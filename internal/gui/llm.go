@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,6 +26,17 @@ import (
 // ---------- 模型配置（全局 [llm] 段，跨项目共用） ----------
 
 const llmKeyMask = "********"
+
+// httpBaseURLOK 校验 base_url 只允许 http/https scheme：test 端点会把 api_key
+// 以 Bearer/x-api-key 头发往该地址，file://、gopher:// 等形态一律拒绝
+// （空串同样拒绝——llmx/embedx 无默认地址，空 base_url 本来也只会在网络层报错）。
+func httpBaseURLOK(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return u.Scheme == "http" || u.Scheme == "https"
+}
 
 type llmProfileJSON struct {
 	Name        string `json:"name"`
@@ -180,7 +192,8 @@ func (h *Handler) apiLLMMaxTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiLLMTest 用表单直传的配置（无需先保存）做连通性检查；api_key 掩码/空时
-// 回查同名已存 profile 的真实 key。
+// 回查同名已存 profile 的真实 key——但此时 base_url 必须与已存值一致：
+// 改了地址还把真实 key 发过去就等于密钥外传，改 URL 必须显式重填 key。
 func (h *Handler) apiLLMTest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name        string `json:"name"`
@@ -199,10 +212,18 @@ func (h *Handler) apiLLMTest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !httpBaseURLOK(req.BaseURL) {
+		writeErr(w, http.StatusBadRequest, "base_url 必须是 http/https URL")
+		return
+	}
 	if req.APIKey == "" || req.APIKey == llmKeyMask {
 		if cfg, err := loadGlobalConfig(); err == nil {
 			for _, p := range cfg.LLM.Profiles {
 				if p.Name == req.Name {
+					if p.APIKey != "" && p.BaseURL != req.BaseURL {
+						writeErr(w, http.StatusBadRequest, "base_url 与已存配置不一致：改用新地址须同时重填 api_key")
+						return
+					}
 					req.APIKey = p.APIKey
 					break
 				}
@@ -269,6 +290,21 @@ const optimizeSystemPrompt = `你是 OpenKnowledge 知识库的条目编辑。�
 // entryPathRef 匹配条目正文中的代码引用：internal/gui/api.go 或 path:行号（区间）。
 var entryPathRef = regexp.MustCompile(`[0-9A-Za-z_./-]+\.(?:go|js|ts|tsx|py|md|html|css|sh|toml|json|iss)(?::\d+(?:-\d+)?)?`)
 
+// resolveRefPath 把条目正文里的路径引用解析为项目根内的真实路径。
+// 引用来自条目正文（可经 propose/导入被污染），片段随后会拼进 prompt 外发 LLM——
+// 必须做包含性复核，`../` 逃逸项目根的引用一律拒绝（同 apiProjectReadmeAsset 的口径）。
+func resolveRefPath(root, file string) (string, bool) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+	absFull, err := filepath.Abs(filepath.Join(root, file))
+	if err != nil || !strings.HasPrefix(absFull, absRoot+string(filepath.Separator)) {
+		return "", false
+	}
+	return absFull, true
+}
+
 // entryCodeHint 匹配正文反引号内代码片段（2~60 字符），作为无行号引用时的
 // 命中线索：把含这些标识符的行窗口补进摘录，而不是只看文件头。
 var entryCodeHint = regexp.MustCompile("`([^`\n]{2,60})`")
@@ -314,7 +350,10 @@ func gatherGrounding(st *store.Store, project, selfFile, title, summary, body st
 				continue
 			}
 			for _, root := range roots {
-				full := filepath.Join(root, file)
+				full, ok := resolveRefPath(root, file)
+				if !ok {
+					continue
+				}
 				data, err := os.ReadFile(full)
 				if err != nil {
 					continue

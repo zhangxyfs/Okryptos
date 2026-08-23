@@ -105,8 +105,10 @@ func (c *OpenAIClient) embedBatch(ctx context.Context, inputs []string) ([][]flo
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("embedding API %d: %s", resp.StatusCode, msg)
 	}
+	// 成功响应体兜底 4MB 上限（llmx 已有 1MB cap，此处同款防御，
+	// 异常服务无限回吐时不至于撑爆内存）
 	var er embedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&er); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&er); err != nil {
 		return nil, err
 	}
 	if len(er.Data) != len(inputs) {

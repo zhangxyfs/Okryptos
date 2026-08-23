@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Download 把模型下载到 modelsDir/<id>.gguf：
@@ -16,7 +17,7 @@ import (
 // ctx 取消保留 .part 供下次续传；sha256 不符删 .part 报错（防循环续传坏文件）。
 func Download(ctx context.Context, hc *http.Client, m BuiltinModel, mirror, modelsDir string, progress func(done, total int64)) error {
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = defaultClient()
 	}
 	if err := os.MkdirAll(modelsDir, 0o755); err != nil {
 		return err
@@ -105,6 +106,15 @@ func Download(ctx context.Context, hc *http.Client, m BuiltinModel, mirror, mode
 		return fmt.Errorf("sha256 校验不符（已删除 %s）", filepath.Base(part))
 	}
 	return os.Rename(part, dest)
+}
+
+// defaultClient 不设整体 Timeout（模型动辄数百 MB，慢速网络下整体超时会误杀
+// 正常下载），只给响应头 30s 兜底：服务端接单不回头的挂起在 30s 内失败退出，
+// 不再只能 Ctrl+C（建连超时 DefaultTransport 自带 30s）。
+func defaultClient() *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = 30 * time.Second
+	return &http.Client{Transport: t}
 }
 
 func fileSHA256(path string) (string, error) {

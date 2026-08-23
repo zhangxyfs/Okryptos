@@ -76,6 +76,27 @@ func TestSlug(t *testing.T) {
 	}
 }
 
+// Slug 加固：控制字符剔除、Windows 保留设备名避让、限长、全非法字符返回空。
+func TestSlugHardening(t *testing.T) {
+	if got := Slug("a\nb\tc"); got != "abc" {
+		t.Fatalf("控制字符应剔除: %q", got)
+	}
+	for _, reserved := range []string{"con", "CON", "Nul", "com1", "lpt9", "con.txt"} {
+		if got := Slug(reserved); !strings.HasPrefix(got, "_") {
+			t.Fatalf("保留设备名 %q 应避让, got %q", reserved, got)
+		}
+	}
+	if got := Slug("console"); got != "console" {
+		t.Fatalf("非保留名误避让: %q", got)
+	}
+	if got := Slug(strings.Repeat("长", 100)); len([]rune(got)) != 80 {
+		t.Fatalf("限长 80 rune, got %d", len([]rune(got)))
+	}
+	if got := Slug("???"); got != "" {
+		t.Fatalf("全非法字符应为空, got %q", got)
+	}
+}
+
 func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "b.md"), []byte(sample), 0o644); err != nil {

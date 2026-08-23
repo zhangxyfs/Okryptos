@@ -73,6 +73,12 @@ func Init(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() == 1 {
 		name = fs.Arg(0)
 	}
+	// 形状校验在注册表写入之前：穿越段/盘符/Windows 保留名一律拒绝，
+	// 否则 knowledge 目录会建到知识库根之外或创建失败（与 GUI 同款校验口径）
+	if !registry.ValidProjectName(name) {
+		fmt.Fprintf(stderr, "非法项目名 %q（须为不含路径分隔符与盘符的基本名，且非 Windows 保留名）\n", name)
+		return 1
+	}
 	// 锁内读-改-写：并发 ok init / GUI 删除 / 备份恢复各自 Load→Save 会互相
 	// 覆盖，项目注册静默丢失（hooks 对该项目全部失效）
 	if err := registry.Update(func(reg *registry.Registry) error {
@@ -147,6 +153,12 @@ func Add(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "用法: ok add --title <标题> --type <rule|pitfall|note|reference> [--tags a,b] [--summary 摘要] [--mandatory] [--file 正文.md] [--force]")
 		return 1
 	}
+	// 空 slug 校验（与 GUI apiEntryCreate 同口径）：纯符号/控制字符标题会生成
+	// ".md" 幽灵条目
+	if entry.Slug(*title) == "" {
+		fmt.Fprintln(stderr, "标题无法生成有效文件名")
+		return 1
+	}
 	pc, code := resolveFromCwd(stderr)
 	if pc == nil {
 		return code
@@ -179,6 +191,18 @@ func Add(args []string, stdout, stderr io.Writer) int {
 	if _, err := os.Stat(path); err == nil && !*force {
 		fmt.Fprintf(stderr, "条目已存在: %s\n", path)
 		return 1
+	}
+	// --force 覆盖写是重建式更新：必须继承盘上原条目的生命周期字段，
+	// 否则重跑迁移/重写会把归档条目静默出归档、草稿静默转正、created 漂移
+	//（GUI writeEntry 同口径；盘上有条目共读失败时按无继承处理，不阻断写入）
+	if data, err := os.ReadFile(path); err == nil {
+		if old, err := entry.Parse(data); err == nil {
+			if old.Created != "" { // 老条目缺 created 时保留今天的新戳，不回填空值
+				e.Created = old.Created
+			}
+			e.Draft = old.Draft
+			e.Archived = old.Archived
+		}
 	}
 	// --force 覆盖写同样受秒级 mtime 粒度影响：同秒覆盖会被 Sync 判未变化，
 	// 写后按 Approve 同口径推进 mtime
@@ -245,10 +269,17 @@ func BackfillBorn(args []string, in io.Reader, stdout, stderr io.Writer) int {
 			continue // 确认瞬间文件被删/损坏：Parse 出错返回 nil，跳过防 panic
 		}
 		e.Tags = append(e.Tags, "born:"+branch)
+		// 写回后按 Add/Approve 同口径推进 mtime：同秒回填会被 Sync 的秒级
+		// mtime diff 判未变化而漏重建
+		var prev time.Time
+		if fi, statErr := os.Stat(f); statErr == nil {
+			prev = fi.ModTime()
+		}
 		if err := fsx.WriteFile(f, e.Serialize(), 0o644); err != nil {
 			fmt.Fprintf(stderr, "写回失败 %s: %v\n", f, err)
 			continue
 		}
+		fsx.BumpMtime(f, prev)
 		n++
 	}
 	fmt.Fprintf(stdout, "已回填 %d 条\n", n)
@@ -423,9 +454,11 @@ func Index(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if client == nil {
-		fmt.Fprintf(stderr, "INDEX 已重建（%d 条）；embedding 未配置或暂不可用，跳过向量重建\n", n)
+		// embedding 未配置是降级而非失败：INDEX 已重建，与 add/approve 同场景的
+		// 退出码 0 保持一致
+		fmt.Fprintf(stdout, "INDEX 已重建（%d 条）；embedding 未配置或暂不可用，跳过向量重建\n", n)
 		printArchiveCandidates(pc.Store.KnowledgeDir(), db, stdout)
-		return 1
+		return 0
 	}
 	fmt.Fprintf(stdout, "INDEX 已重建；索引共 %d 条（embedding：%s）\n", n, client.ModelIdentity())
 	printArchiveCandidates(pc.Store.KnowledgeDir(), db, stdout)
@@ -646,6 +679,11 @@ func Propose(args []string, stdout, stderr io.Writer) int {
 	}
 	if *title == "" || !entry.ValidType(*typ) || (*file != "" && *body != "") {
 		fmt.Fprintln(stderr, "用法: ok propose --title <标题> [--type <rule|pitfall|note|reference>] [--tags a,b] [--summary 摘要] [--file 正文.md | --body 正文]")
+		return 1
+	}
+	// 空 slug 校验（与 GUI 同口径）：纯符号标题会生成 ".md" 幽灵草稿
+	if entry.Slug(*title) == "" {
+		fmt.Fprintln(stderr, "标题无法生成有效文件名")
 		return 1
 	}
 	pc, code := resolveFromCwd(stderr)
@@ -918,6 +956,9 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 		if db, err := index.Open(pc.Store.KbPath()); err == nil {
 			if err := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err == nil {
 				count, _ = db.WikiCount()
+			} else {
+				// 不吞错：Sync 失败时 count 归零会让游标记录假计数，至少提示
+				fmt.Fprintf(stderr, "索引同步失败（wiki 条目计数按 0 记录）: %v\n", err)
 			}
 			// mark 前先算 merged（与 status 同款检测，仅在基准分支上检出）；
 			// mark 落盘后再由 recordMerges 记录，避免被 mark 自身的 SaveState 覆盖

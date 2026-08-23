@@ -122,6 +122,12 @@ button { font:inherit; color:inherit; }
           padding:3px 6px; border-radius:6px; cursor:pointer; font-size:12.5px; text-align:left;
           color:var(--muted); font-weight:600; }
 .tn-cat:hover { background:var(--hover); }
+/* 类目行双热区（同项目行语义）：箭头/图标区单击=展开/收起；类名单击=选中，双击=展开/收起 */
+.tn-cat.sel { background:var(--sel-bg); box-shadow:inset 2px 0 0 var(--primary); }
+.tn-cat .pj-toggle { display:flex; align-items:center; gap:5px; padding:2px 3px; border-radius:5px; flex:none; }
+.tn-cat .pj-toggle:hover { background:var(--sel-bg); }
+.tn-cat .pj-toggle:hover .caret, .tn-cat .pj-toggle:hover .folder { color:var(--primary); }
+.tn-cat .cnm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tn-cat .caret { width:12px; transition:transform .12s; flex:none; font-size:9px; text-align:center; }
 .tn-cat.open .caret { transform:rotate(90deg); }
 .tn-cat .folder { color:var(--muted); display:flex; flex:none; }
@@ -240,6 +246,9 @@ body.tree-resizing { cursor:col-resize; user-select:none; }
 .d-attrs { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
 .d-summary { background:var(--card); border:1px solid var(--border); border-left:3px solid var(--primary);
              border-radius:6px; padding:10px 14px; margin-bottom:16px; }
+/* 演进历程无版本段时的迁移提示（老库升级兜底） */
+.d-hint { background:var(--hover); border:1px dashed var(--border); border-radius:6px;
+          padding:8px 12px; margin-bottom:16px; font-size:12.5px; color:var(--muted); }
 .d-body { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:18px 22px; }
 
 /* 徽标（紧凑化：10px、细圆角，树内不抢视线） */

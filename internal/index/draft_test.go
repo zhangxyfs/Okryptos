@@ -139,3 +139,68 @@ CREATE VIRTUAL TABLE entries_fts USING fts5(title, tags, summary, body, filename
 		t.Fatalf("query after migration wrong: %+v", hits)
 	}
 }
+
+// 旧库（有 draft/archived、无 size 列）首开时补 size 列；存量行 size=0 与盘上
+// 实际大小不符，首轮 Sync 全部重读一次后 size 入库（mtime+size 双判生效）。
+// 重复 Open 幂等。
+func TestSizeColumnMigration(t *testing.T) {
+	root := t.TempDir()
+	kdir := filepath.Join(root, "knowledge")
+	writeEntryFile(t, kdir, "git.md", e1)
+	dbPath := filepath.Join(root, "kb.db")
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldSchema := `
+CREATE TABLE entries(
+  filename TEXT PRIMARY KEY,
+  title TEXT NOT NULL, type TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  mandatory INTEGER NOT NULL DEFAULT 0,
+  draft INTEGER NOT NULL DEFAULT 0,
+  archived INTEGER NOT NULL DEFAULT 0,
+  mtime INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE vectors(filename TEXT PRIMARY KEY, dim INTEGER NOT NULL, blob BLOB NOT NULL);
+CREATE VIRTUAL TABLE entries_fts USING fts5(title, tags, summary, body, filename UNINDEXED);
+`
+	if _, err := raw.Exec(oldSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO entries(filename,title,type,mtime) VALUES('stale.md','旧行','note',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open old-schema db: %v", err)
+	}
+	defer db.Close()
+	if has, err := db.hasColumn("size"); err != nil || !has {
+		t.Fatalf("size 列应被迁移补上: has=%v err=%v", has, err)
+	}
+	if err := db.Sync(kdir, fakeEmbedder{}); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(filepath.Join(kdir, "git.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var size int64
+	if err := db.sql.QueryRow(`SELECT size FROM entries WHERE filename='git.md'`).Scan(&size); err != nil {
+		t.Fatal(err)
+	}
+	if size != fi.Size() {
+		t.Fatalf("size 应入库: got %d, want %d", size, fi.Size())
+	}
+	// 幂等：再次 Open 不再 ALTER
+	db2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	_ = db2.Close()
+}

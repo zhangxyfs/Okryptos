@@ -11,8 +11,15 @@ import (
 // upsertTomlKey 在 config.toml 的指定小节内 upsert 单个键：小节已存在则只
 // 替换/追加该键行（其余键、注释与子表原样保留），小节不存在则文件尾追加整块。
 // 多人共用笔触的小节（[inject]/[retrieve]）不能整段覆盖，GUI 配置写路径统一
-// 走这里。落盘经 fsx.WriteFile 原子写。
+// 走这里。落盘经 fsx.WriteFile 原子写；读-改-写包在 fsx.WithFileLock 内——
+// 行级写基于读时快照整体写回，与锁内整档写者交错时裸跑会回滚对方的写入。
 func upsertTomlKey(path, section, key, keyLine string) error {
+	return fsx.WithFileLock(path, func() error {
+		return upsertTomlKeyLocked(path, section, key, keyLine)
+	})
+}
+
+func upsertTomlKeyLocked(path, section, key, keyLine string) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return fsx.WriteFile(path, []byte("["+section+"]\n"+keyLine+"\n"), 0o644)
@@ -48,7 +55,9 @@ func upsertTomlKey(path, section, key, keyLine string) error {
 	hit := false
 	for i := start + 1; i < end; i++ {
 		t := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(t, key) && strings.Contains(t, "=") {
+		// 键名边界判定：前缀命中后下一个非空字符必须是 "="，否则是
+		// dedup_turns_v2 之类前缀相同的自定义键，不得误替换
+		if strings.HasPrefix(t, key) && strings.HasPrefix(strings.TrimSpace(t[len(key):]), "=") {
 			lines[i] = keyLine
 			hit = true
 			break

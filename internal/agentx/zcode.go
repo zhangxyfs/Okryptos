@@ -105,6 +105,14 @@ func zcodeEventsOf(cfg map[string]any) map[string]any {
 	return events
 }
 
+// zcodeHooksEnabled 报告 hooks.enabled 是否显式为 true。ZCode 缺省不派发 hooks，
+// 用户显式关闭 = 集成失效——与 qoder 的 hooksConfig.enabled 检查对称防御。
+func zcodeHooksEnabled(cfg map[string]any) bool {
+	hooks, _ := cfg["hooks"].(map[string]any)
+	enabled, _ := hooks["enabled"].(bool)
+	return enabled
+}
+
 // zcodeEventsEdit 取 hooks.events 供写入：缺失时创建并把 hooks.enabled 置 true
 // （ZCode 要求显式开启，否则整份 hooks 配置不生效）。
 func zcodeEventsEdit(cfg map[string]any) map[string]any {
@@ -269,7 +277,9 @@ func (zcodeAgent) RemoveHooks() (bool, error) {
 
 // EnsureHooks 自愈：config 存在、曾安装过 ok hooks 且内容过期（exe 迁移、超时
 // 变更、旧格式）时重写；从未安装（无任何 ok 条目）则 no-op——zcode 没有 kimi
-// "标记注释被清"的已知行为，用户显式移除的集成不复活。
+// "标记注释被清"的已知行为，用户显式移除的集成不复活。重写保留现状
+// hooks.enabled：用户显式关闭的总开关不翻回 true（"显式关闭不复活"，
+// 与 qoder 的 hooksConfig.enabled 对称防御）。
 func (zcodeAgent) EnsureHooks(exe string) error {
 	if _, err := os.Stat(zcodeConfigPath()); err != nil {
 		return nil
@@ -282,7 +292,14 @@ func (zcodeAgent) EnsureHooks(exe string) error {
 	if events == nil || !hasOKZcodeHook(events) || zcodeHooksCurrent(events, exe) {
 		return nil
 	}
+	hooks, _ := cfg["hooks"].(map[string]any)
+	prevEnabled, hadEnabled := hooks["enabled"]
 	events = zcodeEventsEdit(cfg)
+	if hadEnabled {
+		hooks["enabled"] = prevEnabled
+	} else {
+		delete(hooks, "enabled")
+	}
 	stripOKZcodeHooks(events)
 	for _, e := range zcodeHookEvents {
 		groups, _ := events[e.event].([]any)
@@ -307,5 +324,6 @@ func (zcodeAgent) HooksInstalled() bool {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
-	return zcodeHooksCurrent(events, exe)
+	// hooks.enabled 关闭/缺失 = 集成失效（hooks 静默不派发），视为未安装。
+	return zcodeHooksCurrent(events, exe) && zcodeHooksEnabled(cfg)
 }

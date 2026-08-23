@@ -152,7 +152,9 @@ func (h *Handler) withAuthQuery(fn http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// serveIndex 返回注入令牌的 index.html（{{TOKEN}} 占位符替换）。
+// serveIndex 原样返回 index.html。token 不再内嵌进 HTML（首页无鉴权，内嵌等于
+// 把 token 白送给任何能连 loopback 的进程）——改由 daemon 以 URL fragment
+// （#token=）一次性递交给浏览器，fragment 不随请求发出，inline script 自行读取。
 func (h *Handler) serveIndex(w http.ResponseWriter, _ *http.Request) {
 	data, err := os.ReadFile(filepath.Join(h.webDir, "index.html"))
 	if err != nil {
@@ -161,7 +163,7 @@ func (h *Handler) serveIndex(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	_, _ = w.Write([]byte(strings.ReplaceAll(string(data), "{{TOKEN}}", h.token)))
+	_, _ = w.Write(data)
 }
 
 // serveStatic 只服务 webDir 白名单内的静态文件（路由本身是字面量，无路径参数）。
@@ -404,7 +406,10 @@ func summaryOf(e *entry.Entry) entrySummaryJSON {
 	}
 }
 
+// decodeJSON 解析 JSON 请求体；统一包 4MB 上限（/api/import 走 multipart 自带
+// 上限，不经此函数），超限/解析失败已写 400，返回 false。
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("JSON 解析失败: %v", err))
 		return false
@@ -572,6 +577,12 @@ func (h *Handler) apiExport(w http.ResponseWriter, r *http.Request) {
 		project = "all"
 	}
 	if project != "all" {
+		// 与本文件其它端点同款校验：注册表被毒化时，穿越段名字不得进入
+		// backup.Export 的 projects/<name>/ 拼路径。
+		if !validProjectName(project) {
+			writeErr(w, http.StatusBadRequest, "非法项目名: "+project)
+			return
+		}
 		reg, err := registry.Load(registry.DefaultPath())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())

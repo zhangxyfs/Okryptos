@@ -45,9 +45,14 @@ def prepare_runtime():
     """
     import zipfile
     dest = ROOT / "dist" / "runtime"
-    if (dest / "llama-server.exe").exists():
-        print("runtime 已存在，跳过下载（删除 dist/runtime 可强制刷新）")
+    tag_file = dest / ".llama-tag"   # 下载来源版本标记：LLAMA_TAG 升级后旧 runtime 不再静默复用
+    current = tag_file.read_text(encoding="utf-8").strip() if tag_file.exists() else ""
+    if (dest / "llama-server.exe").exists() and current == LLAMA_TAG:
+        print(f"runtime 已存在（llama.cpp {LLAMA_TAG}），跳过下载（删除 dist/runtime 可强制刷新）")
         return
+    if (dest / "llama-server.exe").exists():
+        print(f"runtime 版本不符（{current or '无标记'} ≠ {LLAMA_TAG}），重新下载")
+        shutil.rmtree(dest)
     base = os.environ.get("LLAMA_CPP_BASE_URL", LLAMA_BASE_DEFAULT)
     url = f"{base}/{LLAMA_TAG}/llama-{LLAMA_TAG}-bin-win-cpu-x64.zip"
     zip_path = ROOT / "dist" / "llama-win.zip"
@@ -58,6 +63,7 @@ def prepare_runtime():
     zip_path.unlink()
     if not (dest / "llama-server.exe").exists():
         sys.exit("runtime 解包后缺 llama-server.exe（llama.cpp 资产布局变化？）")
+    tag_file.write_text(LLAMA_TAG + "\n", encoding="utf-8")
     print(f"runtime 就绪: {dest}（llama.cpp {LLAMA_TAG}）")
 
 

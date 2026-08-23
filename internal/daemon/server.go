@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"openknowledge/internal/hook"
@@ -54,7 +56,54 @@ func NewMux(gh http.Handler, token, fingerprint string) http.Handler {
 		return HookResponse{Code: hook.HandleCompact(bytes.NewReader(body))}
 	})))
 	mux.Handle("/", gh)
-	return mux
+	return hostGuard(mux)
+}
+
+// hostGuard 最外层防线（DNS rebinding / 跨站直连）：Host 头必须是本机回环
+// （127.0.0.1/localhost/[::1]，端口不限——默认端口被占时 daemon 回退随机端口）。
+// daemon 虽只监听 127.0.0.1，但 rebinding 场景下浏览器把 evil.com 解析到回环后，
+// 页面内 fetch 对浏览器是同源，Host 头却仍是 evil.com——卡死 Host 即掐断该链。
+// /api/* 请求若带 Origin/Referer 头（浏览器跨站 fetch 必带 Origin）必须同源自
+// 回环；非浏览器的 hook 客户端不带这两个头，不受影响。永不输出
+// Access-Control-Allow-Origin（本 mux 任何分支都不设该头）。
+func hostGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !loopbackHost(r.Host) {
+			http.Error(w, `{"error":"非法 Host"}`, http.StatusForbidden)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/") &&
+			(!loopbackOrigin(r.Header.Get("Origin")) || !loopbackOrigin(r.Header.Get("Referer"))) {
+			http.Error(w, `{"error":"跨站请求被拒绝"}`, http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// loopbackHost 判定 Host 头（可带端口）是否本机回环。
+func loopbackHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	switch strings.Trim(host, "[]") {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
+	return false
+}
+
+// loopbackOrigin 判定 Origin/Referer 头是否指向本机回环；空头放行
+// （非浏览器客户端不发），非空必须是 http/https + 回环主机。
+func loopbackOrigin(v string) bool {
+	if v == "" {
+		return true
+	}
+	u, err := url.Parse(v)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	return loopbackHost(u.Host)
 }
 
 // hookHandler 把"读 body + format query → 业务函数 → HookResponse JSON"的模板收敛到一处。

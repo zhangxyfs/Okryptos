@@ -1,6 +1,7 @@
 package fsx
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,6 +20,17 @@ const (
 // 配合原子写，竞态窗口远小于干脆不锁，且绝不能因等锁卡死宿主 hook。
 // 返回 fn 的错误；抢占/fail-open 路径同样执行并返回 fn 的错误。
 func WithFileLock(path string, fn func() error) error {
+	return withFileLock(path, fn, false)
+}
+
+// WithFileLockStrict 与 WithFileLock 相同，但等满 lockTimeout 仍拿不到锁时返回
+// 错误而非无锁执行：注册表这类强一致数据的读-改-写不能 fail-open——两个进程
+// 同时无锁裸跑正是"丢项目注册"的复现路径。hook 的 state 会话锁请用 WithFileLock。
+func WithFileLockStrict(path string, fn func() error) error {
+	return withFileLock(path, fn, true)
+}
+
+func withFileLock(path string, fn func() error, strict bool) error {
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	lp := path + ".lock"
 	token := strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
@@ -36,10 +48,18 @@ func WithFileLock(path string, fn func() error) error {
 			return err
 		}
 		if fi, statErr := os.Stat(lp); statErr == nil && time.Since(fi.ModTime()) > lockStaleAge {
-			_ = os.Remove(lp)
+			// 抢占先 rename 再删：rename 只对第一个等待者成功，消除 stat→remove
+			// 竞态下后来者把新持有者刚创建的锁一并删掉的窗口
+			stale := lp + ".stale-" + token
+			if os.Rename(lp, stale) == nil {
+				_ = os.Remove(stale)
+			}
 			continue
 		}
 		if time.Now().After(deadline) {
+			if strict {
+				return fmt.Errorf("等待文件锁超时（%s 被占用）", lp)
+			}
 			return fn()
 		}
 		time.Sleep(15 * time.Millisecond)

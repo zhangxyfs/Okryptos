@@ -3,8 +3,10 @@ package embed
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -85,6 +87,19 @@ func TestModelIdentity(t *testing.T) {
 	var zero OpenAIClient
 	if zero.ModelIdentity() != "" {
 		t.Fatal("空 Identity 应返回空串")
+	}
+}
+
+// TestEmbedResponseCap：成功响应体超 4MB 上限时报错（截断后非法 JSON），
+// 而非无界读入内存（llmx 已有 1MB cap 的同款防御）。
+func TestEmbedResponseCap(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"data":[{"embedding":[1.0],"index":0}],"pad":%q}`, strings.Repeat("x", 5<<20))
+	}))
+	defer srv.Close()
+	c := &OpenAIClient{BaseURL: srv.URL, Model: "m", Timeout: 5 * time.Second}
+	if _, err := c.EmbedQuery(context.Background(), "x"); err == nil {
+		t.Fatal("超上限响应应报错")
 	}
 }
 

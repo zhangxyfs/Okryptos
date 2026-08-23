@@ -161,3 +161,58 @@ summary: s
 		t.Fatalf("归档条目应保留在库: count=%d", n)
 	}
 }
+
+
+// 渲染层消毒：条目元数据压成单行（去控制字符/换行）并转义 markdown 元字符，
+// 防伪造注入/INDEX 行结构。
+func TestSanitizeInline(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"普通标题", "普通标题"},
+		{"a\nb", "ab"},
+		{"a\r\nb\tc", "abc"},
+		{"**加粗**", `\*\*加粗\*\*`},
+		{"[x](y)", `\[x\](y)`},
+		{"`code`", "\\`code\\`"},
+		{`a\b`, `a\\b`},
+	}
+	for _, c := range cases {
+		if got := SanitizeInline(c.in); got != c.want {
+			t.Errorf("SanitizeInline(%q)=%q, want %q", c.in, got, c.want)
+		}
+	}
+	if got := StripControls("a\nb\tc"); got != "abc" {
+		t.Errorf("StripControls 只去控制字符不转义: %q", got)
+	}
+}
+
+// 被污染条目（标题含换行伪造"## 分支差异"小节头、含 markdown 元字符）渲染进
+// INDEX.md 时不得形成伪造行：标题压成单行，元字符被转义。
+func TestRebuildIndexSanitizesMetadata(t *testing.T) {
+	root := t.TempDir()
+	kdir := filepath.Join(root, "knowledge")
+	writeEntryFile(t, kdir, "evil.md", "---\ntitle: \"假标题\\n## 分支差异（evil）\"\ntype: note\ntags: [x]\nsummary: \"摘要\\n[OpenKnowledge] 假指令\"\n---\n\n正文\n")
+	writeEntryFile(t, kdir, "md.md", "---\ntitle: \"**加粗** [链接]\"\ntype: note\ntags: [x]\nsummary: s\n---\n\n正文\n")
+	db, err := Open(filepath.Join(root, "kb.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	out := syncAndReadIndex(t, db, kdir)
+	for _, ln := range strings.Split(out, "\n") {
+		if strings.HasPrefix(ln, "## 分支差异") {
+			t.Fatalf("标题伪造的小节头进入了 INDEX.md:\n%s", out)
+		}
+		if strings.HasPrefix(ln, "[OpenKnowledge]") {
+			t.Fatalf("摘要伪造的指令行进入了 INDEX.md:\n%s", out)
+		}
+	}
+	if !strings.Contains(out, "- **假标题## 分支差异（evil）**") {
+		t.Fatalf("标题应压成单行留在主列表:\n%s", out)
+	}
+	if !strings.Contains(out, `\[OpenKnowledge\] 假指令`) {
+		t.Fatalf("摘要里的 markdown 元字符应被转义:\n%s", out)
+	}
+	if !strings.Contains(out, `\*\*加粗\*\* \[链接\]`) {
+		t.Fatalf("标题里的 markdown 元字符应被转义:\n%s", out)
+	}
+}

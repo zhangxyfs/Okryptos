@@ -34,16 +34,17 @@ func lingmaSettingsPath() string { return filepath.Join(LingmaHome(), "settings.
 // hooksConfig.enabled 门、改配置需重启 IDE 生效（无热加载）。输出协议复用 Claude
 // JSON（args 末尾 "claude"）：注入 hookSpecificOutput.additionalContext（IDE 文档
 // 的 UserPromptSubmit 场景明列"自动注入上下文"），hook.go 输出层零改动。
-// PostToolUse 追 Write|Edit（IDE 工具名双套——原生 run_in_terminal/create_file/
-// search_replace 与兼容名 Bash/Write/Edit 运行时映射，matcher 两套都认；无空格形态
-// 在"| 拆分"与"正则"两种匹配语义下均正确）。
+// PostToolUse 追 Write|Edit|create_file|search_replace（IDE 工具名双套——原生
+// run_in_terminal/create_file/search_replace 与兼容名 Bash/Write/Edit 运行时映射，
+// matcher 两套都列，映射与否都能命中；无空格形态在"| 拆分"与"正则"两种匹配语义
+// 下均正确）。
 var lingmaHookEvents = []struct {
 	event   string // IDE 事件名
 	matcher string // 组级 matcher（不填或 * 匹配全部，| 多值）
 	okHook  string // ok hook 子命令
 }{
 	{"UserPromptSubmit", "*", "prompt"},
-	{"PostToolUse", "Write|Edit", "post-tool"},
+	{"PostToolUse", "Write|Edit|create_file|search_replace", "post-tool"},
 	{"Stop", "*", "stop"},
 }
 

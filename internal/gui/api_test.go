@@ -44,7 +44,7 @@ func newEnv(t *testing.T) (*Handler, string, string) {
 	t.Setenv("OK_DSH_HOME", filepath.Join(t.TempDir(), "nonexistent-dsh"))
 	webDir := t.TempDir()
 	files := map[string]string{
-		"index.html":  "<html>token={{TOKEN}}</html>",
+		"index.html":  "<html>ok</html>",
 		"app.js":      "console.log(1)",
 		"style.css":   "body{}",
 		"favicon.ico": "ico",
@@ -258,7 +258,10 @@ func TestStaticNoCache(t *testing.T) {
 	}
 }
 
-func TestIndexTokenInjection(t *testing.T) {
+// TestIndexNoTokenEmbedded 首页无鉴权，token 绝不允许内嵌进返回的 HTML
+// （否则任何能连 loopback 的进程 curl / 即可取走 token）；token 由浏览器端
+// 从 URL fragment 自取（daemon 以 #token= 打开），服务端原样下发静态文件。
+func TestIndexNoTokenEmbedded(t *testing.T) {
 	h, _, _ := newEnv(t)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
@@ -268,11 +271,11 @@ func TestIndexTokenInjection(t *testing.T) {
 		t.Fatalf("status = %d", code)
 	}
 	body := string(data)
-	if !strings.Contains(body, "token="+testToken) {
-		t.Fatalf("token not injected: %s", body)
+	if strings.Contains(body, testToken) {
+		t.Fatalf("token must not be embedded: %s", body)
 	}
-	if strings.Contains(body, "{{TOKEN}}") {
-		t.Fatalf("placeholder left in output: %s", body)
+	if body != "<html>ok</html>" {
+		t.Fatalf("index.html 应原样下发: %s", body)
 	}
 }
 

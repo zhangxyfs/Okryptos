@@ -118,8 +118,8 @@ func buildMatch(terms []string) string {
 // floor = MinScoreFloor(cfg.MinScore, 库条目数)，随库规模缩放，
 // MinScore<=0 维持旧语义（score>0 即注入）。同域语料下无关文本的余弦基线可能
 // 高达 0.4+，若用混合总分做准入会把伪词关键词命中顶过阈值，故必须分通道。
-// mandatory 与 draft 条目不参与；结果按总分降序、同分标题升序，截 top_n——不强行
-// 凑满。terms 与 queryVec 均为空时返回空结果。
+// mandatory 与 draft 条目不参与；结果按总分降序、同分标题升序再文件名升序，
+// 截 top_n——不强行凑满。terms 与 queryVec 均为空时返回空结果。
 func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]Hit, error) {
 	hits, _, err := db.QueryEx(terms, queryVec, cfg)
 	return hits, err
@@ -172,9 +172,10 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve, 
 	if fusion != "weighted" {
 		fusion = "rrf"
 	}
-	// 通道准入阈值按可检索条目数缩放（Count 失败时关闭阈值，fail-open 不阻断注入）
+	// 通道准入阈值按可检索条目数缩放（draft/archived 不进检索结果，不计入；
+	// 计数失败时关闭阈值，fail-open 不阻断注入）
 	floor := 0.0
-	if n, err := db.Count(); err == nil {
+	if n, err := db.searchableCount(); err == nil {
 		floor = MinScoreFloor(cfg.MinScore, n)
 	}
 	// 反馈统计（30 天窗口一条 GROUP BY，千级事件毫秒级）；fail-open：
@@ -319,7 +320,11 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve, 
 		if out[i].Score != out[j].Score {
 			return out[i].Score > out[j].Score
 		}
-		return out[i].Title < out[j].Title
+		if out[i].Title != out[j].Title {
+			return out[i].Title < out[j].Title
+		}
+		// 同名条目（多分支 wiki 差异条目同名是常态）再按文件名决胜，保证确定性
+		return out[i].Filename < out[j].Filename
 	})
 	// 冷却排除在排序后、返回前（QueryExBranch 内 top_n 截断随之位于排除之后）；
 	// 被排除但本可准入（Score>0 进入 out）的条目记入 CooledSkipped 供观测。

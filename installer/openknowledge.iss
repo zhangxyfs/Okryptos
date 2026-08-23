@@ -2,7 +2,7 @@
 ; 构建：bash scripts/build-installer.sh（先构建 dist/ 再调用 ISCC）
 
 #define AppName "OpenKnowledge"
-#define AppVersion "2.21.0"
+#define AppVersion "2.22.0"
 #define AppPublisher "OpenKnowledge"
 
 [Setup]
@@ -50,7 +50,7 @@ Name: "{autodesktop}\OpenKnowledge 知识库"; Filename: "{app}\OkManager.exe"; 
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OpenKnowledge"; ValueData: """{app}\okd.exe"""; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{app}\OkManager.exe"; Description: "打开 OpenKnowledge 配置中心（引导页可一键完成 hooks / 技能 / embedding 配置）"; Flags: postinstall skipifsilent unchecked
+Filename: "{app}\OkManager.exe"; Description: "打开 OpenKnowledge 配置中心（引导页可一键完成 hooks / 技能 / embedding 配置）"; Flags: postinstall skipifsilent
 
 [Code]
 const
@@ -119,6 +119,9 @@ begin
     UpperPath := Uppercase(Path);
     P := Pos(';' + UpperDir + ';', ';' + UpperPath + ';');
   end;
+  { Dir 原本位于 PATH 末尾时，删除后残留尾部空条目（尾 ';'），收尾剥掉 }
+  while (Length(Path) > 0) and (Path[Length(Path)] = ';') do
+    Delete(Path, Length(Path), 1);
   RegWriteStringValue(HKCU, EnvKey, 'Path', Path);
 end;
 
@@ -152,15 +155,18 @@ begin
   if CurUninstallStep = usPostUninstall then
   begin
     RemoveFromUserPath(ExpandConstant('{app}'));
-    DataDir := ExpandConstant('{userdocs}\..\.openknowledge');
+    { 数据目录定位用 %USERPROFILE%：旧写法 userdocs\.. 在 Documents 重定向（OneDrive 已知文件夹
+      迁移等）下指错目录，可能找不到真实数据目录甚至误删无关数据 }
+    DataDir := ExpandConstant('{%USERPROFILE}\.openknowledge');
     { 静默卸载（/VERYSILENT）下绝不删除数据；交互模式才询问。
       注意：卸载期只能用 UninstallSilent，WizardSilent 是 Setup 期函数，误用会运行时错误。 }
     if (not UninstallSilent) and DirExists(DataDir) then
     begin
+      { 默认按钮 = 否（MB_DEFBUTTON2）：连续回车不应删全量数据 }
       if MsgBox('是否同时删除知识库数据？' + #13#10 + #13#10 +
                 DataDir + #13#10 +
                 '（包含全部知识条目、索引与配置。选"否"保留，重装后可继续使用。）',
-                mbConfirmation, MB_YESNO) = IDYES then
+                mbConfirmation, MB_YESNO + MB_DEFBUTTON2) = IDYES then
         DelTree(DataDir, True, True, True);
     end;
   end;

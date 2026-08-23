@@ -128,6 +128,44 @@ func TestAddOutsideProjectFails(t *testing.T) {
 	}
 }
 
+// 项目名形状校验下沉后 ok init 与 GUI 同口径：穿越段/盘符/保留名在注册表
+// 写入前即拒绝，且不残留注册条目。
+func TestInitRejectsInvalidName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	chdir(t, t.TempDir())
+	for _, name := range []string{`..\evil`, `a/b`, "con", "foo.", "c:"} {
+		var out, errBuf bytes.Buffer
+		if code := Init([]string{name}, &out, &errBuf); code == 0 {
+			t.Fatalf("Init(%q) 应失败", name)
+		}
+	}
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.Projects) != 0 {
+		t.Fatalf("非法名不应入册: %+v", reg.Projects)
+	}
+}
+
+// 空 slug 校验（与 GUI 同口径）：纯符号标题不得落成 ".md" 幽灵条目/草稿。
+func TestAddProposeRejectEmptySlug(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	chdir(t, t.TempDir())
+	var out, errBuf bytes.Buffer
+	if code := Add([]string{"--title", "???", "--type", "note"}, &out, &errBuf); code == 0 {
+		t.Fatal("Add 纯符号标题应失败")
+	}
+	if !strings.Contains(errBuf.String(), "文件名") {
+		t.Fatalf("应提示文件名问题, got %q", errBuf.String())
+	}
+	errBuf.Reset()
+	if code := Propose([]string{"--title", "***", "--type", "note"}, &out, &errBuf); code == 0 {
+		t.Fatal("Propose 纯符号标题应失败")
+	}
+}
+
 // ok init 不带参数时应以当前目录基名作为项目名。
 func TestInitDefaultsToDirBaseName(t *testing.T) {
 	home := t.TempDir()
@@ -164,7 +202,7 @@ func TestInitDefaultsToDirBaseName(t *testing.T) {
 	}
 }
 
-// 无 API key 时 ok index 仍应重建 INDEX.md（向量跳过，退出码保持 1）。
+// 无 API key 时 ok index 仍应重建 INDEX.md（向量跳过，属降级路径，退出码 0）。
 func TestIndexRebuildsIndexWithoutAPIKey(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("OK_HOME", home)
@@ -197,8 +235,9 @@ func TestIndexRebuildsIndexWithoutAPIKey(t *testing.T) {
 	}
 	out.Reset()
 	errBuf.Reset()
-	if code := Index(nil, &out, &errBuf); code != 1 {
-		t.Fatalf("expected exit 1 without API key, got %d", code)
+	// embedding 未配置是降级而非失败：与 add/approve 同场景一致返回 0（评审 L-10）
+	if code := Index(nil, &out, &errBuf); code != 0 {
+		t.Fatalf("expected exit 0 without API key, got %d", code)
 	}
 	data, err := os.ReadFile(filepath.Join(kb, "INDEX.md"))
 	if err != nil {
@@ -207,8 +246,8 @@ func TestIndexRebuildsIndexWithoutAPIKey(t *testing.T) {
 	if !strings.Contains(string(data), "手工条目") {
 		t.Fatalf("INDEX should be rebuilt with manual entry, got %q", data)
 	}
-	if !strings.Contains(errBuf.String(), "INDEX") {
-		t.Fatalf("stderr should mention INDEX rebuilt, got %q", errBuf.String())
+	if !strings.Contains(out.String(), "INDEX") {
+		t.Fatalf("stdout should mention INDEX rebuilt, got %q", out.String())
 	}
 }
 
@@ -1119,9 +1158,9 @@ func TestIndexArchiveCandidates(t *testing.T) {
 	writeCLIEntry(t, kbRoot, "stale.md", "---\ntitle: 陈年条目\ntype: note\ncreated: "+old+"\nsummary: s\n---\n\n正文。\n")
 	writeCLIEntry(t, kbRoot, "fresh.md", "---\ntitle: 新条目\ntype: note\ncreated: "+time.Now().Format("2006-01-02")+"\nsummary: s\n---\n\n正文。\n")
 	var out, errBuf bytes.Buffer
-	// 离线（无 embedding）时退出码为 1（既有约定，见 TestIndexRebuildsIndexWithoutAPIKey），
-	// 归档候选报告仍写到 stdout。
-	if code := Index(nil, &out, &errBuf); code != 1 {
+	// 离线（无 embedding）属降级路径，退出码 0（与 add/approve 一致，见
+	// TestIndexRebuildsIndexWithoutAPIKey），归档候选报告仍写到 stdout。
+	if code := Index(nil, &out, &errBuf); code != 0 {
 		t.Fatalf("exit %d: %s", code, errBuf.String())
 	}
 	got := out.String()
@@ -1150,5 +1189,44 @@ func TestDoctorEmptyPathsNoPanic(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "未登记项目路径") {
 		t.Fatalf("应报告未登记项目路径: %q", out.String())
+	}
+}
+
+// --force 覆盖写必须继承盘上原条目的生命周期字段（created/draft/archived），
+// 否则重跑迁移/重写会把归档条目静默转正、草稿静默转正（GUI writeEntry 已修过同类坑）。
+func TestAddForceInheritsLifecycle(t *testing.T) {
+	_, kbRoot := setupCLIProject(t)
+	writeCLIEntry(t, kbRoot, "演进历程-归档（v1.0~v2.15）.md", `---
+title: 演进历程-归档（v1.0~v2.15）
+type: reference
+tags:
+    - wiki
+    - 历史
+draft: true
+archived: true
+created: "2026-01-02"
+summary: s
+---
+
+旧正文。
+`)
+	body := filepath.Join(kbRoot, "new-body.md")
+	if err := os.WriteFile(body, []byte("新正文。"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errBuf bytes.Buffer
+	if code := Add([]string{"--title", "演进历程-归档（v1.0~v2.15）", "--type", "reference", "--tags", "wiki,历史", "--file", body, "--force"}, &out, &errBuf); code != 0 {
+		t.Fatalf("add --force exit %d: %s", code, errBuf.String())
+	}
+	data, _ := os.ReadFile(filepath.Join(kbRoot, "knowledge", "演进历程-归档（v1.0~v2.15）.md"))
+	e, err := entry.Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.Archived || !e.Draft || e.Created != "2026-01-02" {
+		t.Fatalf("--force 未继承生命周期字段: archived=%v draft=%v created=%q", e.Archived, e.Draft, e.Created)
+	}
+	if e.Body != "新正文。" {
+		t.Fatalf("--force 未更新正文: %q", e.Body)
 	}
 }

@@ -153,7 +153,7 @@ func TestOpenGUI(t *testing.T) {
 	if code := OpenGUI(&out, io.Discard); code != 0 {
 		t.Fatalf("OpenGUI code=%d", code)
 	}
-	if !strings.Contains(opened, "/?token=") {
+	if !strings.Contains(opened, "/#token=") {
 		t.Fatalf("opened url %q", opened)
 	}
 	Stop(io.Discard, io.Discard)

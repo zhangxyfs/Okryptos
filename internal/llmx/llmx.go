@@ -29,6 +29,11 @@ func New(p config.LLMProfile, timeout time.Duration) *Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
+	if p.Kind == "anthropic" {
+		// 用户按 openai 习惯把 base_url 填成 …/v1 时先去重，否则 endpoint 拼出
+		// …/v1/v1/messages 404（embedx 已为 ollama 修过同款）。
+		p.BaseURL = strings.TrimSuffix(strings.TrimRight(p.BaseURL, "/"), "/v1")
+	}
 	return &Client{p: p, timeout: timeout, hc: &http.Client{Timeout: timeout}}
 }
 

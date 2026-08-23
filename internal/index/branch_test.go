@@ -58,6 +58,35 @@ func TestTrimIndexBranchSections(t *testing.T) {
 	}
 }
 
+// 小节头行格式校验：伪造/损坏的"## 分支差异（…）"行（尾部垃圾、双括号、
+// 空名）不得被当作小节边界——否则被污染条目可在 INDEX 里插入假小节头让
+// Trim 裁掉真实内容。格式不符的行按普通 "## " 标题处理（结束裁剪、自身保留）。
+func TestTrimIndexBranchSectionsStrictFormat(t *testing.T) {
+	// 真 hotfix 小节被裁；带尾部垃圾的伪 feat 小节头及其内容保留
+	idx := "## 分支差异（dev）\n\n- [a](a.md)\n\n## 分支差异（hotfix）\n\n- [h](h.md)\n\n## 分支差异（feat） 垃圾\n\n- [b](b.md)\n"
+	got := TrimIndexBranchSections(idx, "dev")
+	if strings.Contains(got, "hotfix") {
+		t.Errorf("真 hotfix 小节应被裁: %q", got)
+	}
+	if !strings.Contains(got, "## 分支差异（feat） 垃圾") || !strings.Contains(got, "[b](b.md)") {
+		t.Errorf("伪小节头及其内容应保留: %q", got)
+	}
+	// 双括号/空名/括号不配对同理不识别为小节头
+	for _, fake := range []string{"## 分支差异（a）b）", "## 分支差异（）", "## 分支差异（a（b）"} {
+		idx := "## 分支差异（dev）\n\n- [a](a.md)\n\n" + fake + "\n\n- [b](b.md)\n"
+		got := TrimIndexBranchSections(idx, "dev")
+		if !strings.Contains(got, fake) || !strings.Contains(got, "[b](b.md)") {
+			t.Errorf("伪小节头 %q 应原样保留: %q", fake, got)
+		}
+	}
+	// 行尾 \r（用户以 CRLF 编辑过 INDEX）的合法小节头仍识别
+	idx = "## 分支差异（dev）\r\n\n- [a](a.md)\n\n## 分支差异（hotfix）\r\n\n- [b](b.md)\n"
+	got = TrimIndexBranchSections(idx, "dev")
+	if strings.Contains(got, "hotfix") || !strings.Contains(got, "## 分支差异（dev）\r") {
+		t.Errorf("CRLF 小节头应正常识别: %q", got)
+	}
+}
+
 // 全程未裁任何节（只有当前分支小节）时也必须逐字节返回原文，
 // 且重复调用结果稳定（幂等）——否则 hook 每次注入会让 INDEX 多一个尾部换行。
 func TestTrimIndexBranchSectionsIdempotent(t *testing.T) {

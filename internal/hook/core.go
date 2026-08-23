@@ -80,6 +80,8 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		}
 	}
 	st := state.Load(pc.Store.StateDir(), sessionID)
+	// st 只是锁外快照看分支：WikiNudged/MergedChecked/RetrieveWarned 等每会话
+	// 一次决策在下方各 state.Update 闭包内重查后才落位，防并发 prompt 重复提示。
 	// CheckStatus 每次注入只算一次：INDEX 分支裁剪、检索分支过滤、分支上下文行
 	// 与 nudge 共用同一份 Status。分支未知（非 git）时 ws.Branch 为空，
 	// 裁剪与过滤均为恒等（宁多勿漏，零回归）。
@@ -124,7 +126,8 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	if doBase {
 		_ = state.Clean(pc.Store.StateDir(), 7*24*time.Hour)
 		for _, h := range mandatory {
-			fmt.Fprintf(&mandatoryText, "## %s\n\n%s\n\n", h.Title, h.Body)
+			// 标题消毒防伪造注入行结构；Body 是合法 markdown 全文，保持原样
+			fmt.Fprintf(&mandatoryText, "## %s\n\n%s\n\n", index.SanitizeInline(h.Title), h.Body)
 		}
 		// mandatory 预算护栏：它是唯一不被 max_tokens 截断的段，全文超限只告警
 		// 不硬截断（截断"必守"条目违背语义）——告警行进注入文本 + ok.log，
@@ -149,8 +152,10 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		// 这类 prompt 不需要规约提醒。
 		mandatoryText.WriteString("## 必守规约（全文见文件，必要时读取）\n\n")
 		for _, h := range mandatory {
-			p := filepath.ToSlash(filepath.Join(pc.Store.KnowledgeDir(), h.Filename))
-			fmt.Fprintf(&mandatoryText, "- **%s** (%s)（%s）\n", h.Title, h.Type, p)
+			// 标题/类型消毒（去控制字符 + 转义 markdown 元字符）；路径只去控制
+			// 字符——转义会破坏模型按路径重读原文
+			p := index.StripControls(filepath.ToSlash(filepath.Join(pc.Store.KnowledgeDir(), h.Filename)))
+			fmt.Fprintf(&mandatoryText, "- **%s** (%s)（%s）\n", index.SanitizeInline(h.Title), index.SanitizeInline(h.Type), p)
 		}
 		mandatoryText.WriteString("\n")
 	}
@@ -209,11 +214,11 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		restText.WriteString("## 相关知识（需要全文时读取对应文件）\n\n")
 		names := make([]string, 0, len(hits))
 		for _, h := range hits {
-			p := filepath.ToSlash(filepath.Join(pc.Store.KnowledgeDir(), h.Filename))
+			p := index.StripControls(filepath.ToSlash(filepath.Join(pc.Store.KnowledgeDir(), h.Filename)))
 			if h.Summary != "" {
-				fmt.Fprintf(&restText, "- **%s** (%s) — %s（%s）\n", h.Title, h.Type, h.Summary, p)
+				fmt.Fprintf(&restText, "- **%s** (%s) — %s（%s）\n", index.SanitizeInline(h.Title), index.SanitizeInline(h.Type), index.SanitizeInline(h.Summary), p)
 			} else {
-				fmt.Fprintf(&restText, "- **%s** (%s)（%s）\n", h.Title, h.Type, p)
+				fmt.Fprintf(&restText, "- **%s** (%s)（%s）\n", index.SanitizeInline(h.Title), index.SanitizeInline(h.Type), p)
 			}
 			names = append(names, h.Filename)
 		}
@@ -246,11 +251,20 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		out = line + "\n" + out
 	}
 	if nudge := wikiNudge(pc, st, ws); nudge != "" {
-		out += nudge
+		// WikiNudged 判定与置位须在锁内一次完成：锁外快照判定存在窗口，并发
+		// prompt 会各自看到未置位而重复 nudge。fail-open：状态写失败仍提示。
+		emit := true
 		if err := state.Update(pc.Store.StateDir(), sessionID, func(s *state.Session) {
+			if s.WikiNudged {
+				emit = false
+				return
+			}
 			s.WikiNudged = true
 		}); err != nil {
 			logErr("prompt save state: %v", err)
+		}
+		if emit {
+			out += nudge
 		}
 	}
 	// 已并入提示（merged 变体）：仅在基准分支、有其他分支 tip 已并入且其差异条目
@@ -266,15 +280,22 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 				return ok
 			})
 			mergedNudge := wikiNudgeMerged(pc, st, ws.BaseBranch, merged)
+			// WikiNudged 预算锁内重查（同上方 wikiNudge 段）；MergedChecked 熔断
+			// 无论结果均置位。fail-open：状态写失败仍按快照提示。
+			emit := mergedNudge != ""
 			if err := state.Update(pc.Store.StateDir(), sessionID, func(s2 *state.Session) {
 				s2.MergedChecked = true
 				if mergedNudge != "" {
+					if s2.WikiNudged {
+						emit = false
+						return
+					}
 					s2.WikiNudged = true
 				}
 			}); err != nil {
 				logErr("prompt save state: %v", err)
 			}
-			if mergedNudge != "" {
+			if emit {
 				out += mergedNudge
 			}
 		}
@@ -283,12 +304,20 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	// 身份缺失/切换而拦截向量通道时，仅写 ok.log 用户不可见，注入一行让模型
 	// 知道当前是纯关键词检索、可运行 ok index 重建恢复。
 	if embedWarn != "" && !st.RetrieveWarned {
+		// 同上：锁内重查再置位，并发 prompt 只提示一次；写失败 fail-open 仍提示
+		emit := true
 		if err := state.Update(pc.Store.StateDir(), sessionID, func(s *state.Session) {
+			if s.RetrieveWarned {
+				emit = false
+				return
+			}
 			s.RetrieveWarned = true
 		}); err != nil {
 			logErr("prompt save state: %v", err)
 		}
-		out += "\n[OpenKnowledge] 语义检索退化：" + embedWarn + "\n"
+		if emit {
+			out += "\n[OpenKnowledge] 语义检索退化：" + embedWarn + "\n"
+		}
 	}
 	return out
 }

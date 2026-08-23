@@ -206,6 +206,54 @@ timeout = 3
 			t.Fatal("expected error for missing config")
 		}
 	})
+
+	t.Run("no marker and no ok hooks: no-op (explicit uninstall not revived)", func(t *testing.T) {
+		cfg := filepath.Join(t.TempDir(), "config.toml")
+		// 用户显式移除 kimi hooks（保留其它工具的 hook 表）后的形态
+		initial := "default_model = \"kimi\"\n\n[[hooks]]\nevent = \"SessionStart\"\ncommand = \"other-tool run\"\ntimeout = 3\n"
+		if err := os.WriteFile(cfg, []byte(initial), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := EnsureHooksBlock(cfg, "D:/new/ok.exe"); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(cfg)
+		if string(data) != initial {
+			t.Fatalf("file should be untouched when no ok hooks remain: %q", data)
+		}
+		if _, err := os.Stat(cfg + ".bak-openknowledge"); !os.IsNotExist(err) {
+			t.Fatal("no backup should be written on no-op")
+		}
+	})
+}
+
+func TestUpsertHooksBlockStripsDuplicateMarkerBlocks(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	// 历史 bug 残留的双标记块：旧块不剥离会与新块并存，hook 双派发
+	initial := "default_model = \"kimi\"\n\n" +
+		MarkerBegin + "\n" + HooksBlockFor("D:/old/ok.exe", 10) + MarkerEnd + "\n\n" +
+		MarkerBegin + "\n" + HooksBlockFor("D:/older/ok.exe", 5) + MarkerEnd + "\n\n[providers]\n"
+	if err := os.WriteFile(cfg, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertHooksBlock(cfg, HooksBlockFor("D:/new/ok.exe", 10)); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(cfg)
+	got := string(data)
+	if c := strings.Count(got, MarkerBegin); c != 1 {
+		t.Fatalf("expected exactly one marker block, got %d: %q", c, got)
+	}
+	if strings.Contains(got, "D:/old/ok.exe") || strings.Contains(got, "D:/older/ok.exe") {
+		t.Fatalf("stale duplicate blocks should be stripped: %q", got)
+	}
+	if !strings.Contains(got, "D:/new/ok.exe") || !strings.Contains(got, "[providers]") {
+		t.Fatalf("new block / user content lost: %q", got)
+	}
+	// 原位替换语义不变：新块仍在第一个旧块的位置（[providers] 之前）
+	if strings.Index(got, MarkerBegin) > strings.Index(got, "[providers]") {
+		t.Fatalf("marker block should stay before [providers]: %q", got)
+	}
 }
 
 func TestKimiAgentInstallDetectRemove(t *testing.T) {

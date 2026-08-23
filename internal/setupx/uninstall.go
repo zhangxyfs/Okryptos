@@ -8,6 +8,7 @@ import (
 
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/daemonx"
+	"openknowledge/internal/fsx"
 	"openknowledge/internal/registry"
 )
 
@@ -105,20 +106,16 @@ func RemoveSection(path, section string) (bool, error) {
 		return false, nil
 	}
 	out := append([]string{}, lines[:start]...)
-	// 去掉紧挨小节前的一个空行（如果小节原本前面有空行且输出非空）
 	out = append(out, lines[end:]...)
-	var body []string
-	for _, l := range out {
-		body = append(body, strings.TrimRight(l, " \t"))
-	}
-	content := strings.TrimSpace(strings.Join(body, "\n"))
-	if content == "" {
+	// 其余内容原样保留：不做行尾裁剪（多行字符串等用户内容可能有意义空白）。
+	body := strings.Join(out, "\n")
+	if strings.TrimSpace(body) == "" {
 		if err := os.Remove(path); err != nil {
 			return false, err
 		}
 		return true, nil
 	}
-	if err := os.WriteFile(path, []byte(strings.Join(body, "\n")), 0o644); err != nil {
+	if err := fsx.WriteFile(path, []byte(body), 0o644); err != nil {
 		return false, err
 	}
 	return true, nil

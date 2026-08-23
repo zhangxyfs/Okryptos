@@ -165,6 +165,13 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 	if err := toml.Unmarshal(regData, &zreg); err != nil {
 		return nil, fmt.Errorf("%w: registry.toml 损坏", ErrBadPackage)
 	}
+	// 包内项目名形状校验在注册表写入之前：恶意/畸形备份包可把 ../evil 写进
+	// 注册表，之后 GUI 按 projects/<name>/ 解析即越出知识库根（与 GUI 同款校验）
+	for _, p := range zreg.Projects {
+		if !registry.ValidProjectName(p.Name) {
+			return nil, fmt.Errorf("%w: 非法项目名 %q", ErrBadPackage, p.Name)
+		}
+	}
 	if len(entries) == 0 && len(configs) == 0 {
 		return nil, fmt.Errorf("%w: 包内无有效条目", ErrBadPackage)
 	}
@@ -194,6 +201,13 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 		return nil, err
 	}
 
+	// 导入按阶段推进（注册→条目→config→wiki 状态→重建索引），无整体回滚；
+	// 各步幂等（同名覆盖/同名注册跳过），部分失败后重新导入即可续传——
+	// 此后的错误信息统一带上这句指引
+	fail := func(err error) (*Report, error) {
+		return nil, fmt.Errorf("%w（导入按阶段幂等，重新导入即可续传）", err)
+	}
+
 	rep := &Report{}
 	seen := map[string]bool{}
 	for _, it := range entries {
@@ -203,10 +217,10 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 		}
 		dir := filepath.Join(registry.Home(), "projects", it.project, "knowledge")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, err
+			return fail(err)
 		}
 		if err := fsx.WriteFile(filepath.Join(dir, it.file), it.data, 0o644); err != nil {
-			return nil, err
+			return fail(err)
 		}
 		rep.Imported++
 		seen[it.project] = true
@@ -214,10 +228,10 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 	for _, it := range configs {
 		root := filepath.Join(registry.Home(), "projects", it.project)
 		if err := os.MkdirAll(root, 0o755); err != nil {
-			return nil, err
+			return fail(err)
 		}
 		if err := fsx.WriteFile(filepath.Join(root, "config.toml"), it.data, 0o644); err != nil {
-			return nil, err
+			return fail(err)
 		}
 		seen[it.project] = true
 	}
@@ -225,10 +239,10 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 	for _, it := range wikis {
 		dir := filepath.Join(registry.Home(), "projects", it.project, "state")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, err
+			return fail(err)
 		}
 		if err := fsx.WriteFile(filepath.Join(dir, it.file), it.data, 0o644); err != nil {
-			return nil, err
+			return fail(err)
 		}
 		seen[it.project] = true
 	}
@@ -243,7 +257,7 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 		st := store.New(filepath.Join(registry.Home(), "projects", name))
 		db, err := index.Open(st.KbPath())
 		if err != nil {
-			return nil, err
+			return fail(err)
 		}
 		var opts index.SyncOptions
 		if cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml")); err == nil {
@@ -253,7 +267,7 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 		db.Close()
 		var ce *index.CorruptEntriesError
 		if syncErr != nil && !errors.As(syncErr, &ce) {
-			return nil, syncErr
+			return fail(syncErr)
 		}
 	}
 	return rep, nil

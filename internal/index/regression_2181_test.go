@@ -104,7 +104,7 @@ func TestSyncSkipsCorruptUnchangedEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 同 mtime 把 bad.md 写坏（秒级粒度下同秒写坏的等价模拟）
+	// 同 mtime 把 bad.md 写坏（长度不同，mtime+size 双判下判为变化）
 	victim := filepath.Join(kdir, "bad.md")
 	fi, err := os.Stat(victim)
 	if err != nil {
@@ -117,7 +117,7 @@ func TestSyncSkipsCorruptUnchangedEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 第二轮带 embedder：两条都缺向量、都未变化 → 走补齐路径；bad 损坏应跳过
+	// 第二轮带 embedder：bad.md 判为变化但损坏跳过、good.md 未变化走补齐路径
 	err = db.Sync(kdir, fakeEmbedder{})
 	var corrupt *CorruptEntriesError
 	if !errors.As(err, &corrupt) {

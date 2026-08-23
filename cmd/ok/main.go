@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"openknowledge/internal/cli"
 	"openknowledge/internal/daemon"
@@ -100,7 +101,13 @@ func runHook(args []string) (code int) {
 	if len(args) > 1 {
 		format = args[1]
 	}
-	payload, _ := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+	// 读 1MB+1 以区分截断：超限事件被整包丢弃前至少留一行观测
+	//（大文件 Write 的 PostToolUse 会触发），fail-open 不变。
+	payload, _ := io.ReadAll(io.LimitReader(os.Stdin, (1<<20)+1))
+	if len(payload) > 1<<20 {
+		payload = payload[:1<<20]
+		logTruncation(args[0])
+	}
 	if handled, c := daemon.ForwardHook(args[0], format, payload, os.Stdout, os.Stderr); handled {
 		return c
 	}
@@ -124,6 +131,18 @@ func runExtensionServe() int {
 		fmt.Fprintln(os.Stderr, "extension-serve:", err)
 	}
 	return 0
+}
+
+// logTruncation 把 hook payload 超 1MB 截断记进 ok.log（与 hook.logErr 同一文件、
+// 同一行格式）；写不进也不影响主流程（fail-open）。
+func logTruncation(event string) {
+	f, err := os.OpenFile(filepath.Join(registry.Home(), "ok.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s hook %s: payload 超 1MB 已截断，事件按不完整处理\n",
+		time.Now().Format("2006-01-02 15:04:05"), event)
 }
 
 func usage() {

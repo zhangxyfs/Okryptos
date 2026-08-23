@@ -123,17 +123,39 @@ func LoadTolerant(dir string) (entries []*Entry, errs []error) {
 	return entries, errs
 }
 
-// Slug 将标题转为安全文件名（不含扩展名）。
+// Slug 将标题转为安全文件名（不含扩展名）：剔除路径元字符与控制字符，
+// Windows 保留设备名前缀 "_" 避让，并限长（Windows MAX_PATH 下给目录前缀留余量）。
+// 全被剔除时返回空串——调用方须判空拒绝（GUI/CLI 建条目路径均已校验）。
 func Slug(title string) string {
 	title = strings.TrimSpace(title)
 	title = strings.ReplaceAll(title, " ", "-")
-	return strings.Map(func(r rune) rune {
+	slug := strings.Map(func(r rune) rune {
+		switch {
+		// 控制字符（含换行）：进文件名后在 Explorer/git 下极难处理
+		case r < 0x20 || r == 0x7f:
+			return -1
+		}
 		switch r {
 		case '<', '>', ':', '"', '/', '\\', '|', '?', '*':
 			return -1
 		}
 		return r
 	}, title)
+	// Windows 保留设备名大小写不敏感，且 "con.md" 这类带扩展形态同样被保留
+	base := slug
+	if i := strings.IndexByte(base, '.'); i >= 0 {
+		base = base[:i]
+	}
+	switch strings.ToLower(base) {
+	case "con", "prn", "aux", "nul",
+		"com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+		"lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9":
+		slug = "_" + slug
+	}
+	if n := []rune(slug); len(n) > 80 {
+		slug = string(n[:80])
+	}
+	return slug
 }
 
 // FileName 返回条目在磁盘上的文件名。

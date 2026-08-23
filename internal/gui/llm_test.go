@@ -574,3 +574,18 @@ func TestExcerptLinesHints(t *testing.T) {
 		t.Fatalf("头部命中不重复、深处命中保留: %q", got[len(got)-260:])
 	}
 }
+
+func TestResolveRefPathContainment(t *testing.T) {
+	root := t.TempDir()
+	// 根内引用放行
+	p, ok := resolveRefPath(root, "sub/a.go")
+	if !ok || !strings.HasPrefix(p, root) {
+		t.Fatalf("in-root ref rejected: %q ok=%v", p, ok)
+	}
+	// ../ 逃逸一律拒绝
+	for _, evil := range []string{"../../secret.md", "../sibling/x.go", "sub/../../../secret.md"} {
+		if _, ok := resolveRefPath(root, evil); ok {
+			t.Fatalf("traversal ref %q not rejected", evil)
+		}
+	}
+}

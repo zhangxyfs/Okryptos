@@ -266,6 +266,31 @@ func TestImportRejectsBadNames(t *testing.T) {
 	}
 }
 
+// 包内 registry.toml 的项目名同样过形状校验（zip 路径有 validName 防穿越，
+// 但注册表名没有）：穿越段/盘符/保留名整包拒绝，且不写入注册表。
+func TestImportRejectsInvalidProjectName(t *testing.T) {
+	setupHome(t)
+	for _, bad := range []string{`..\evil`, `a/b`, "con", "c:"} {
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		w, _ := zw.Create("registry.toml")
+		w.Write([]byte("[[project]]\nname=\"" + strings.ReplaceAll(bad, `\`, `\\`) + "\"\npaths=[\"D:/src/x\"]\n"))
+		w2, _ := zw.Create("projects/alpha/knowledge/x.md")
+		w2.Write([]byte("---\ntitle: x\ntype: note\ntags: []\nsummary: s\ndraft: false\nmandatory: false\n---\nb\n"))
+		zw.Close()
+		if _, err := Import(bytes.NewReader(buf.Bytes()), int64(buf.Len())); !errors.Is(err, ErrBadPackage) {
+			t.Fatalf("%q: expected ErrBadPackage", bad)
+		}
+	}
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.Projects) != 2 { // setupHome 原有的 alpha/beta，不得新增
+		t.Fatalf("非法项目名不应入册: %+v", reg.Projects)
+	}
+}
+
 // zip bomb：条目解压后总体积超上限整包拒绝
 func TestImportRejectsDecompressionBomb(t *testing.T) {
 	setupHome(t)

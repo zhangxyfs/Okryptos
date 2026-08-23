@@ -12,8 +12,8 @@ import (
 	"openknowledge/internal/retrieve"
 )
 
-// 未变化条目（filename+mtime 相同）在增量同步中不得被读取/解析：
-// 全量同步一次后破坏某条目 YAML，但用 os.Chtimes 恢复原 mtime，
+// 未变化条目（filename+mtime+size 全同）在增量同步中不得被读取/解析：
+// 全量同步一次后破坏某条目 YAML，但用同长度内容 + os.Chtimes 复原签名，
 // 再次同步必须成功且该条目仍留在库中——全量扫描实现会解析失败或把条目删出库。
 func TestSyncDoesNotReadUnchangedFiles(t *testing.T) {
 	db, kdir := setupDB(t)
@@ -26,7 +26,13 @@ func TestSyncDoesNotReadUnchangedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(victim, []byte("---\ntitle: [unclosed\n---\n\n已损坏\n"), 0o644); err != nil {
+	// 变化判据为 mtime+size 双判：构造同长度损坏内容（YAML 首行即失败，
+	// 尾部填充不影响），mtime 用 Chtimes 复原——签名全同才算未变化
+	bad := []byte("---\ntitle: [unclosed\n---\n\n已损坏\n")
+	if d := int(fi.Size()) - len(bad); d > 0 {
+		bad = append(bad, make([]byte, d)...)
+	}
+	if err := os.WriteFile(victim, bad, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(victim, fi.ModTime(), fi.ModTime()); err != nil {

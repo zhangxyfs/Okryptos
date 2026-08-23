@@ -132,7 +132,7 @@ OpenKnowledge/
 │   │   └── embed_test.go
 │   ├── index/                     # ★ SQLite+FTS5 索引库（kb.db）
 │   │   ├── db.go                  #   Open/Close/Count、旧版 vectors.json 迁移
-│   │   ├── sync.go                #   增量同步（filename+mtime）、损坏条目跳过、INDEX.md 重建
+│   │   ├── sync.go                #   增量同步（filename+mtime+size）、损坏条目跳过、INDEX.md 重建
 │   │   ├── query.go               #   FTS5 BM25 + 余弦混合查询、Mandatory
 │   │   └── index_test.go
 │   ├── retrieve/                  # 检索分词
@@ -236,7 +236,7 @@ func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环�
 
 ### 5.6 index/retrieve — 索引化混合检索（db.go 138 + sync.go 240 + query.go 138 + retrieve.go 44 行）
 
-检索不再逐文件扫描 Markdown，而是查询 SQLite 索引库 `kb.db`（位于各项目 KB 根目录；entries/entries_fts/vectors 之外另有 `meta(key,value)` 表记录建向量的模型身份 `embedding_model`/`embedding_dim`，见 17.4）。同步按 filename+mtime 增量（枚举优先、只解析变化文件）；查询为准入按通道独立判定 + 融合排序：融合默认 RRF（`score = Σ 1/(rrf_k+rank)`，只看名次不看分数），`fusion = "weighted"` 回滚旧加权（`α·归一BM25 + β·余弦`）。**草稿条目（frontmatter `draft: true`，由 `ok propose` 写入）不进 FTS 与向量，检索与注入一律排除；INDEX.md 中以【草稿】标记，批准（`ok approve` / GUI 采纳）后才参与检索**。**算法实现细节（分词、BM25、归一化、混合、降级矩阵、实测性能）见第 17 章**，配置参数见第 18 章。
+检索不再逐文件扫描 Markdown，而是查询 SQLite 索引库 `kb.db`（位于各项目 KB 根目录；entries/entries_fts/vectors 之外另有 `meta(key,value)` 表记录建向量的模型身份 `embedding_model`/`embedding_dim`，见 17.4）。同步按 filename+mtime+size 增量（枚举优先、只解析变化文件）；查询为准入按通道独立判定 + 融合排序：融合默认 RRF（`score = Σ 1/(rrf_k+rank)`，只看名次不看分数），`fusion = "weighted"` 回滚旧加权（`α·归一BM25 + β·余弦`）。**草稿条目（frontmatter `draft: true`，由 `ok propose` 写入）不进 FTS 与向量，检索与注入一律排除；INDEX.md 中以【草稿】标记，批准（`ok approve` / GUI 采纳）后才参与检索**。**算法实现细节（分词、BM25、归一化、混合、降级矩阵、实测性能）见第 17 章**，配置参数见第 18 章。
 
 ### 5.7 state — 会话状态（96 行）
 
@@ -269,7 +269,7 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 配置中心是五页单页应用（管理/引导/设置/日志/其他），供不熟悉命令行的用户完成首次引导与日常知识维护。gui 包只出 HTTP API 与静态页，进程生命周期由 internal/daemon 托管（okd 常驻，页面关闭不退出）。**双入口**：`ok gui`（或无参数运行）与 `OkManager.exe` 同为薄启动器——EnsureCurrent 确保 okd 在线后以应用模式打开浏览器即退（`daemon.OpenGUI`）；托盘双击同链路。
 
 - **server.go**：仅剩包注释（gui-split 后监听/托管全在 daemon）。web 资源目录由入口定位：`<exe目录>/web` 优先，其次 `<当前目录>/web`（dist/ 布局正好满足前者）；资源不内嵌、实时读盘分发（no-cache）。
-- **api.go**：`/` 返回注入令牌的 index.html（`{{TOKEN}}` 替换）；静态资源仅白名单 `app.js`/`style.css`/`favicon.ico`/`help.md`；`/api/*` 全部经 `X-Ok-Token` 头鉴权（缺失/错误 401）；条目文件名参数必须是不含 `..` 与路径分隔符的 `.md` 基本名（防路径穿越）；写操作（POST/PUT/DELETE entry）落盘后自动 `index.Sync` 同步索引库。项目列表（`/api/status`、`/api/projects`）附 `last_update`（kb.db mtime）并按其降序——最近有知识写入的项目排最前。`DELETE /api/project` 删除项目知识库：**先注销注册表**（`registry.RemoveProject` + Save，失败 500 中止、目录不动）**再 `os.RemoveAll` 项目目录**（失败 200 + `warning`/`dir`——兜底永远偏向留数据）；目录名取注册表匹配后的 `p.Name`，不接受用户原始输入拼路径。
+- **api.go**：`/` 原样返回 index.html（token 不再内嵌 HTML，由前端从 URL `#token=` fragment 读取并转存 sessionStorage）；静态资源仅白名单 `app.js`/`style.css`/`favicon.ico`/`help.md`；全 mux 外层有 Host/Origin 校验（Host 必须回环、`/api/*` 的 Origin/Referer 存在则必须同源、永不输出 CORS 头，见 daemon/server.go hostGuard）；`/api/*` 全部经 `X-Ok-Token` 头鉴权（缺失/错误 401）；条目文件名参数必须是不含 `..` 与路径分隔符的 `.md` 基本名（防路径穿越）；写操作（POST/PUT/DELETE entry）落盘后自动 `index.Sync` 同步索引库。项目列表（`/api/status`、`/api/projects`）附 `last_update`（kb.db mtime）并按其降序——最近有知识写入的项目排最前。`DELETE /api/project` 删除项目知识库：**先注销注册表**（`registry.RemoveProject` + Save，失败 500 中止、目录不动）**再 `os.RemoveAll` 项目目录**（失败 200 + `warning`/`dir`——兜底永远偏向留数据）；目录名取注册表匹配后的 `p.Name`，不接受用户原始输入拼路径。
 
 端点面（按页分组）：
 
@@ -306,7 +306,7 @@ GUI「其他」tab 背后的备份包（叶子包：stdlib zip + registry/entry/
 用户发消息
   → kimi 触发 UserPromptSubmit
   → 执行 "ok.exe hook prompt"，stdin 喂事件 JSON
-  → ok：开关检查 → 项目路由 → 打开 kb.db → 查询前增量同步（filename+mtime）
+  → ok：开关检查 → 项目路由 → 打开 kb.db → 查询前增量同步（filename+mtime+size）
   → 首次提问？→ 输出 mandatory 全文 + INDEX.md（置 BaseInjected）
   → 每次提问 → embed 提问(失败降级) → index.Query 混合打分 → top-N 全文
   → TruncateToBudget 截断 → stdout
@@ -792,7 +792,7 @@ go build ./...         # 编译检查
 
 ```sql
 CREATE TABLE entries(filename PK, title, type, tags, summary, body,
-                     mandatory, mtime);              -- 原文
+                     mandatory, mtime, size);         -- 原文（mtime+size 双判变化）
 CREATE VIRTUAL TABLE entries_fts USING fts5(
     title, tags, summary, body, filename UNINDEXED); -- 切分后文本，独立维护
 CREATE TABLE vectors(filename PK, dim, blob);        -- float32 小端
@@ -879,7 +879,7 @@ stderr 并附 `min_gap` 调节指引；语义退化（模型身份缺失/切换�
 ```
 os.ReadDir(knowledge/)                # 只拿文件名，不读内容
   ├─ DirEntry.Info()                  # Windows 下复用 readdir 数据，零额外系统调用
-  ├─ 与 entries 表 filename+mtime 对比
+  ├─ 与 entries 表 filename+mtime+size 对比
   ├─ 新增/变化 → 仅这些文件 ReadFile+Parse+upsert(+重算向量)
   ├─ 已删除 → 连带清理 entries/fts/vectors
   └─ 有变化才重写 INDEX.md（缺失时必写）

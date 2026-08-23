@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -28,7 +29,8 @@ CREATE TABLE IF NOT EXISTS entries(
   mandatory INTEGER NOT NULL DEFAULT 0,
   draft INTEGER NOT NULL DEFAULT 0,
   archived INTEGER NOT NULL DEFAULT 0,
-  mtime INTEGER NOT NULL DEFAULT 0
+  mtime INTEGER NOT NULL DEFAULT 0,
+  size INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS vectors(
   filename TEXT PRIMARY KEY,
@@ -70,13 +72,17 @@ func Open(path string) (*DB, error) {
 		return nil, err
 	}
 	db := &DB{sql: sqldb}
-	if err := db.migrateDraftColumn(); err != nil {
-		_ = sqldb.Close()
-		return nil, err
-	}
-	if err := db.migrateArchivedColumn(); err != nil {
-		_ = sqldb.Close()
-		return nil, err
+	// 旧库补列（CREATE TABLE IF NOT EXISTS 不会改动已存在的表）：
+	// draft（v2.0 及更早的库）、archived（归档标记）、size（mtime+size 变化双判）
+	for _, c := range []struct{ column, ddl string }{
+		{"draft", `ALTER TABLE entries ADD COLUMN draft INTEGER NOT NULL DEFAULT 0`},
+		{"archived", `ALTER TABLE entries ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`},
+		{"size", `ALTER TABLE entries ADD COLUMN size INTEGER NOT NULL DEFAULT 0`},
+	} {
+		if err := db.ensureColumn(c.column, c.ddl); err != nil {
+			_ = sqldb.Close()
+			return nil, err
+		}
 	}
 	if err := db.migrateVectorsJSON(path); err != nil {
 		_ = sqldb.Close()
@@ -85,44 +91,28 @@ func Open(path string) (*DB, error) {
 	return db, nil
 }
 
-// migrateDraftColumn 为 v2.0 及更早的库补 entries.draft 列
-// （CREATE TABLE IF NOT EXISTS 不会改动已存在的表）。
-func (db *DB) migrateDraftColumn() error {
-	rows, err := db.sql.Query(`PRAGMA table_info(entries)`)
-	if err != nil {
+// ensureColumn 为旧库补 entries 列：先探列存在性，缺失才 ALTER。
+// ALTER 失败后重探一次：多进程并发首开同一旧库时另一进程可能已抢先加列
+// （duplicate column 错误），列已存在即收尾成功，否则返回原始错误。
+func (db *DB) ensureColumn(column, ddl string) error {
+	has, err := db.hasColumn(column)
+	if err != nil || has {
 		return err
 	}
-	has := false
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notnull, pk int
-		var dflt sql.RawBytes
-		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
-			_ = rows.Close()
-			return err
+	if _, err := db.sql.Exec(ddl); err != nil {
+		if has2, perr := db.hasColumn(column); perr == nil && has2 {
+			return nil // 并发首开：别的进程已加列
 		}
-		if name == "draft" {
-			has = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return err
 	}
-	_ = rows.Close()
-	if has {
-		return nil
-	}
-	_, err = db.sql.Exec(`ALTER TABLE entries ADD COLUMN draft INTEGER NOT NULL DEFAULT 0`)
-	return err
+	return nil
 }
 
-// migrateArchivedColumn 为旧库补 entries.archived 列（归档标记，见 migrateDraftColumn）。
-func (db *DB) migrateArchivedColumn() error {
+// hasColumn 报告 entries 表是否已有指定列。
+func (db *DB) hasColumn(column string) (bool, error) {
 	rows, err := db.sql.Query(`PRAGMA table_info(entries)`)
 	if err != nil {
-		return err
+		return false, err
 	}
 	has := false
 	for rows.Next() {
@@ -132,22 +122,18 @@ func (db *DB) migrateArchivedColumn() error {
 		var dflt sql.RawBytes
 		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
 			_ = rows.Close()
-			return err
+			return false, err
 		}
-		if name == "archived" {
+		if name == column {
 			has = true
 		}
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return err
+		return false, err
 	}
 	_ = rows.Close()
-	if has {
-		return nil
-	}
-	_, err = db.sql.Exec(`ALTER TABLE entries ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`)
-	return err
+	return has, nil
 }
 
 // Close 关闭索引库。
@@ -157,6 +143,14 @@ func (db *DB) Close() error { return db.sql.Close() }
 func (db *DB) Count() (int, error) {
 	var n int
 	err := db.sql.QueryRow(`SELECT COUNT(*) FROM entries`).Scan(&n)
+	return n, err
+}
+
+// searchableCount 返回可检索条目数（排除 draft/archived——它们不进检索结果），
+// 供关键词准入 floor 按库规模缩放；Count 是全库口径（ok index 统计展示用）。
+func (db *DB) searchableCount() (int, error) {
+	var n int
+	err := db.sql.QueryRow(`SELECT COUNT(*) FROM entries WHERE draft = 0 AND archived = 0`).Scan(&n)
 	return n, err
 }
 
@@ -240,7 +234,14 @@ func (db *DB) migrateVectorsJSON(dbPath string) error {
 	}
 	var vs legacyVectors
 	if err := json.Unmarshal(data, &vs); err != nil {
-		return err
+		// 损坏的 vectors.json（旧版 O_TRUNC 直写可能留下半截 JSON）不应让 Open
+		// 永久失败：改名隔离后按无向量继续——向量可由条目文件重建
+		if rerr := os.Rename(vj, vj+".bad"); rerr != nil {
+			fmt.Fprintf(os.Stderr, "openknowledge: vectors.json 损坏（%v）且隔离失败: %v\n", err, rerr)
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "openknowledge: vectors.json 损坏（%v），已改名为 vectors.json.bad，向量将在下次同步时重建\n", err)
+		return nil
 	}
 	tx, err := db.sql.Begin()
 	if err != nil {

@@ -44,6 +44,7 @@ const I18N = {
   zh: {
     manage:"管理", setup:"引导", prefs:"设置", logs:"日志", misc:"其他",
     treeCaption:"知识条目", filter:"过滤条目… / 命令（/type、/tag）", pickEntry:"← 从树中选择一条知识条目",
+    evoSegHint:"演进历程尚未拆分版本段子条目——对 agent 说「更新 wiki」即可按新结构迁移（索引 + 版本段），老内容不会丢。",
     modified:"修改于",
     mandatory:"★ mandatory", optional:"非 mandatory", draft:"草稿", archived:"已归档",
     collapseTip:"收起/展开侧栏",
@@ -176,6 +177,7 @@ const I18N = {
   en: {
     manage:"Manage", setup:"Setup", prefs:"Settings", logs:"Logs", misc:"Misc",
     treeCaption:"Entries", filter:"Filter entries… / commands (/type, /tag)", pickEntry:"← Select an entry from the tree",
+    evoSegHint:"No version-segment sub-entries yet — ask your agent to \"update wiki\" to migrate to the new structure (index + segments). Existing content is preserved.",
     modified:"Modified",
     mandatory:"★ mandatory", optional:"optional", draft:"Draft", archived:"Archived",
     collapseTip:"Collapse/expand sidebar",
@@ -320,7 +322,7 @@ const ICON = {
   logs:   svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
   misc:   svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>'),
   folder: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>', 14),
-  history: svg('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>'),   // 演进历程：自绘时钟（需求 5）
+  history: svg('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>'),   // 预留（演进历程已改回文件夹图标）
   branch: svg('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>', 10),
   panel:  svg('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>'),
   moon:   svg('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'),
@@ -603,6 +605,7 @@ function loadLayout(){
 const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
                 open:{}, openTouched:false, sel:null, projSel:null, q:"", mgmtFb:null, treeShown:{},
                 catOpen:{},                                                   // 需求 5：类目目录展开态（会话级）
+                catSel:null,                                                  // 类目行单击选中态（双击=展开/收起）
                 catDefaulted:{},                                              // 需求 5：首展默认展开每项目只应用一次
                 cmd:null, cmdRaw:"", cmdErr:"", cmdHelp:false, scopeNote:"",   // 需求 2：搜索框命令态
                 termHist:[],                                                  // 需求 3：终端会话级历史
@@ -632,7 +635,18 @@ function pDirtyLive(k, dirty){
 }
 function pSave(k){
   prefsDirty[k]=false; prefsErr[k]=null; prefsSaved[k]=true; render();
-  setTimeout(()=>{ prefsSaved[k]=false; render(); }, 1500);
+  // 自消只摘除反馈节点、不整页 render：全量重建 DOM 会丢弃输入框中已敲入未失焦的字符
+  setTimeout(()=>{ prefsSaved[k]=false; clearFb("saved:"+k); }, 1500);
+}
+/* ✓已保存 反馈节点（data-fb 标记）与定向摘除：1.5s 自消走 clearFb 而非 render——
+   设置页输入框靠"oninput 直写不重渲"保焦点，定时器全量重渲会丢未提交字符 */
+function savedFb(id){
+  const s = Object.assign(el("span","fb2"),{textContent:t("saved")});
+  s.dataset.fb = id;
+  return s;
+}
+function clearFb(id){
+  document.querySelectorAll("[data-fb]").forEach(n=>{ if(n.dataset.fb===id) n.remove(); });
 }
 // 数字输入（设置卡用）：oninput 实时上报，由调用方 apply + 计算脏态；不重渲，避免丢焦点
 function pnumLive(val, min, max, onVal){
@@ -654,14 +668,14 @@ function pcard(key, title, desc, body, inlineRow){
     // 简单输入卡：保存按钮进控件行右端，不独占页脚
     const wrap = el("span");
     wrap.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:10px;flex:none";
-    if(prefsSaved[key]) wrap.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    if(prefsSaved[key]) wrap.appendChild(savedFb("saved:"+key));
     if(prefsErr[key]) wrap.appendChild(Object.assign(el("span","fb2 err"),{textContent:prefsErr[key]}));
     wrap.appendChild(sv);
     inlineRow.appendChild(wrap);
   } else {
     const f = el("div","pfoot");
     f.appendChild(sv);
-    if(prefsSaved[key]) f.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    if(prefsSaved[key]) f.appendChild(savedFb("saved:"+key));
     if(prefsErr[key]) f.appendChild(Object.assign(el("span","fb2 err"),{textContent:prefsErr[key]}));
     c.appendChild(f);
   }
@@ -908,7 +922,9 @@ const LAZY_STEP = 50;   // 树内条目懒加载步进（需求 5 起下沉到�
 const TREE_W_KEY = "ok-tree-w";   // 树栏宽度 localStorage 键（拖拽分隔条持久化）
 let treeTip = null;     // 截断标题悬浮窗节点（body 级，同时只一个）
 let mgmtPollBusy = false;         // 管理页 4s 轮询重入保护
+let mgmtRefreshBusy = false, mgmtRefreshAgain = false;   // refreshManage 重入保护：in-flight 期间补一轮不丢更新
 let nmLastClick = null;           // 项目名双击检测 {name,t}：单击即重渲换节点，原生 dblclick 不可靠
+let catLastClick = null;          // 类目行/双身份节点双击检测 {key,t}：同上，单击即重渲换节点
 
 function fmtTime(unix){
   if(!unix) return "";
@@ -935,6 +951,8 @@ function loadManage(){ if(MGMT) return; MGMT = { list:[] }; refreshManage(); }
 // refreshManage 全量重拉项目+条目；项目按 last_update 降序（kb.db mtime，api.go listProjects
 // 口径，最近有知识写入的排前）。完成时原位刷新（过滤框聚焦中只重填树、不整页重渲，保焦点）
 function refreshManage(){
+  if(mgmtRefreshBusy){ mgmtRefreshAgain = true; return; }   // 重入保护：与 pollManage 等交错时记补一轮，不丢更新
+  mgmtRefreshBusy = true;
   api("/api/projects").then(ps=>{
     return Promise.all((ps||[]).map(p=>
       api("/api/entries?project="+encodeURIComponent(p.name))
@@ -956,6 +974,8 @@ function refreshManage(){
   }).catch(err=>{
     MGMT = { list:[], loadErr: err.message };
   }).then(()=>{
+    mgmtRefreshBusy = false;
+    if(mgmtRefreshAgain){ mgmtRefreshAgain = false; refreshManage(); }   // in-flight 期间又有触发 → 补一轮全量
     if(state.menu!=="manage" || edBusy()) return;   // 编辑/对照态中不重渲（草稿优先）
     const ae = document.activeElement;
     if(termBusy || (ae && ae.classList && ae.classList.contains("term-in"))) return;   // 终端输入/执行态不打断（需求 3）
@@ -1415,7 +1435,7 @@ function entryLeaf(p, e){
     +(e.mandatory?'<span class="badge-mand">★</span>':"")
     +(e.draft?'<span class="badge-draft">'+t("draft")+'</span>':"")+'</span>'
     +'<span class="t2">'+esc(e.title)+'</span>';
-  leaf.onclick = ()=>{ exitEdit(); state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
+  leaf.onclick = ()=>{ exitEdit(); state.catSel=null; state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
   return leaf;
 }
 // 类目内懒加载（懒加载下沉到类目内，需求 5）：treeShown 键 = 项目/类目[/子目录]
@@ -1426,15 +1446,23 @@ function leafList(container, p, ck, entries){
     container.appendChild(Object.assign(el("div","lazy-more"),
       {textContent:t("lazyMore").replace("{n}", String(entries.length - shown))}));
 }
-/* 类目行：文件夹图标 + 类名 + 计数徽标；单击展开/收起（归档默认收起，其余默认展开；
-   过滤命中后空类目由调用方跳过不渲染） */
+/* 类目行：文件夹图标 + 类名 + 计数徽标；单击=选中（高亮），双击=展开/收起，
+   箭头/图标区单击直接展开/收起（归档默认收起，其余默认展开；过滤命中后空类目由调用方跳过不渲染） */
 function renderCatGroup(kids, p, key, entries){
   const ck = p.name+"/"+key;
   const cOpen = ck in state.catOpen ? state.catOpen[ck] : key!=="archived";
-  const crow = el("button","tn-cat"+(cOpen?" open":""));
-  crow.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>'
-    +esc(t(CATEGORY_I18N[key]))+'<span class="cnt">'+entries.length+'</span>';
-  crow.onclick = ()=>{ state.catOpen[ck]=!cOpen; render(); };
+  const crow = el("button","tn-cat"+(cOpen?" open":"")+(state.catSel===ck?" sel":""));
+  crow.innerHTML = '<span class="pj-toggle"><span class="caret">▶</span><span class="folder">'+ICON.folder+'</span></span>'
+    +'<span class="cnm">'+esc(t(CATEGORY_I18N[key]))+'</span><span class="cnt">'+entries.length+'</span>';
+  const toggle = ()=>{ state.catOpen[ck]=!cOpen; render(); };
+  crow.querySelector(".pj-toggle").onclick = ev=>{ ev.stopPropagation(); toggle(); };
+  crow.onclick = ()=>{
+    state.catSel = ck;                                     // 单击 = 选中（高亮）
+    const now = Date.now();                                // 双击 = 展开/收起（计时检测，同 nmLastClick：单击即重渲换节点，原生 dblclick 不可靠）
+    if(catLastClick && catLastClick.key===ck && now-catLastClick.t<400){ catLastClick = null; toggle(); return; }
+    catLastClick = { key:ck, t:now };
+    render();
+  };
   kids.appendChild(crow);
   if(!cOpen) return;
   const sub = el("div","tn-kids");
@@ -1443,61 +1471,82 @@ function renderCatGroup(kids, p, key, entries){
   kids.appendChild(sub);
 }
 /* 参考目录子结构（固定顺序：架构总览 → 演进历程 → 其他；无 wiki 条目的项目只显示"其他"）：
-   架构总览 = 目录+文件双重身份——箭头/图标区点击展开收起子章节，点名=选中出详情，子节点直接是
-   章节条目（tags 含 wiki 且标题非架构总览/演进历程），无"章节"中间层；演进历程 = 文件节点（时钟图标）；
+   架构总览/演进历程均为 目录+文件双重身份——箭头/图标区点击展开收起子节点，点名=选中出详情，双击=展开/收起；
+   架构总览子节点=主题域章节（tags 含 wiki、不含"历史"，标题非架构总览/演进历程）；
+   演进历程子节点=版本段条目（tags 含 wiki 且含"历史"），按段标题首个版本号数值升序；
    其他 = 真目录，收 tags 不含 wiki 的普通 reference。branch: 差异条目按当前分支过滤，匹配条排后 */
 // 参考类目拆分子结构（渲染与懒加载 growTreeShown 共用，保证 treeShown 子键口径一致）
 function refSubGroups(p, entries){
   const overview = entries.filter(e=>e.title==="架构总览");
   const evo = entries.filter(e=>e.title==="演进历程");
-  const isChapter = e=>(e.tags||[]).indexOf("wiki")>=0 && overview.indexOf(e)<0 && evo.indexOf(e)<0;
+  const isWikiRef = e=>(e.tags||[]).indexOf("wiki")>=0 && overview.indexOf(e)<0 && evo.indexOf(e)<0;
+  const isHist = e=>(e.tags||[]).indexOf("历史")>=0;
   const bi = BRANCH[p.name];
   if(bi === undefined) loadBranchInfo(p.name);   // 分支上下文惰性拉取（到位后重渲即按分支过滤）
   const cur = bi && bi.current_branch;
   const branchTag = e=>{ const tg=(e.tags||[]).find(x=>x.indexOf("branch:")===0); return tg?tg.slice(7):""; };
-  const chapters = entries.filter(e=>isChapter(e) && (!cur || !branchTag(e) || branchTag(e)===cur));
+  const inBranch = e=>!cur || !branchTag(e) || branchTag(e)===cur;
+  const chapters = entries.filter(e=>isWikiRef(e) && !isHist(e) && inBranch(e));
   chapters.sort((a,b)=>(branchTag(a)?1:0)-(branchTag(b)?1:0));   // 分支差异条目排列在后
-  const plain = entries.filter(e=>overview.indexOf(e)<0 && evo.indexOf(e)<0 && !isChapter(e));
-  // 架构总览缺位时章节无宿主节点，回落进"其他"保证可达（chapters 清空，growTreeShown 总览子键自然空操作）
+  // 演进历程版本段：按标题首个 vX.Y 数值升序（v2.9 < v2.10，字典序会倒挂），无版本号的排后按标题
+  const segVer = t=>{ const m=/v(\d+)\.(\d+)/.exec(t); return m?[Number(m[1]),Number(m[2])]:null; };
+  const evoSegs = entries.filter(e=>isWikiRef(e) && isHist(e) && inBranch(e));
+  evoSegs.sort((a,b)=>{
+    const va=segVer(a.title), vb=segVer(b.title);
+    if(va&&vb) return va[0]-vb[0] || va[1]-vb[1];
+    if(va) return -1; if(vb) return 1;
+    return a.title<b.title?-1:a.title>b.title?1:0;
+  });
+  const plain = entries.filter(e=>overview.indexOf(e)<0 && evo.indexOf(e)<0 && !isWikiRef(e));
+  // 宿主条目缺位时子节点回落进"其他"保证可达（清空子列表，growTreeShown 对应子键自然空操作）
   if(!overview.length){ plain.push.apply(plain, chapters); chapters.length = 0; }
-  return { overview:overview, evo:evo, chapters:chapters, plain:plain };
+  if(!evo.length){ plain.push.apply(plain, evoSegs); evoSegs.length = 0; }
+  return { overview:overview, evo:evo, chapters:chapters, evoSegs:evoSegs, plain:plain };
+}
+// 参考目录双身份节点（架构总览/演进历程共用）：箭头/图标区=展开收起，点名=选中出详情，双击=展开/收起
+function renderDualLeaf(sub, p, ck, e, icon, kids){
+  const cOpen = ck in state.catOpen ? state.catOpen[ck] : true;
+  const sel = state.sel && state.sel.project===p.name && state.sel.file===e.file;
+  const leaf = el("button","leaf spec dual"+(sel?" sel":"")+(cOpen?" open":""));
+  leaf.innerHTML = '<span class="caret">▶</span><span class="folder">'+icon+'</span>'
+    +'<span class="t2">'+esc(e.title)+'</span><span class="cnt">'+kids.length+'</span>';
+  const toggle = ev=>{ if(ev) ev.stopPropagation(); state.catOpen[ck]=!cOpen; render(); };
+  leaf.querySelector(".caret").onclick = toggle;
+  leaf.querySelector(".folder").onclick = toggle;
+  leaf.onclick = ()=>{
+    exitEdit(); state.catSel=null; state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail();
+    const now = Date.now();   // 双击 = 展开/收起（计时检测，同 nmLastClick：单击即重渲换节点，原生 dblclick 不可靠）
+    if(catLastClick && catLastClick.key===ck && now-catLastClick.t<400){ catLastClick = null; toggle(); return; }
+    catLastClick = { key:ck, t:now };
+    render();
+  };
+  sub.appendChild(leaf);
+  if(cOpen && kids.length){
+    const sub2 = el("div","tn-kids");
+    leafList(sub2, p, ck, kids);
+    sub.appendChild(sub2);
+  }
 }
 function renderRefGroup(sub, p, entries){
   const sg = refSubGroups(p, entries);
-  const overview = sg.overview, evo = sg.evo, chapters = sg.chapters, plain = sg.plain;
-  overview.forEach(e=>{
-    const ck = p.name+"/reference/架构总览";
-    const cOpen = ck in state.catOpen ? state.catOpen[ck] : true;
-    const sel = state.sel && state.sel.project===p.name && state.sel.file===e.file;
-    const leaf = el("button","leaf spec dual"+(sel?" sel":"")+(cOpen?" open":""));
-    leaf.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>'
-      +'<span class="t2">'+esc(e.title)+'</span><span class="cnt">'+chapters.length+'</span>';
-    const toggle = ev=>{ ev.stopPropagation(); state.catOpen[ck]=!cOpen; render(); };
-    leaf.querySelector(".caret").onclick = toggle;
-    leaf.querySelector(".folder").onclick = toggle;
-    leaf.onclick = ()=>{ exitEdit(); state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
-    sub.appendChild(leaf);
-    if(cOpen && chapters.length){
-      const sub2 = el("div","tn-kids");
-      leafList(sub2, p, ck, chapters);
-      sub.appendChild(sub2);
-    }
-  });
-  evo.forEach(e=>{
-    const sel = state.sel && state.sel.project===p.name && state.sel.file===e.file;
-    const leaf = el("button","leaf spec"+(sel?" sel":""));
-    leaf.innerHTML = '<span class="l1"><span class="folder">'+ICON.history+'</span></span>'
-      +'<span class="t2">'+esc(e.title)+'</span>';
-    leaf.onclick = ()=>{ exitEdit(); state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
-    sub.appendChild(leaf);
-  });
+  sg.overview.forEach(e=>renderDualLeaf(sub, p, p.name+"/reference/架构总览", e, ICON.folder, sg.chapters));
+  sg.evo.forEach(e=>renderDualLeaf(sub, p, p.name+"/reference/演进历程", e, ICON.folder, sg.evoSegs));
+  const plain = sg.plain;
   if(plain.length){
     const ck = p.name+"/reference/其他";
     const cOpen = ck in state.catOpen ? state.catOpen[ck] : true;
-    const crow = el("button","tn-cat"+(cOpen?" open":""));
-    crow.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>'
-      +esc(t("catOther"))+'<span class="cnt">'+plain.length+'</span>';
-    crow.onclick = ()=>{ state.catOpen[ck]=!cOpen; render(); };
+    const crow = el("button","tn-cat"+(cOpen?" open":"")+(state.catSel===ck?" sel":""));
+    crow.innerHTML = '<span class="pj-toggle"><span class="caret">▶</span><span class="folder">'+ICON.folder+'</span></span>'
+      +'<span class="cnm">'+esc(t("catOther"))+'</span><span class="cnt">'+plain.length+'</span>';
+    const toggle = ()=>{ state.catOpen[ck]=!cOpen; render(); };
+    crow.querySelector(".pj-toggle").onclick = ev=>{ ev.stopPropagation(); toggle(); };
+    crow.onclick = ()=>{
+      state.catSel = ck;
+      const now = Date.now();   // 双击 = 展开/收起（计时检测，同 nmLastClick）
+      if(catLastClick && catLastClick.key===ck && now-catLastClick.t<400){ catLastClick = null; toggle(); return; }
+      catLastClick = { key:ck, t:now };
+      render();
+    };
     sub.appendChild(crow);
     if(cOpen){
       const sub2 = el("div","tn-kids");
@@ -1540,7 +1589,7 @@ function fillTree(scroll){
     nm.innerHTML = '<span class="nm">'+esc(p.name)+'</span><span class="cnt">'+(p.err?"!":list.length)+'</span>';
     nm.onclick = ()=>{
       exitEdit();
-      state.sel = null; DETAIL = null;
+      state.sel = null; DETAIL = null; state.catSel = null;
       state.projSel = p.name; loadReadme(p.name);          // 点项目名 → 右侧显示项目 README（反馈3）
       const now = Date.now();                              // 双击项目名 = 展开/收起（计时检测，见 nmLastClick 注释）
       if(nmLastClick && nmLastClick.name===p.name && now-nmLastClick.t<400){ nmLastClick = null; toggleOpen(); return; }
@@ -1564,8 +1613,8 @@ function fillTree(scroll){
 }
 // growTreeShown 懒加载追加（反馈7 + 需求 5 下沉到类目）：第一个还有未渲条目的展开类目步进
 // LAZY_STEP，原位重填树；追加在列表尾部，scrollTop 天然不变。
-// 参考类目消费的是子目录键（renderRefGroup/refSubGroups 口径）：架构总览=章节、其他=普通 reference，
-// 故对两个子键分别步进，而非父键 …/reference
+// 参考类目消费的是子目录键（renderRefGroup/refSubGroups 口径）：架构总览=主题域章节、演进历程=版本段、
+// 其他=普通 reference，故对三个子键分别步进，而非父键 …/reference
 function growTreeShown(scroll){
   if(!MGMT || !MGMT.list) return;
   const filtering = filteringOn();
@@ -1577,7 +1626,7 @@ function growTreeShown(scroll){
     for(const key of sortCategories(g)){
       if(key==="reference"){
         const sg = refSubGroups(p, g.reference);
-        const subKeys = [ ["架构总览", sg.chapters], ["其他", sg.plain] ];
+        const subKeys = [ ["架构总览", sg.chapters], ["演进历程", sg.evoSegs], ["其他", sg.plain] ];
         let grew = false;
         for(const sk of subKeys){
           const ck = p.name+"/reference/"+sk[0];
@@ -1633,6 +1682,7 @@ function treeWidth(){
    输入框命令下拉：聚焦即显示全部白名单命令，首 token 前缀过滤，Tab/Enter 补全（下拉打开时
    Enter 优先补全不发送），发送后自动关闭露出历史，输入变化/↑↓/重新聚焦再弹。 */
 const TERM_WHITELIST = ["list","search","doctor","capture","approve","wiki","add","propose","archive","on","off"];
+const TERM_HIST_MAX = 200;   // 会话级历史上限：超出环形截断最旧条目（无上限会随会话膨胀、每次全量重建 DOM 越来越慢）
 /* chips 只放命令名（说明挪进输入时的命令下拉里） */
 const TERM_CHIPS = ["list","search","doctor","capture","approve","wiki"];
 /* 终端命令提示下拉：name 命令名 / usage 仅参数部分（无参为空）/ desc 一句话功能说明（i18n 键） */
@@ -1814,6 +1864,7 @@ function sendTerm(){
   if(!v) return;
   termBusy = true;
   state.termHist.push({ cmd:v, pending:true });
+  if(state.termHist.length > TERM_HIST_MAX) state.termHist.splice(0, state.termHist.length - TERM_HIST_MAX);   // 环形截断（TERM_HIST_MAX）
   paintTermHist();
   termInputEl.value = "";
   termDdMuted = true;               // 发送后关闭下拉（保持聚焦也不弹），让最新回显+结果卡片可见
@@ -2041,7 +2092,7 @@ function renderDetail(){
     ops.appendChild(Object.assign(el("span","fb2"+(state.mgmtFb.err?" err":"")),{textContent:state.mgmtFb.txt}));
   const mk = (label, cls, fn)=>{ const b=el("button",cls); b.textContent=label; b.onclick=fn; return b; };
   ops.appendChild(mk(t("opEdit"), "btn", ()=>startEdit(proj, e.file)));
-  if(e.draft) ops.appendChild(mk(t("opApprove"), "btn btn-primary", ()=>approveEntry(proj, e)));   // 需求 1：实心主按钮
+  if(e.draft) ops.appendChild(mk(t("opApprove"), "btn btn-primary", ev=>approveEntry(proj, e, ev.currentTarget)));   // 需求 1：实心主按钮
   ops.appendChild(mk(e.archived?t("opUnarchive"):t("opArchive"), "btn", ()=>archiveEntry(proj, e, e.archived)));
   ops.appendChild(mk(t("opDelete"), "btn btn-danger", ()=>delEntry(proj, e)));
   d.appendChild(ops);
@@ -2056,6 +2107,14 @@ function renderDetail(){
   if(edSavedFb) at.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));   // 保存成功闪示（1.5s 自消）
   d.appendChild(at);
   const sm = el("div","d-summary"); sm.textContent = e.summary; d.appendChild(sm);
+  // 老库升级兜底：演进历程条目存在但本项目还没有版本段子条目（wiki+历史 标签）时给迁移提示
+  if(e.title==="演进历程" && MGMT){
+    const pr = MGMT.list.find(x=>x.name===proj);
+    const hasSegs = pr && (pr.entries||[]).some(x=>x.title!=="演进历程" && x.type==="reference"
+      && (x.tags||[]).indexOf("wiki")>=0 && (x.tags||[]).indexOf("历史")>=0);
+    if(!hasSegs)
+      d.appendChild(Object.assign(el("div","d-hint"),{textContent:t("evoSegHint")}));
+  }
   const bd = el("div","d-body md");
   const det = DETAIL && DETAIL.key===(proj+"\n"+e.file) ? DETAIL : null;
   if(det && det.err) bd.innerHTML = '<p class="fb2 err">'+esc(det.err)+'</p>';
@@ -2077,10 +2136,12 @@ function afterEntryOp(){
   render();
 }
 function opFail(err){ state.mgmtFb = { txt:err.message, err:true }; render(); }
-// 批准草稿：draft 翻正并同步索引与向量（POST /api/approve）
-function approveEntry(proj, e){
+// 批准草稿：draft 翻正并同步索引与向量（POST /api/approve）；请求期间禁用按钮防双击重发（重复请求会报误导性错误）
+function approveEntry(proj, e, btn){
+  if(btn){ if(btn.disabled) return; btn.disabled = true; }
   api("/api/approve", { method:"POST", body:{ project:proj, file:e.file } })
-    .then(afterEntryOp).catch(opFail);
+    .then(afterEntryOp)
+    .catch(err=>{ if(btn) btn.disabled = false; opFail(err); });
 }
 // 归档/取消归档（POST /api/entry/archive {undo}）；归档需确认（旧 app.js:819 文案）
 function archiveEntry(proj, e, undo){
@@ -2420,7 +2481,7 @@ let llmModal = false, llmDraft = null, llmEdit = -1, llmForm = null, llmErr = ""
 
 function flashPrefs(key){
   prefsFb[key] = true; render();
-  setTimeout(()=>{ prefsFb[key] = false; render(); }, 1500);
+  setTimeout(()=>{ prefsFb[key] = false; clearFb("prefs:"+key); }, 1500);   // 同 pSave：只摘除反馈节点不整页重渲
 }
 function loadPrefs(){ if(PREFS) return; PREFS = { errs:{} }; refreshPrefs(); }
 // 聚合拉取（多请求并行，非新聚合端点）；冷却/沉淀/门控/规则四件为全局配置，不带 project
@@ -2532,8 +2593,8 @@ function renderPrefs(){
     r.appendChild(dsc);
     const right = el("span");
     right.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:10px;flex:none";
-    if(prefsFb.g) right.appendChild(Object.assign(el("span","fb2"),
-      {textContent:PREFS.status.disabled?t("gOffFb"):t("gOnFb")}));
+    if(prefsFb.g){ const s = Object.assign(el("span","fb2"),
+      {textContent:PREFS.status.disabled?t("gOffFb"):t("gOnFb")}); s.dataset.fb = "prefs:g"; right.appendChild(s); }
     if(prefsErr.g) right.appendChild(Object.assign(el("span","fb2 err"),{textContent:prefsErr.g}));
     const on = !PREFS.status.disabled;
     right.appendChild(pswitch(on, ()=>{
@@ -2572,7 +2633,7 @@ function renderPrefs(){
     mg.disabled = !PREFS.emb;
     mg.onclick = openEmbModal;
     c.appendChild(sumRow(t("eActive"), sumBody, mg));
-    if(prefsFb.e) c.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    if(prefsFb.e) c.appendChild(savedFb("prefs:e"));
     d.appendChild(c);
   }
   // 3. 模型配置（LLM）：与 embedding 同构——摘要行 + 管理配置弹窗，确定即生效
@@ -2597,7 +2658,7 @@ function renderPrefs(){
     mg.disabled = !PREFS.llm;
     mg.onclick = openLlmModal;
     c.appendChild(sumRow(t("eActive"), sumBody, mg));
-    if(prefsFb.l) c.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    if(prefsFb.l) c.appendChild(savedFb("prefs:l"));
     d.appendChild(c);
   }
   // 4. Hook 超时（全局；独立写端点，不重装 hooks）
@@ -2693,7 +2754,7 @@ function renderPrefs(){
       t("gtStatus").replace("{b}",(g.builtin||[]).length).replace("{n}",(g.extra||[]).length)}));
     const right = el("span");
     right.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:10px;flex:none";
-    if(prefsFb.gt) right.appendChild(Object.assign(el("span","fb2"),{textContent:t("saved")}));
+    if(prefsFb.gt) right.appendChild(savedFb("prefs:gt"));
     if(prefsErr.gt) right.appendChild(Object.assign(el("span","fb2 err"),{textContent:prefsErr.gt}));
     const mg = el("button","btn"); mg.textContent = t("gtManage");
     mg.onclick = ()=>{ gateDraft = (g.extra||[]).slice(); gateErr = ""; gateModal = true; render(); };
@@ -3342,7 +3403,9 @@ function refreshMisc(){
 }
 
 function miscFbSpan(fb){
-  return Object.assign(el("span","fb2"+(fb.err?" err":"")),{textContent:fb.txt});
+  const s = Object.assign(el("span","fb2"+(fb.err?" err":"")),{textContent:fb.txt});
+  s.dataset.fb = "misc:"+fb.key;
+  return s;
 }
 // 卡片右端反馈：成功闪 1.5s；sticky（导入结果行/错误）驻留至下次操作覆盖
 function flashMiscFb(key, txt, opts){
@@ -3350,7 +3413,7 @@ function flashMiscFb(key, txt, opts){
   state.miscFb = { key:key, txt:txt, err:!!opts.err };
   render();
   if(!opts.sticky) setTimeout(()=>{
-    if(state.miscFb && state.miscFb.key===key){ state.miscFb = null; render(); }
+    if(state.miscFb && state.miscFb.key===key){ state.miscFb = null; clearFb("misc:"+key); }   // 同 pSave：只摘除反馈节点不整页重渲
   }, 1500);
 }
 // 导出/删除共用的 zip 下载（fetch 响应 → a[download]；Content-Disposition 文件名优先）

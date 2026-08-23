@@ -104,11 +104,15 @@
   .tn-proj.open .caret { transform:rotate(90deg); }
   .tn-proj .cnt { margin-left:auto; color:var(--muted); font-size:11px; font-weight:400; }
   .tn-kids { margin-left:15px; border-left:1px solid var(--border); padding-left:4px; }
-  /* 需求 5：类目子目录行（文件夹图标 + 类名 + 计数徽标，单击展开/收起、不互斥） */
+  /* 需求 5：类目子目录行（文件夹图标 + 类名 + 计数徽标；单击选中、双击展开/收起、不互斥） */
   .tn-cat { display:flex; align-items:center; gap:5px; width:100%; border:none; background:none;
             padding:3px 8px; border-radius:6px; cursor:pointer; font-size:12.5px; text-align:left;
             color:var(--muted); font-weight:600; }
   .tn-cat:hover { background:var(--hover); }
+  .tn-cat.sel { background:var(--sel-bg); box-shadow:inset 2px 0 0 var(--primary); }
+  .tn-cat .tg { display:flex; align-items:center; gap:5px; flex:none; padding:1px 2px; border-radius:4px; }
+  .tn-cat .tg:hover { background:var(--sel-bg); }
+  .tn-cat .cnm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .tn-cat .caret { width:12px; transition:transform .12s; flex:none; font-size:9px; }
   .tn-cat.open .caret { transform:rotate(90deg); }
   .tn-cat .cnt { margin-left:auto; font-size:11px; font-weight:400; opacity:.75; }
@@ -337,9 +341,25 @@ const PROJECTS = [
       body:"# 架构总览\n\n本条目是目录地图，细节见「章节」下各主题域条目：\n\n- **Web GUI**：四标签 SPA 管理界面\n- **daemon 进程模型**：单实例端口即锁\n- **多-Agent支持（agentx）**：hooks 接入矩阵" },
     { file:"knowledge/wiki-演进历程.md", title:"演进历程", type:"reference", born:"master",
       tags:["wiki"], mandatory:false, draft:false, archived:false,
-      size:"1.6 KB", mtime:"2026-08-22 20:05", mts:1787475600,
-      summary:"版本沿革：v1 单通道注入 → v2 混合检索 → v2.18 GUI 管理页",
-      body:"# 演进历程\n\n- v1：单通道关键词注入\n- v2.0：混合检索 + daemon\n- v2.18：GUI 管理页、日志查看器" },
+      size:"1.0 KB", mtime:"2026-08-22 20:05", mts:1787475600,
+      summary:"里程碑索引：一段一行 + 指针，正文按版本段拆子条目",
+      body:"# 演进历程\n\n本条目只留索引，里程碑正文见各版本段子条目：\n\n- **v1.0~v2.15**：骨架 → 混合检索 → daemon → 十适配器 → embedding\n- **v2.16~v2.18**：检索准入与索引治理\n- **v2.19 起**：AI 优化、跨轮冷却、三 exe 化" },
+    /* 演进历程版本段子条目（tags wiki+历史，挂演进历程节点下，按版本号升序） */
+    { file:"knowledge/wiki-演进-v1.md", title:"演进历程（v1.0~v2.15 骨架到十适配器）", type:"reference", born:"master",
+      tags:["wiki","历史"], mandatory:false, draft:false, archived:false,
+      size:"3.2 KB", mtime:"2026-08-22 20:06", mts:1787475660,
+      summary:"v1.0 骨架 → SQLite 索引 → Web GUI 与安装器 → daemon 内嵌托盘 → 十个 agent 适配器 → embedding 多服务",
+      body:"# v1.0~v2.15\n\n- v1：单通道关键词注入\n- v2.0：混合检索 + daemon\n- v2.15：dsh 适配器" },
+    { file:"knowledge/wiki-演进-v2.md", title:"演进历程（v2.16~v2.18 检索准入与索引治理）", type:"reference", born:"master",
+      tags:["wiki","历史"], mandatory:false, draft:false, archived:false,
+      size:"1.8 KB", mtime:"2026-08-22 20:07", mts:1787475720,
+      summary:"min_score/min_gap 通道准入 → 四特性 → INDEX 预算渲染 → WAL 并发加固",
+      body:"# v2.16~v2.18\n\n- v2.16：检索按通道准入\n- v2.18：索引治理 + 并发加固" },
+    { file:"knowledge/wiki-演进-v3.md", title:"演进历程（v2.19 起 AI 优化与三 exe 化）", type:"reference", born:"master",
+      tags:["wiki","历史"], mandatory:false, draft:false, archived:false,
+      size:"1.5 KB", mtime:"2026-08-23 09:30", mts:1787475780,
+      summary:"条目 AI 优化 → 跨轮冷却 → wiki 基线继承 → 三 exe 分离与五页化",
+      body:"# v2.19 起\n\n- v2.19：条目 AI 优化\n- v2.21：三 exe 分离与配置中心五页化" },
     { file:"knowledge/wiki-多-Agent支持.md", title:"多-Agent支持（agentx）", type:"reference", born:"master",
       tags:["wiki","agentx"], mandatory:false, draft:false, archived:false,
       size:"1.4 KB", mtime:"2026-08-21 18:30", mts:1787472000,
@@ -431,7 +451,7 @@ const storedLayout = loadStoredLayout();
 const initVariant = (new URLSearchParams(location.search).get("variant")||"A").toUpperCase();
 const state = {
   variant: VARIANTS.some(v=>v[0]===initVariant) ? initVariant : "A",
-  open:{ "OpenKnowledge":true }, sel:null, catOpen:{}, catDefaulted:{},
+  open:{ "OpenKnowledge":true }, sel:null, catOpen:{}, catDefaulted:{}, catSel:null,
   q:"", cmd:null, cmdErr:"", showHelp:false, scopeNote:"",
   rightTab:"detail", drawerOpen:true,
   treeW:300, termW:360, termH:0.4,
@@ -773,14 +793,6 @@ function entryLeaf(e){
   leaf.onclick = ()=>{ state.sel=e; render(); };
   return leaf;
 }
-/* 演进历程：文件节点（时钟图标占位，开发时重新设计），点击 = 详情区显示条目内容 */
-function specialLeaf(e){
-  const leaf = el("button","leaf spec"+(state.sel===e?" sel":""));
-  leaf.innerHTML = '<span class="l1"><span class="folder-ico">'+ICON_HISTORY+'</span></span>'
-    +'<span class="t2">'+esc(e.title)+'</span>';
-  leaf.onclick = ()=>{ state.sel=e; render(); };
-  return leaf;
-}
 function leafList(container, entries){
   entries.slice(0, CAT_LAZY_N).forEach(e=>container.appendChild(entryLeaf(e)));
   if(entries.length > CAT_LAZY_N)
@@ -800,43 +812,59 @@ function relTime(sec){
   if(d < 86400) return Math.floor(d/3600)+" 小时前";
   return Math.floor(d/86400)+" 天前";
 }
+/* 类目行：单击 = 选中（高亮），双击 = 展开/收起；箭头/图标区单击直接展开/收起 */
 function catRow(label, count, ck, defaultOpen, latest){
   const cOpen = ck in state.catOpen ? state.catOpen[ck] : defaultOpen;
-  const crow = el("button","tn-cat"+(cOpen?" open":""));
-  crow.innerHTML = '<span class="caret">▶</span><span class="folder-ico">'+ICON_FOLDER_SM+'</span>'
-    +esc(label)+'<span class="cnt">'+count+'</span>'
+  const crow = el("button","tn-cat"+(cOpen?" open":"")+(state.catSel===ck?" sel":""));
+  crow.innerHTML = '<span class="tg"><span class="caret">▶</span><span class="folder-ico">'+ICON_FOLDER_SM+'</span></span>'
+    +'<span class="cnm">'+esc(label)+'</span><span class="cnt">'+count+'</span>'
     +(latest ? '<span class="mtime">'+relTime(latest)+'</span>' : "");
-  crow.onclick = ()=>{ state.catOpen[ck]=!cOpen; render(); };
+  const toggle = ()=>{ state.catOpen[ck]=!cOpen; render(); };
+  crow.querySelector(".tg").onclick = ev=>{ ev.stopPropagation(); toggle(); };
+  crow.onclick = ()=>{ state.catSel=ck; state.sel=null; render(); };
+  crow.ondblclick = ()=>{ state.catSel=ck; toggle(); };
   return { crow, cOpen };
 }
-/* 架构总览：目录+文件双重身份——箭头/图标区点击 = 展开/收起子章节，点名 = 详情出内容 */
-function dualLeaf(e, childCount, ck){
+/* 架构总览/演进历程：目录+文件双重身份——箭头/图标区点击或双击 = 展开/收起子节点，点名 = 详情出内容 */
+function dualLeaf(e, childCount, ck, icon){
   const cOpen = ck in state.catOpen ? state.catOpen[ck] : true;
   const leaf = el("button","leaf spec dual"+(state.sel===e?" sel":"")+(cOpen?" open":""));
-  leaf.innerHTML = '<span class="caret">▶</span><span class="folder-ico">'+ICON_FOLDER_SM+'</span>'
+  leaf.innerHTML = '<span class="caret">▶</span><span class="folder-ico">'+icon+'</span>'
     +'<span class="t2">'+esc(e.title)+'</span><span class="cnt">'+childCount+'</span>';
-  const toggle = ev=>{ ev.stopPropagation(); state.catOpen[ck]=!cOpen; render(); };
+  const toggle = ev=>{ if(ev) ev.stopPropagation(); state.catOpen[ck]=!cOpen; render(); };
   leaf.querySelector(".caret").onclick = toggle;
   leaf.querySelector(".folder-ico").onclick = toggle;
-  leaf.onclick = ()=>{ state.sel=e; render(); };
+  leaf.onclick = ()=>{ state.sel=e; state.catSel=null; render(); };
+  leaf.ondblclick = ()=>{ toggle(); };
   return { leaf, cOpen };
 }
-/* 参考目录子结构（固定顺序）：架构总览（双重身份，子节点=章节条目，无中间"章节"目录）→
-   演进历程（文件节点，点击出内容）→ 其他（真目录，普通无 wiki 标签的 reference）；
+/* 演进历程版本段排序：按段标题首个 vX.Y 数值升序（v2.9 < v2.10，字典序会倒挂） */
+function segVer(t){ const m=/v(\d+)\.(\d+)/.exec(t); return m?[Number(m[1]),Number(m[2])]:null; }
+function bySegVer(a,b){
+  const va=segVer(a.title), vb=segVer(b.title);
+  if(va&&vb) return va[0]-vb[0] || va[1]-vb[1];
+  if(va) return -1; if(vb) return 1;
+  return a.title<b.title?-1:a.title>b.title?1:0;
+}
+/* 参考目录子结构（固定顺序）：架构总览（双重身份，子节点=主题域章节条目，无中间"章节"目录）→
+   演进历程（双重身份，子节点=版本段条目 tags wiki+历史，按版本号升序）→ 其他（真目录，普通无 wiki 标签的 reference）；
    无 wiki 条目的项目只显示"其他" */
 function renderRefGroup(sub, p, entries){
   const overview = entries.filter(e=>e.title==="架构总览");
   const evo = entries.filter(e=>e.title==="演进历程");
   const isWiki = e=>e.tags.includes("wiki") && !overview.includes(e) && !evo.includes(e);
-  const chapters = entries.filter(e=>isWiki(e) && branchOk(e));
+  const isHist = e=>e.tags.includes("历史");
+  const chapters = entries.filter(e=>isWiki(e) && !isHist(e) && branchOk(e));
   chapters.sort((a,b)=>{   // 分支差异条目排列在后
     const ab = a.tags.some(t=>t.startsWith("branch:")) ? 1 : 0;
     const bb = b.tags.some(t=>t.startsWith("branch:")) ? 1 : 0;
     return ab-bb;
   });
+  const evoSegs = entries.filter(e=>isWiki(e) && isHist(e) && branchOk(e));
+  evoSegs.sort(bySegVer);
   const plain = entries.filter(e=>!overview.includes(e)&&!evo.includes(e)&&!isWiki(e));
   overview.forEach(e=>{
-    const { leaf, cOpen } = dualLeaf(e, chapters.length, p.name+"/reference/架构总览");
+    const { leaf, cOpen } = dualLeaf(e, chapters.length, p.name+"/reference/架构总览", ICON_FOLDER_SM);
     sub.appendChild(leaf);
     if(cOpen && chapters.length){
       const sub2 = el("div","tn-kids");
@@ -844,7 +872,15 @@ function renderRefGroup(sub, p, entries){
       sub.appendChild(sub2);
     }
   });
-  evo.forEach(e=>sub.appendChild(specialLeaf(e)));
+  evo.forEach(e=>{
+    const { leaf, cOpen } = dualLeaf(e, evoSegs.length, p.name+"/reference/演进历程", ICON_FOLDER_SM);
+    sub.appendChild(leaf);
+    if(cOpen && evoSegs.length){
+      const sub2 = el("div","tn-kids");
+      leafList(sub2, evoSegs);
+      sub.appendChild(sub2);
+    }
+  });
   if(plain.length){
     const { crow, cOpen } = catRow("其他", plain.length, p.name+"/reference/其他", true);
     sub.appendChild(crow);

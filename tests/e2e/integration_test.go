@@ -200,9 +200,9 @@ func TestEndToEnd(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, "demo") {
 		t.Fatalf("list: code=%d out=%q", code, stdout)
 	}
-	stdout, _, _ = runOK(t, home, proj, "", "doctor")
-	if !strings.Contains(stdout, "demo") {
-		t.Fatalf("doctor: out=%q", stdout)
+	stdout, _, code = runOK(t, home, proj, "", "doctor")
+	if code != 0 || !strings.Contains(stdout, "demo") {
+		t.Fatalf("doctor: code=%d out=%q", code, stdout)
 	}
 
 	// 全局开关：off 后 prompt 无输出，on 后恢复

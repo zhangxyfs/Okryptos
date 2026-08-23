@@ -136,3 +136,80 @@ func TestWithFileLockFailOpenOnTimeout(t *testing.T) {
 		t.Fatalf("他方锁文件被改动: data=%q err=%v", data, err)
 	}
 }
+
+// 严格模式（registry.Update 用）：等满 lockTimeout 仍拿不到锁时返回错误且不执行
+// fn——强一致数据的读-改-写不允许 fail-open 无锁裸跑；他方锁文件保持原样。
+func TestWithFileLockStrictTimeoutReturnsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.toml")
+	lp := path + ".lock"
+	if err := os.WriteFile(lp, []byte("busy-holder"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() { // 模拟存活的长事务：持续刷新锁 mtime 使其永不陈旧
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(200 * time.Millisecond):
+				now := time.Now()
+				_ = os.Chtimes(lp, now, now)
+			}
+		}
+	}()
+	start := time.Now()
+	ran := false
+	err := WithFileLockStrict(path, func() error { ran = true; return nil })
+	if err == nil {
+		t.Fatal("严格模式超时应返回错误")
+	}
+	if ran {
+		t.Fatal("严格模式超时不得执行 fn")
+	}
+	if elapsed := time.Since(start); elapsed < lockTimeout {
+		t.Fatalf("超时返回耗时 %v < %v，疑似未等锁", elapsed, lockTimeout)
+	}
+	if data, rerr := os.ReadFile(lp); rerr != nil || string(data) != "busy-holder" {
+		t.Fatalf("他方锁文件被改动: data=%q err=%v", data, rerr)
+	}
+}
+
+// 严格模式正常拿锁路径：执行 fn、传播错误、释放锁。
+func TestWithFileLockStrictAcquires(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.toml")
+	ran := false
+	if err := WithFileLockStrict(path, func() error { ran = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if !ran {
+		t.Fatal("fn 未执行")
+	}
+	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("锁文件未释放: %v", err)
+	}
+}
+
+// 陈旧锁抢占后不得残留 .stale-* 临时文件（先 rename 再删的抢占路径须自行收尾）。
+func TestWithFileLockPreemptLeavesNoStaleFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	lp := path + ".lock"
+	if err := os.WriteFile(lp, []byte("dead-holder"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-lockStaleAge - time.Second)
+	if err := os.Chtimes(lp, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := WithFileLock(path, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "*.stale-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("抢占残留临时文件: %v", matches)
+	}
+}

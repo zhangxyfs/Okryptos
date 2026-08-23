@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"openknowledge/internal/agentx"
+	"openknowledge/internal/daemonx"
 	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/state"
@@ -161,6 +162,10 @@ func logErr(format string, args ...any) {
 }
 
 // selfHealHooks 逐 agent 自检 hooks 集成（如 kimi 清掉标记块时自动修复）。fail-open。
+// daemon（okd）进程内 os.Executable 是 okd.exe——hook 请求经 daemon 转发后在 okd
+// 内执行本函数，不经 CliTargetFor 换算会把各 agent hooks 改写成指向 okd（gui-split
+// 后 okd 无子命令，等于注册失效命令，且 ok doctor 视角持续误报）。换算失败
+// （同目录无 ok）放弃本次自愈。
 func selfHealHooks() {
 	exe, err := os.Executable()
 	if err != nil {
@@ -168,6 +173,11 @@ func selfHealHooks() {
 	}
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
+	}
+	exe, err = daemonx.CliTargetFor(exe)
+	if err != nil {
+		logErr("self-heal cli target: %v", err)
+		return
 	}
 	for _, a := range agentx.Detected() {
 		if err := a.EnsureHooks(exe); err != nil {

@@ -173,6 +173,27 @@ func TestRemoveSectionDeletesEmptyFile(t *testing.T) {
 	}
 }
 
+func TestRemoveSectionPreservesTrailingWhitespace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	// 其它小节的行尾空白（如多行字符串缩进）不应被裁剪
+	initial := "[llm]\nnotes = \"keep trailing\"  \n\n[embedding]\napi_key = \"sk\"\n"
+	if err := os.WriteFile(path, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := RemoveSection(path, "[embedding]")
+	if err != nil || !removed {
+		t.Fatalf("removed=%v err=%v", removed, err)
+	}
+	data, _ := os.ReadFile(path)
+	got := string(data)
+	if !strings.Contains(got, "\"keep trailing\"  \n") {
+		t.Fatalf("trailing whitespace of other sections should be preserved: %q", got)
+	}
+	if strings.Contains(got, "embedding") || strings.Contains(got, "api_key") {
+		t.Fatalf("embedding section should be removed: %q", got)
+	}
+}
+
 func TestUninstallStopsDaemon(t *testing.T) {
 	setupUninstallEnv(t)
 	// 伪造一个活的"daemon"：httptest + daemon.json

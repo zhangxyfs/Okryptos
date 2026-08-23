@@ -50,6 +50,42 @@ func TestLoadSaveRoundtrip(t *testing.T) {
 	}
 }
 
+// ValidProjectName 是注册表写入前的形状闸门：路径穿越、盘符/分隔符、
+// Windows 保留设备名与尾部点/空格一律拒绝。
+func TestValidProjectName(t *testing.T) {
+	valid := []string{"demo", "my-proj_2", "变更日志", "console", "com10", "a.b"}
+	for _, n := range valid {
+		if !ValidProjectName(n) {
+			t.Fatalf("ValidProjectName(%q) = false, want true", n)
+		}
+	}
+	invalid := []string{
+		"", ".", "..",
+		`..\x`, `foo/bar`, `foo\bar`, `C:\x`, "c:", "/abs",
+		"con", "CON", "Nul", "com1", "lpt9", "con.txt", // Windows 保留设备名
+		"foo.", "foo ", // 尾部点/空格会被 Windows 静默截掉
+	}
+	for _, n := range invalid {
+		if ValidProjectName(n) {
+			t.Fatalf("ValidProjectName(%q) = true, want false", n)
+		}
+	}
+}
+
+// 大小写冲突拒绝：Windows 上 projects/Foo 与 projects/foo 是同一目录。
+func TestAddProjectCaseConflict(t *testing.T) {
+	r := &Registry{}
+	if err := r.AddProject("Foo", `D:\src\foo`); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddProject("foo", `D:\src\foo2`); err == nil {
+		t.Fatal("expected case-conflict error")
+	}
+	if len(r.Projects) != 1 {
+		t.Fatalf("冲突项目不应入册: %+v", r.Projects)
+	}
+}
+
 func TestLoadMissing(t *testing.T) {
 	r, err := Load(filepath.Join(t.TempDir(), "none.toml"))
 	if err != nil || len(r.Projects) != 0 {

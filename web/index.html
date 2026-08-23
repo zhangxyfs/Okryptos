@@ -6,7 +6,21 @@
   <title>OkManager</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="stylesheet" href="style.css">
-  <script>window.OK_TOKEN = "{{TOKEN}}";</script>
+  <script>
+  // token 经 URL fragment 一次性注入（fragment 不发服务器、不进 Referer）；读入后
+  // 转存 sessionStorage 并从地址栏抹除——app.js 的菜单路由会改写 location.hash，
+  // 没有 sessionStorage 兜底的话，点过菜单再刷新页面 token 就丢了。
+  (function () {
+    var m = /[#&]token=([^&]+)/.exec(location.hash);
+    if (m) {
+      try { sessionStorage.setItem("ok_token", decodeURIComponent(m[1])); } catch (e) {}
+      history.replaceState(null, "", location.pathname + location.search);
+    }
+    var t = "";
+    try { t = sessionStorage.getItem("ok_token") || ""; } catch (e) {}
+    window.OK_TOKEN = t;
+  })();
+  </script>
 </head>
 <body>
   <div id="app"></div>

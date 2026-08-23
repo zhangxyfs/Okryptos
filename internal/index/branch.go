@@ -56,7 +56,10 @@ func FilterHitsByBranch(hits []Hit, branch string) []Hit {
 // TrimIndexBranchSections 裁剪 INDEX.md 的"## 分支差异（X）"小节：只保留 branch 的，
 // 其余整节移除；branch 为空、无差异小节或全程未裁任何节时逐字节返回原文
 // （零回归 + 幂等：重复调用结果稳定，不会每次多一个尾部换行）。
-// 小节边界：下一个 "## " 级标题或 EOF。
+// 小节边界：下一个 "## " 级标题或 EOF。小节头须严格匹配渲染层输出格式
+// （"## 分支差异（名）"，名不含全角括号、允许行尾 \r）——条目元数据已消毒
+// 无法注入伪小节头，此处再校验行格式兜底：格式不符的行按普通 "## " 标题
+// 处理（结束裁剪但自身保留），不会被当作小节头裁掉内容。
 func TrimIndexBranchSections(idx, branch string) string {
 	if branch == "" || !strings.Contains(idx, "## 分支差异（") {
 		return idx
@@ -68,11 +71,7 @@ func TrimIndexBranchSections(idx, branch string) string {
 	for _, ln := range lines {
 		if strings.HasPrefix(ln, "## ") {
 			dropping = false
-			if strings.HasPrefix(ln, "## 分支差异（") {
-				name := strings.TrimPrefix(ln, "## 分支差异（")
-				if i := strings.Index(name, "）"); i >= 0 {
-					name = name[:i]
-				}
+			if name, ok := branchSectionName(ln); ok {
 				dropping = name != branch
 			}
 		}
@@ -89,6 +88,21 @@ func TrimIndexBranchSections(idx, branch string) string {
 	}
 	// 重组后规整末尾换行：与原文末尾形态保持一致（原文无末换行则去掉，有则恰好一个）
 	return strings.TrimSuffix(b.String(), "\n") + trailingNL(idx)
+}
+
+// branchSectionName 严格解析"## 分支差异（X）"小节头：返回 (分支名, true)；
+// 前缀/收尾括号缺失、名为空、名内嵌全角括号（伪造或损坏行）一律 false。
+func branchSectionName(ln string) (string, bool) {
+	const prefix = "## 分支差异（"
+	ln = strings.TrimSuffix(ln, "\r")
+	if !strings.HasPrefix(ln, prefix) || !strings.HasSuffix(ln, "）") {
+		return "", false
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(ln, prefix), "）")
+	if name == "" || strings.ContainsAny(name, "（）") {
+		return "", false
+	}
+	return name, true
 }
 
 // trailingNL 保留原文末尾换行形态。

@@ -113,6 +113,30 @@ func StripLegacyOKHooks(content string) string {
 	return strings.Join(out, "\n")
 }
 
+// stripMarkerBlocks 移除 content 中全部标记块（含标记行），供 UpsertHooksBlock
+// 在 upsert 前清理重复旧块——只原位替换第一个会让其余旧块残留，hook 双派发。
+// 有头无尾（损坏块）报错，不覆盖原文件。
+func stripMarkerBlocks(content, configPath string) (string, error) {
+	for {
+		i := strings.Index(content, MarkerBegin)
+		if i < 0 {
+			return content, nil
+		}
+		j := strings.Index(content[i:], MarkerEnd)
+		if j < 0 {
+			return "", fmt.Errorf("hooks 标记块损坏（缺少结束标记）: %s", configPath)
+		}
+		j += i
+		head := strings.TrimRight(content[:i], "\n")
+		tail := strings.TrimPrefix(content[j+len(MarkerEnd):], "\n")
+		if head == "" {
+			content = tail
+		} else {
+			content = head + "\n" + tail
+		}
+	}
+}
+
 // UpsertHooksBlock 以标记块幂等写入 hooks 配置：先清除存量 ok hooks（含无标记的
 // 历史遗留块），已存在标记块则原位替换（exe 路径随之更新），否则追加。
 func UpsertHooksBlock(configPath, block string) error {
@@ -126,7 +150,14 @@ func UpsertHooksBlock(configPath, block string) error {
 	// 连带着吃掉两个标记行，导致原位替换退化为尾部追加、损坏标记检测失效。
 	if i := strings.Index(content, MarkerBegin); i >= 0 {
 		if j := strings.Index(content, MarkerEnd); j > i {
-			content = StripLegacyOKHooks(content[:i]) + content[i:j+len(MarkerEnd)] + StripLegacyOKHooks(content[j+len(MarkerEnd):])
+			// 第一个标记块留给下面的原位替换；其后若还有重复标记块（历史 bug 可能
+			// 留下多个）先整段剥离——只换第一个会让旧块残留双派发。先剥块再清
+			// 遗留表：StripLegacyOKHooks 不处理标记块内部（见其注释）。
+			tail, err := stripMarkerBlocks(content[j+len(MarkerEnd):], configPath)
+			if err != nil {
+				return err
+			}
+			content = StripLegacyOKHooks(content[:i]) + content[i:j+len(MarkerEnd)] + StripLegacyOKHooks(tail)
 		} else {
 			// 有头无尾：保留原样，交给下面的损坏标记分支报错
 			content = StripLegacyOKHooks(content[:i]) + content[i:]
@@ -158,14 +189,27 @@ func UpsertHooksBlock(configPath, block string) error {
 }
 
 // EnsureHooksBlock hook 入口自检：kimi-code 有时会清掉标记注释行，使标记块丢失
-// （孤儿 hook 表仍在、hook 照常运行，但下次 setup 的去重依据没了）。标记块缺失时
-// 自动备份并重新 Upsert 修复；标记块存在则不动。调用方按 fail-open 处理返回错误。
+// （孤儿 hook 表仍在、hook 照常运行，但下次 setup 的去重依据没了）。标记块缺失且
+// 仍残留 ok 的 [[hooks]] 表（okHookCommand 命中）时自动备份并重新 Upsert 修复；
+// 标记块存在、或完全无 ok hook 表（用户显式卸载/从未安装）则不动——与其它适配器
+// "无 ok 条目不复活"对称，显式移除的集成不被自愈复活。调用方按 fail-open 处理返回错误。
 func EnsureHooksBlock(configPath, exe string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
 	}
-	if strings.Contains(string(data), MarkerBegin) {
+	content := string(data)
+	if strings.Contains(content, MarkerBegin) {
+		return nil
+	}
+	hasOKHook := false
+	for _, l := range strings.Split(content, "\n") {
+		if okHookCommand.MatchString(l) {
+			hasOKHook = true
+			break
+		}
+	}
+	if !hasOKHook {
 		return nil
 	}
 	_ = os.WriteFile(configPath+".bak-openknowledge", data, 0o644)
@@ -222,7 +266,7 @@ func (kimiAgent) RemoveHooks() (bool, error) {
 	if content == orig {
 		return false, nil
 	}
-	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+	if err := fsx.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
 		return false, fmt.Errorf("移除 hooks 配置: %w", err)
 	}
 	return true, nil

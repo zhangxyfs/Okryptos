@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"openknowledge/internal/embed"
 	"openknowledge/internal/entry"
@@ -48,11 +49,15 @@ type SyncOptions struct {
 }
 
 // Sync 将 dir（knowledge 目录）下的 Markdown 条目增量同步进索引库：
-// 先用 os.ReadDir 枚举文件名+mtime（不读文件内容），与 entries 表按
-// filename+mtime 对比；仅新增/变化的条目才 read+parse 并 upsert
-// （entries 存原文，entries_fts 存 ftsText 切分文本），client!=nil 时
-// 收集变化条目与缺向量的未变化条目（只读这些文件）的 EmbedText，
-// 提交前按 32 条一批调 EmbedDocuments 批量算向量写入 vectors 表；
+// 先用 os.ReadDir 枚举文件名+mtime+size（不读文件内容），与 entries 表按
+// filename+mtime+size 对比（双判：外部编辑器同秒双写时 size 兜底）；仅
+// 新增/变化的条目才 read+parse 并 upsert（entries 存原文，entries_fts 存
+// ftsText 切分文本），client!=nil 时收集变化条目与缺向量的未变化条目
+//（只读这些文件）的 EmbedText。entries/fts/死条目删除先在一个事务内提交；
+// embedding 网络调用在写事务外执行，每批（32 条）算完向量后开一个毫秒级
+// 小事务写入 vectors——持锁时长与库规模脱钩，全量重建期间 hook/GUI 的
+// 读写不再被分钟级写锁堵死；批次失败时已提交的 entries 保留（mtime 幂等），
+// 缺向量条目由下一轮 Sync 的补齐路径重试。
 // 提交后若 client 身份非空且确有向量写入，则刷新 meta 表的
 // embedding_model/embedding_dim。client 身份与 meta 记录不符时
 // 跳过全部向量写与 meta 更新（INDEX/FTS 照常），杜绝新旧模型向量
@@ -61,7 +66,7 @@ type SyncOptions struct {
 // 保留，无旧行则缺席），其余条目照常提交——一个 YAML 笔误不能压制全部
 // 注入；提交成功后若有跳过，返回 *CorruptEntriesError 警告（调用方用
 // errors.As 区分）。SQL 失败、目录不可读、INDEX.md 写入失败等致命错误
-// 仍中止并回滚。diff 非空或 INDEX.md 缺失时重建 <dir>/../INDEX.md，
+// 仍中止。diff 非空或 INDEX.md 缺失时重建 <dir>/../INDEX.md，
 // 无变化的纯热路径不做任何写盘。
 func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 	o := SyncOptions{}
@@ -77,6 +82,7 @@ func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 		name  string
 		path  string
 		mtime int64
+		size  int64
 	}
 	var disk []diskFile
 	for _, de := range dirents {
@@ -87,22 +93,26 @@ func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 		if err != nil {
 			return err
 		}
-		disk = append(disk, diskFile{de.Name(), filepath.Join(dir, de.Name()), info.ModTime().Unix()})
+		disk = append(disk, diskFile{de.Name(), filepath.Join(dir, de.Name()), info.ModTime().Unix(), info.Size()})
 	}
 
-	existing := map[string]int64{}
-	rows, err := db.sql.Query(`SELECT filename, mtime FROM entries`)
+	// 变化判据 mtime+size 双判：秒级 mtime 下外部编辑器同秒双写（或 FAT 2 秒
+	// 粒度）第二次内容不同的写入单靠 mtime 会漏判。存量库 size 列为 0，首轮
+	// 全部判变化重读一次（幂等无害），之后 size 入库。
+	type indexedFile struct{ mtime, size int64 }
+	existing := map[string]indexedFile{}
+	rows, err := db.sql.Query(`SELECT filename, mtime, size FROM entries`)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var name string
-		var mtime int64
-		if err := rows.Scan(&name, &mtime); err != nil {
+		var f indexedFile
+		if err := rows.Scan(&name, &f.mtime, &f.size); err != nil {
 			_ = rows.Close()
 			return err
 		}
-		existing[name] = mtime
+		existing[name] = f
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
@@ -165,14 +175,14 @@ func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 		name := f.name
 		alive[name] = true
 		mtime := f.mtime
-		if old, ok := existing[name]; ok && old == mtime {
+		if old, ok := existing[name]; ok && old.mtime == mtime && old.size == f.size {
 			// 未变化条目不读不解析；仅在缺向量且可算向量时收集补齐
 			if !embedBlocked && !hasVector[name] {
 				e, err := readEntry(f.path)
 				if err != nil {
 					// 与 changed 路径同口径：损坏条目跳过、记入告警，不中止整轮
-					// 同步（同秒写坏 mtime 未变的场景会走到这里——"一个 YAML 笔误
-					// 不能压制全部注入"）
+					// 同步（写坏后 mtime+size 均未变的场景会走到这里——"一个
+					// YAML 笔误不能压制全部注入"）
 					skipped = append(skipped, name)
 					continue
 				}
@@ -201,14 +211,14 @@ func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 		if e.Archived {
 			archived = 1
 		}
-		if _, err := tx.Exec(`INSERT INTO entries(filename,title,type,tags,summary,body,mandatory,draft,archived,mtime)
-			VALUES(?,?,?,?,?,?,?,?,?,?)
+		if _, err := tx.Exec(`INSERT INTO entries(filename,title,type,tags,summary,body,mandatory,draft,archived,mtime,size)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(filename) DO UPDATE SET
 			title=excluded.title, type=excluded.type, tags=excluded.tags,
 			summary=excluded.summary, body=excluded.body,
 			mandatory=excluded.mandatory, draft=excluded.draft,
-			archived=excluded.archived, mtime=excluded.mtime`,
-			name, e.Title, e.Type, tags, e.Summary, e.Body, mandatory, draft, archived, mtime); err != nil {
+			archived=excluded.archived, mtime=excluded.mtime, size=excluded.size`,
+			name, e.Title, e.Type, tags, e.Summary, e.Body, mandatory, draft, archived, mtime, f.size); err != nil {
 			return rollback(err)
 		}
 		if _, err := tx.Exec(`DELETE FROM entries_fts WHERE filename=?`, name); err != nil {
@@ -236,6 +246,13 @@ func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 			}
 		}
 	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// embedding 网络调用在写事务外执行：每批算完向量开一个毫秒级小事务写入，
+	// 持锁时长与库规模脱钩——全量重建期间 hook/GUI 的读写不再被分钟级写锁
+	// 堵死。批次失败时已提交的 entries 保留（mtime 幂等），缺向量条目由下一轮
+	// Sync 的"未变化缺向量补齐"路径重试。
 	const embedBatchSize = 32
 	vecDim := 0
 	for i := 0; i < len(pending); i += embedBatchSize {
@@ -249,18 +266,23 @@ func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 		}
 		vecs, err := client.EmbedDocuments(context.Background(), texts)
 		if err != nil {
-			return rollback(err)
+			return err
+		}
+		vtx, err := db.sql.Begin()
+		if err != nil {
+			return err
 		}
 		for k, vec := range vecs {
 			vecDim = len(vec)
-			if _, err := tx.Exec(`INSERT OR REPLACE INTO vectors(filename,dim,blob) VALUES(?,?,?)`,
+			if _, err := vtx.Exec(`INSERT OR REPLACE INTO vectors(filename,dim,blob) VALUES(?,?,?)`,
 				pending[i+k].name, len(vec), encodeVector(vec)); err != nil {
-				return rollback(err)
+				_ = vtx.Rollback()
+				return err
 			}
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return err
+		if err := vtx.Commit(); err != nil {
+			return err
+		}
 	}
 	if !embedBlocked && client != nil && vecDim > 0 && client.ModelIdentity() != "" {
 		if err := db.SetMeta("embedding_model", client.ModelIdentity()); err != nil {
@@ -320,6 +342,29 @@ func dedupSummary(title, summary string) string {
 	}
 	return summary
 }
+
+// mdInlineEscaper 转义行内 markdown 元字符：条目元数据（标题/摘要等）里的
+// **/[]/` 不再破坏 INDEX.md 与注入文本的行结构。
+var mdInlineEscaper = strings.NewReplacer(
+	`\`, `\\`, `*`, `\*`, "[", `\[`, "]", `\]`, "`", "\\`",
+)
+
+// StripControls 删除控制字符（含换行/制表）：注入文本与 INDEX.md 按行组织
+// 结构，条目元数据里的换行可伪造结构行（假"## 分支差异"小节头、假
+// [OpenKnowledge] 系统指令行）。
+func StripControls(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// SanitizeInline 把条目元数据（标题/摘要/标签/类型）压成单行安全文本：
+// StripControls + markdown 元字符转义。正文（mandatory 全文等）是合法
+// markdown，不在此列；文件路径用 StripControls（转义会破坏可读路径）。
+func SanitizeInline(s string) string { return mdInlineEscaper.Replace(StripControls(s)) }
 
 // indexRow 是 rebuildIndex 主列表渲染用的条目视图。
 type indexRow struct {
@@ -399,14 +444,17 @@ func (db *DB) rebuildIndex(dir string, maxLines int) error {
 		shown, folded = ordered[:maxLines], ordered[maxLines:]
 	}
 	for _, r := range shown {
-		title := r.title
+		// 渲染层消毒：title/summary/tags 可被污染（CLI 可传、AI 优化直接落盘
+		// LLM 输出），去控制字符防伪造行结构、转义 markdown 元字符防破坏格式
+		title := SanitizeInline(r.title)
 		if r.draft != 0 {
 			title = "【草稿】" + title
 		}
+		typ, tags := SanitizeInline(r.typ), SanitizeInline(r.tags)
 		if sum := dedupSummary(r.title, r.summary); sum != "" {
-			fmt.Fprintf(&b, "- **%s** (%s) [%s] — %s\n", title, r.typ, r.tags, sum)
+			fmt.Fprintf(&b, "- **%s** (%s) [%s] — %s\n", title, typ, tags, SanitizeInline(sum))
 		} else {
-			fmt.Fprintf(&b, "- **%s** (%s) [%s]\n", title, r.typ, r.tags)
+			fmt.Fprintf(&b, "- **%s** (%s) [%s]\n", title, typ, tags)
 		}
 	}
 	if len(folded) > 0 {
@@ -414,10 +462,11 @@ func (db *DB) rebuildIndex(dir string, maxLines int) error {
 	}
 	if wikiEntries, err := db.WikiEntries(); err == nil && len(wikiEntries) > 0 {
 		writeWikiLine := func(b *strings.Builder, we WikiEntry) {
+			title, filename := SanitizeInline(we.Title), StripControls(we.Filename)
 			if we.Summary != "" {
-				fmt.Fprintf(b, "- [%s](%s) — %s\n", we.Title, we.Filename, we.Summary)
+				fmt.Fprintf(b, "- [%s](%s) — %s\n", title, filename, SanitizeInline(we.Summary))
 			} else {
-				fmt.Fprintf(b, "- [%s](%s)\n", we.Title, we.Filename)
+				fmt.Fprintf(b, "- [%s](%s)\n", title, filename)
 			}
 		}
 		b.WriteString("\n## Wiki 目录\n\n")
@@ -435,7 +484,10 @@ func (db *DB) rebuildIndex(dir string, maxLines int) error {
 		}
 		sort.Strings(names)
 		for _, n := range names {
-			fmt.Fprintf(&b, "\n## 分支差异（%s）\n\n", n)
+			// 小节头只去控制字符不转义：TrimIndexBranchSections 按原名比对
+			// 分支名，转义会让当前分支小节失配被裁；含全角括号的怪异分支名
+			// 生成的小节头通不过 Trim 的行格式校验，按 fail-open 保留不裁
+			fmt.Fprintf(&b, "\n## 分支差异（%s）\n\n", StripControls(n))
 			for _, we := range branches[n] {
 				writeWikiLine(&b, we)
 			}
@@ -475,7 +527,7 @@ func writeFoldedLine(b *strings.Builder, folded []indexRow) {
 	}
 	parts := make([]string, len(pairs))
 	for i, p := range pairs {
-		parts[i] = fmt.Sprintf("%s×%d", p.tag, p.n)
+		parts[i] = fmt.Sprintf("%s×%d", SanitizeInline(p.tag), p.n)
 	}
 	fmt.Fprintf(b, "- 另有 %d 条未列出（tags 分布：%s），可用关键词/向量检索命中\n", len(folded), strings.Join(parts, ", "))
 }

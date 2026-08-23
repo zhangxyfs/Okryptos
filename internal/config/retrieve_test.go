@@ -101,3 +101,33 @@ func TestEffectiveDedupTurns(t *testing.T) {
 		}
 	}
 }
+
+// TestUpsertTomlKeyBoundary 键名前缀匹配带边界判定：dedup_turns_v2 这类
+// 前缀相同的自定义键不得被误替换，upsert 应另起正确键行。
+func TestUpsertTomlKeyBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	src := "[retrieve]\ndedup_turns_v2 = 9\n"
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetRetrieveDedupTurns(path, 5); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	got := string(data)
+	if !strings.Contains(got, "dedup_turns_v2 = 9") {
+		t.Fatalf("自定义键被误替换:\n%s", got)
+	}
+	if !strings.Contains(got, "dedup_turns = 5") {
+		t.Fatalf("目标键未写入:\n%s", got)
+	}
+	// 再次设置命中真键行，不影响自定义键
+	if err := SetRetrieveDedupTurns(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	got = string(data)
+	if !strings.Contains(got, "dedup_turns_v2 = 9") || !strings.Contains(got, "dedup_turns = 0") || strings.Count(got, "dedup_turns = ") != 1 {
+		t.Fatalf("二次 upsert 异常:\n%s", got)
+	}
+}

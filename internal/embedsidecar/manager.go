@@ -171,8 +171,9 @@ func (m *Manager) Stop() {
 
 func (m *Manager) stopLocked() {
 	if m.cmd != nil && m.cmd.Process != nil {
+		// 只 Kill 不 Wait：回收由 Ensure 的看护 goroutine 独占（它同时负责写退出
+		// 日志、关闭日志文件），此处再 Wait 会与之竞态，误报 "no child processes"。
 		_ = m.cmd.Process.Kill()
-		_, _ = m.cmd.Process.Wait()
 		m.cmd = nil
 	} else if st := LoadState(); st != nil {
 		// 跨进程残留（daemon 重启后 m.cmd 为空）：按 PID 杀。仅当端口仍在正常

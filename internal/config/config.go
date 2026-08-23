@@ -346,6 +346,7 @@ func LoadMerged(projectPath, globalPath string) (Config, error) {
 // 块（0 个或多个连续表数组块）整体删除，在首个块原位按 rules 重写；无区块时在
 // 文件末尾追加；空数组 = 删除全部 [[enforce]] 块。其余内容（含注释）原样保留。
 // 算法与 SetGate/SetCapture 同款（行级小节写入），差别仅在多块定位与重写。
+// 读-改-写包在 fsx.WithFileLock 内（原因同 SetCapture）。
 func SetEnforceRules(path string, rules []EnforceRule) error {
 	var sb strings.Builder
 	for _, r := range rules {
@@ -365,6 +366,12 @@ func SetEnforceRules(path string, rules []EnforceRule) error {
 		sb.WriteString("\n")
 	}
 	block := sb.String()
+	return fsx.WithFileLock(path, func() error {
+		return setEnforceRulesLocked(path, block)
+	})
+}
+
+func setEnforceRulesLocked(path, block string) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return fsx.WriteFile(path, []byte(block), 0o644)

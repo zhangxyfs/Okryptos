@@ -77,6 +77,26 @@ func TestChatAnthropic(t *testing.T) {
 	}
 }
 
+// TestAnthropicStripsDuplicateV1：base_url 带 /v1（带或不带尾斜杠）时先去重，
+// 不再拼出 …/v1/v1/messages（404 根因）；不带 /v1 时不受影响。
+func TestAnthropicStripsDuplicateV1(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Errorf("path = %q, want /v1/messages", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]string{{"text": "p"}},
+		})
+	}))
+	defer srv.Close()
+	for _, suffix := range []string{"/v1", "/v1/", "", "/"} {
+		c := New(config.LLMProfile{Kind: "anthropic", BaseURL: srv.URL + suffix, Model: "m", APIKey: "k"}, 0)
+		if _, err := c.Chat(context.Background(), "s", "u", 10); err != nil {
+			t.Fatalf("base %q: %v", suffix, err)
+		}
+	}
+}
+
 func TestChatHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(401)

@@ -151,7 +151,7 @@ func TestQoderIdeInstallHooks(t *testing.T) {
 			"Stop":             lingmaCommand(qoderIdeTestExe(), "stop"),
 		}
 	}
-	wantMatcher := map[string]string{"UserPromptSubmit": "*", "PostToolUse": "Write|Edit", "Stop": "*"}
+	wantMatcher := map[string]string{"UserPromptSubmit": "*", "PostToolUse": "Write|Edit|create_file|search_replace", "Stop": "*"}
 	wantTimeout := float64(HookTimeoutSec())
 	for ev, cmd := range wantCmd {
 		groups, _ := events[ev].([]any)

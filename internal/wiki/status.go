@@ -1,11 +1,17 @@
 package wiki
 
 import (
+	"context"
 	"os/exec"
 	"strings"
+	"time"
 
 	"openknowledge/internal/procx"
 )
+
+// gitTimeout 单次 git 子进程上限：网络盘/凭据提示下 git 可挂起，
+// 状态检测在注入链上，不能被它拖满宿主超时（全链其余 spawn 点均已有超时）。
+const gitTimeout = 5 * time.Second
 
 // CurrentBranch 返回 srcDir 当前分支名；detach 为 "DETACHED@<short>"；
 // 非 git 仓库或命令失败返回 ""（fail-open）。
@@ -21,7 +27,9 @@ func CurrentBranch(srcDir string) string {
 }
 
 func gitOut(srcDir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", srcDir}, args...)...)
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", srcDir}, args...)...)
 	procx.HideWindow(cmd)
 	b, err := cmd.Output()
 	if err != nil {
@@ -45,7 +53,9 @@ func commitExists(srcDir, commit string) bool {
 
 // isAncestor 报告 a 是否是 b 的祖先（a 可达 b）。
 func isAncestor(srcDir, a, b string) bool {
-	cmd := exec.Command("git", "-C", srcDir, "merge-base", "--is-ancestor", a, b)
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", srcDir, "merge-base", "--is-ancestor", a, b)
 	procx.HideWindow(cmd)
 	return cmd.Run() == nil
 }

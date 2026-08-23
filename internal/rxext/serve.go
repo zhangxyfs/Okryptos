@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"openknowledge/internal/agentx"
+	"openknowledge/internal/daemonx"
 	"openknowledge/internal/hook"
 	"openknowledge/internal/project"
 	extension "openknowledge/internal/rxext/sdk"
@@ -141,6 +142,9 @@ func buildInputReplacement(original string, parts []string) (*extension.Intercep
 }
 
 // selfHealHooks 逐 agent 自检 hooks/插件集成（如 ok.exe 迁移后重写登记）。fail-open。
+// sidecar 由 okd 拉起时 os.Executable 可能是 okd.exe，必须经 CliTargetFor 换算成
+// CLI 入口，否则会把各 agent hooks 改写成指向 okd（无子命令的失效命令）；换算失败
+// 放弃本次自愈。
 func selfHealHooks() {
 	exe, err := os.Executable()
 	if err != nil {
@@ -148,6 +152,9 @@ func selfHealHooks() {
 	}
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
+	}
+	if exe, err = daemonx.CliTargetFor(exe); err != nil {
+		return
 	}
 	for _, a := range agentx.Detected() {
 		_ = a.EnsureHooks(exe)

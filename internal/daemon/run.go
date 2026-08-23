@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"openknowledge/internal/daemonx"
@@ -77,6 +79,14 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 		<-gh.Done()
 		_ = srv.Shutdown(context.Background())
 	}()
+	// 前台 Ctrl+C / SIGTERM：转优雅 Shutdown 而不是被信号直接杀死——否则 defer
+	// （daemon.json 清理、sidecar 回收、托盘图标删除）全部被跳过。
+	sigCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	go func() {
+		<-sigCtx.Done()
+		_ = srv.Shutdown(context.Background())
+	}()
 	// 自省：daemon.json 丢失或易主（并发 spawn 败者/版本切换残留）→ 自动退出，保证全局唯一
 	go func() {
 		ticker := time.NewTicker(selfCheckInterval)
@@ -110,7 +120,9 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 				}
 			}()
 			tray.Run(trayCtx, version.Version,
-				func() uintptr { return OpenBrowserFunc(info.URL() + "/?token=" + info.Token) },
+				// token 走 fragment（#token=）而不是 ?token=：fragment 不随请求发出、
+				// 不进 Referer/访问日志，由 index.html 的 inline script 读入
+				func() uintptr { return OpenBrowserFunc(info.URL() + "/#token=" + info.Token) },
 				func() { go func() { _ = srv.Shutdown(context.Background()) }() })
 		}()
 	}
@@ -148,14 +160,14 @@ func Stop(stdout, _ io.Writer) int {
 // OpenGUI 确保 daemon 在线（含版本切换）后打开浏览器并立即返回。
 func OpenGUI(_, stderr io.Writer) int {
 	if info, ok := EnsureCurrent(); ok {
-		OpenBrowserFunc(info.URL() + "/?token=" + info.Token)
+		OpenBrowserFunc(info.URL() + "/#token=" + info.Token)
 		return 0
 	}
 	// daemon 正在后台拉起：轮询就绪（最长 3s）
 	for i := 0; i < 30; i++ {
 		time.Sleep(100 * time.Millisecond)
 		if info, err := daemonx.Load(); err == nil && info.Healthy(quickClient()) {
-			OpenBrowserFunc(info.URL() + "/?token=" + info.Token)
+			OpenBrowserFunc(info.URL() + "/#token=" + info.Token)
 			return 0
 		}
 	}

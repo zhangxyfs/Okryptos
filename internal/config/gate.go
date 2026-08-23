@@ -14,6 +14,7 @@ import (
 // 算法与 SetCapture 同款；子表头的匹配串是 "[retrieve.gate]"，边界判定
 // （下一个 [ 开头行）无需改动——[retrieve.gate] 之后的任何小节头（含
 // [retrieve.xxx] / [[enforce]]）都以 [ 开头，都会被正确识别为边界。
+// 读-改-写包在 fsx.WithFileLock 内（原因同 SetCapture）。
 func SetGate(path string, enabled bool, extra []string) error {
 	var sb strings.Builder
 	sb.WriteString("[retrieve.gate]\nenabled = ")
@@ -27,40 +28,42 @@ func SetGate(path string, enabled bool, extra []string) error {
 	}
 	sb.WriteString("]\n")
 	block := sb.String()
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return fsx.WriteFile(path, []byte(block), 0o644)
-	}
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(string(data), "\n")
-	start, end := -1, len(lines)
-	for i, l := range lines {
-		t := strings.TrimSpace(l)
-		if start < 0 {
-			if t == "[retrieve.gate]" {
-				start = i
+	return fsx.WithFileLock(path, func() error {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return fsx.WriteFile(path, []byte(block), 0o644)
+		}
+		if err != nil {
+			return err
+		}
+		lines := strings.Split(string(data), "\n")
+		start, end := -1, len(lines)
+		for i, l := range lines {
+			t := strings.TrimSpace(l)
+			if start < 0 {
+				if t == "[retrieve.gate]" {
+					start = i
+				}
+				continue
 			}
-			continue
+			if strings.HasPrefix(t, "[") {
+				end = i
+				break
+			}
 		}
-		if strings.HasPrefix(t, "[") {
-			end = i
-			break
+		var out []string
+		if start >= 0 {
+			out = append(out, lines[:start]...)
+			out = append(out, strings.TrimSuffix(block, "\n"))
+			out = append(out, lines[end:]...)
+		} else {
+			out = append(out, lines...)
+			// 与上文保持空行分隔
+			if n := len(out); n > 0 && strings.TrimSpace(out[n-1]) != "" {
+				out = append(out, "")
+			}
+			out = append(out, strings.TrimSuffix(block, "\n"))
 		}
-	}
-	var out []string
-	if start >= 0 {
-		out = append(out, lines[:start]...)
-		out = append(out, strings.TrimSuffix(block, "\n"))
-		out = append(out, lines[end:]...)
-	} else {
-		out = append(out, lines...)
-		// 与上文保持空行分隔
-		if n := len(out); n > 0 && strings.TrimSpace(out[n-1]) != "" {
-			out = append(out, "")
-		}
-		out = append(out, strings.TrimSuffix(block, "\n"))
-	}
-	return fsx.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+		return fsx.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+	})
 }

@@ -30,7 +30,9 @@ func OpenBrowser(url string) uintptr {
 			return maximizeWindowByTitle("OkManager", 10*time.Second)
 		}
 	}
-	fallback := exec.Command("cmd", "/c", "start", url)
+	// 兜底经 explorer.exe 起默认浏览器：URL 作为参数直传，不经 cmd 解析——
+	// cmd /c start 对 & ^ | % , ; = 等元字符的防御不完整，不如绕开 cmd。
+	fallback := exec.Command("explorer.exe", url)
 	procx.HideWindow(fallback)
 	_ = fallback.Run()
 	return maximizeWindowByTitle("OkManager", 10*time.Second)

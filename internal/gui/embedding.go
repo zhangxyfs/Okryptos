@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -217,7 +218,9 @@ func (h *Handler) apiEmbeddingDelete(w http.ResponseWriter, r *http.Request) {
 
 // apiEmbeddingTest：按表单当前内容做连通性/就绪检查（不要求先保存）。
 // api_key 留空且存在同名已保存 profile 时回退用其 ResolvedAPIKey()
-//（"留空=用已保存"语义，与保存一致）；builtin 分支照旧忽略 base_url/key。
+//（"留空=用已保存"语义，与保存一致）——此时 base_url 显式给出则必须与已存值
+// 一致（改了地址还把真实 key 发过去等于密钥外传，改 URL 必须显式重填 key），
+// 留空则跟随已存地址；builtin 分支照旧忽略 base_url/key。
 func (h *Handler) apiEmbeddingTest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name    string `json:"name"`
@@ -234,6 +237,12 @@ func (h *Handler) apiEmbeddingTest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "名称不能为空")
 		return
 	}
+	// 显式给了 base_url 才校验 scheme；留空（name-only 复测）由 ClientForProfile
+	// 判 nil 报错，本就发不出请求，无泄露面。
+	if req.Type != "builtin" && req.BaseURL != "" && !httpBaseURLOK(req.BaseURL) {
+		writeErr(w, http.StatusBadRequest, "base_url 必须是 http/https URL")
+		return
+	}
 	p := config.EmbeddingProfile{
 		Name: req.Name, Type: req.Type, BaseURL: req.BaseURL,
 		Model: req.Model, APIKey: req.APIKey, Mirror: req.Mirror,
@@ -246,7 +255,18 @@ func (h *Handler) apiEmbeddingTest(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, saved := range cfg.Embedding.Profiles {
 			if saved.Name == p.Name {
-				p.APIKey = saved.ResolvedAPIKey()
+				if key := saved.ResolvedAPIKey(); key != "" {
+					// 请求显式改地址时不得带出已存真实 key（密钥外传）；
+					// 留空则跟随已存地址，等价于复测已存 profile。
+					if p.BaseURL != "" && saved.BaseURL != p.BaseURL {
+						writeErr(w, http.StatusBadRequest, "base_url 与已存配置不一致：改用新地址须同时重填 api_key")
+						return
+					}
+					if p.BaseURL == "" {
+						p.BaseURL = saved.BaseURL
+					}
+					p.APIKey = key
+				}
 				break
 			}
 		}
@@ -403,10 +423,16 @@ func (h *Handler) apiEmbeddingOpenModelsDir(w http.ResponseWriter, r *http.Reque
 }
 
 // apiOllamaModels：代理探测 Ollama 已安装模型（前端跨域受限，经后端转发）。
+// 目标限制为本机回环 http(s)——该端点会 GET 目标并回读响应，放任任意地址
+// 即成内网/云元数据（169.254.169.254）探测口。
 func (h *Handler) apiOllamaModels(w http.ResponseWriter, r *http.Request) {
 	base := r.URL.Query().Get("base_url")
 	if base == "" {
 		base = "http://localhost:11434"
+	} else if u, err := url.Parse(strings.TrimSpace(base)); err != nil ||
+		(u.Scheme != "http" && u.Scheme != "https") || !loopbackHostname(u.Hostname()) {
+		writeErr(w, http.StatusBadRequest, "base_url 仅允许本机回环地址")
+		return
 	}
 	models, err := setupx.ListOllamaModels(base)
 	if err != nil {
@@ -414,4 +440,13 @@ func (h *Handler) apiOllamaModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+}
+
+// loopbackHostname 判定主机名是否本机回环（与 browser.go safeAppURL 同一判定集）。
+func loopbackHostname(host string) bool {
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }

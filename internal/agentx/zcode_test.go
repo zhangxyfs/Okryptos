@@ -265,6 +265,53 @@ func TestZcodeEnsureHooks(t *testing.T) {
 	}
 }
 
+func TestZcodeHooksEnabledGate(t *testing.T) {
+	setupZcode(t)
+	exe := currentExe(t)
+	a := zcodeAgent{}
+	if err := a.InstallHooks(exe); err != nil {
+		t.Fatal(err)
+	}
+	// 用户显式关闭总开关 → HooksInstalled 为假（与 qoder hooksConfig.enabled 对称）
+	cfgPath := zcodeConfigPath()
+	cfg := readZcodeConfig(t)
+	cfg["hooks"].(map[string]any)["enabled"] = false
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if a.HooksInstalled() {
+		t.Fatal("hooks.enabled=false 时 HooksInstalled 应为假")
+	}
+	// 过期 ok hook（旧 exe）+ enabled=false → 自愈重写 hook 内容但不翻回开关
+	if err := a.InstallHooks(`D:\old\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	cfg = readZcodeConfig(t)
+	cfg["hooks"].(map[string]any)["enabled"] = false
+	data, _ = json.MarshalIndent(cfg, "", "  ")
+	if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnsureHooks(exe); err != nil {
+		t.Fatal(err)
+	}
+	cfg = readZcodeConfig(t)
+	if enabled, _ := cfg["hooks"].(map[string]any)["enabled"].(bool); enabled {
+		t.Fatal("自愈重写不应把显式关闭的 hooks.enabled 翻回 true")
+	}
+	if n := countOKHooks(t, cfg, "Stop"); n != 1 {
+		t.Fatalf("自愈后 Stop 应有 1 条当前形态的 ok hook, got %d", n)
+	}
+	events := zcodeEventsOf(cfg)
+	if !zcodeHooksCurrent(events, exe) {
+		t.Fatal("自愈后 hook 内容应为当前形态")
+	}
+	if a.HooksInstalled() {
+		t.Fatal("enabled 保持 false，HooksInstalled 仍应为假")
+	}
+}
+
 func TestZcodeSkillsDir(t *testing.T) {
 	home := setupZcode(t)
 	if got := (zcodeAgent{}).SkillsDir(); got != filepath.Join(home, "skills") {

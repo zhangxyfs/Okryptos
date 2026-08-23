@@ -9,4 +9,9 @@ go build -ldflags "-s -w -H windowsgui -X openknowledge/internal/version.Version
 rm -rf dist/web dist/changelogs
 cp -r web dist/web
 cp -r docs/changelogs dist/changelogs
+# iss 无条件打包 dist\runtime；本脚本不下载 runtime，缺失时明确报错指路，而非让 ISCC 编译失败
+if [ ! -f dist/runtime/llama-server.exe ]; then
+  echo "错误：dist/runtime 缺 llama-server.exe——先跑 python scripts/build.py 下载 llama runtime（或设 LLAMA_CPP_BASE_URL 镜像）" >&2
+  exit 1
+fi
 echo "dist/ built: ok.exe + okd.exe + OkManager.exe + web/ + changelogs/"

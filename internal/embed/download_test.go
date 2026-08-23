@@ -40,6 +40,19 @@ func testModel(content []byte) BuiltinModel {
 	return BuiltinModel{ID: "t-model", Repo: "r/p", File: "m.gguf", Size: int64(len(content)), SHA256: fmt.Sprintf("%x", sum), Dim: 8}
 }
 
+// TestDefaultClientHeaderTimeout：默认下载客户端不设整体超时（大模型下载耗时不定），
+// 但必须有响应头超时兜底，连接挂起不再只能 Ctrl+C。
+func TestDefaultClientHeaderTimeout(t *testing.T) {
+	hc := defaultClient()
+	if hc.Timeout != 0 {
+		t.Fatalf("不应设整体 Timeout: %v", hc.Timeout)
+	}
+	tr, ok := hc.Transport.(*http.Transport)
+	if !ok || tr.ResponseHeaderTimeout <= 0 {
+		t.Fatalf("应有 ResponseHeaderTimeout: %+v", hc.Transport)
+	}
+}
+
 func TestDownloadFull(t *testing.T) {
 	content := []byte(strings.Repeat("abc123", 1000))
 	srv := fakeModelServer(content, new(bool))
