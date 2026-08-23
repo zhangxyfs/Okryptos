@@ -383,7 +383,7 @@ func CheckStop(pc *project.Context, sessionID string) (reason string, blockedRul
 		if pc.Config.Capture.Mode == "auto" && len(st.Touched) > 0 &&
 			st.StopCount-st.LastExtractReminder >= interval {
 			st.LastExtractReminder = st.StopCount
-			reason = "本会话修改过文件。请回顾是否有值得记录的经验（非显而易见的坑或解法），有则立即运行 ok propose 记录草稿条目；没有则继续。"
+			reason = "本会话修改过文件。请回顾是否有值得记录的经验（非显而易见的坑或解法；琐碎任务不要沉淀：闲聊、一次性问答、例行操作），有则立即运行 ok propose 记录草稿条目；没有则继续。"
 			blockedRule = ""
 			return
 		}

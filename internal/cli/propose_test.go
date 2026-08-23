@@ -154,11 +154,11 @@ func TestApproveFlipsDraft(t *testing.T) {
 func TestCapturePrintAndSet(t *testing.T) {
 	_, kb := setupProject(t)
 	var out, errBuf bytes.Buffer
-	// 无参打印当前模式（默认 propose / turn_interval 5）
+	// 无参打印当前模式（默认 propose / turn_interval 3）
 	if code := CaptureCmd(nil, &out, &errBuf); code != 0 {
 		t.Fatalf("capture code=%d err=%q", code, errBuf.String())
 	}
-	if !strings.Contains(out.String(), "propose") || !strings.Contains(out.String(), "5") {
+	if !strings.Contains(out.String(), "propose") || !strings.Contains(out.String(), "3") {
 		t.Fatalf("default capture print wrong: %q", out.String())
 	}
 	// 非法模式 → 失败

@@ -965,7 +965,7 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | 参数 | 说明 |
 |------|------|
 | `capture.mode` | 经验沉淀模式：`propose`（默认，AI 主动提议草稿人批准）或 `auto`（Stop hook 周期阻断强制自省）；`ok capture <mode>`（写项目层）或 GUI 设置页沉淀卡（写全局层） |
-| `capture.turn_interval` | auto 模式的自省间隔（Stop 次数，默认 5）；GUI 设置页沉淀卡（写全局层）或手改 |
+| `capture.turn_interval` | auto 模式的自省间隔（Stop 次数，默认 3）；GUI 设置页沉淀卡（写全局层）或手改 |
 | `provenance.auto_born` | 新建条目自动记录 born 分支溯源标签（默认 true）；手改配置文件（新配置中心未暴露该键） |
 | `wiki.stale_commits` | wiki 落后多少 commit 触发 prompt 提示（默认 20，0 = 关闭；游标失效 gone/归属存疑 legacy_orphan 提示不受此阈值门控） |
 | `[[enforce]].type` | 规则类型，v1 仅 `changelog_required` |

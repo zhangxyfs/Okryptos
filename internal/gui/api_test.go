@@ -992,7 +992,7 @@ func TestCaptureRoundTrip(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	// 默认 GET：propose / turn_interval 5
+	// 默认 GET：propose / turn_interval 3
 	code, data := do(t, "GET", srv.URL+"/api/capture?project=demo", testToken, nil)
 	if code != 200 {
 		t.Fatalf("capture get: status = %d, body %s", code, data)
@@ -1004,7 +1004,7 @@ func TestCaptureRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &cap1); err != nil {
 		t.Fatal(err)
 	}
-	if cap1.Mode != "propose" || cap1.TurnInterval != 5 {
+	if cap1.Mode != "propose" || cap1.TurnInterval != 3 {
 		t.Fatalf("unexpected defaults: %s", data)
 	}
 
@@ -1084,7 +1084,7 @@ func TestCaptureGlobalDefault(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("global capture get: status = %d, body %s", code, data)
 	}
-	if !strings.Contains(string(data), `"mode":"propose"`) || !strings.Contains(string(data), `"turn_interval":5`) {
+	if !strings.Contains(string(data), `"mode":"propose"`) || !strings.Contains(string(data), `"turn_interval":3`) {
 		t.Fatalf("global defaults: %s", data)
 	}
 

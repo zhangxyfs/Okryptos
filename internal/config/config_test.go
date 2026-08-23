@@ -172,7 +172,7 @@ func TestActiveProfileAndIdentity(t *testing.T) {
 
 func TestCaptureDefaults(t *testing.T) {
 	cfg := Default()
-	if cfg.Capture.Mode != "propose" || cfg.Capture.TurnInterval != 5 {
+	if cfg.Capture.Mode != "propose" || cfg.Capture.TurnInterval != 3 {
 		t.Fatalf("capture defaults %+v", cfg.Capture)
 	}
 }

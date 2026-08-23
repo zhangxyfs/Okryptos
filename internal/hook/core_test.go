@@ -682,3 +682,23 @@ func TestAdoptionDuringCooldownOverwrite(t *testing.T) {
 		t.Fatalf("冷却中条目（注入台账已被覆写）的读取应记采纳: %+v", st.AdoptedKnowledge)
 	}
 }
+
+// TestCheckStopReminderTriviaGate auto 自省提醒须带琐碎任务反例
+// （TencentDB/Acontext 调研：琐碎门控给显式反例，减少低质量草稿）。
+func TestCheckStopReminderTriviaGate(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "条目.md", "---\ntitle: 测试条目\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n正文。\n")
+	writeCaptureConfig(t, kbRoot, "auto", 1)
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	TrackTouched(pc, "s-trivia", "write", filepath.Join(projDir, "a.go"))
+	reason, _ := CheckStop(pc, "s-trivia")
+	if reason == "" {
+		t.Fatal("auto 模式有文件修改且满间隔应提醒")
+	}
+	if !strings.Contains(reason, "琐碎") {
+		t.Errorf("自省提醒应含琐碎任务反例，got: %q", reason)
+	}
+}

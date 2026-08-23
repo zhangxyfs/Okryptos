@@ -263,3 +263,18 @@ func TestConcurrentSaveEmbeddingProfile(t *testing.T) {
 		t.Fatalf("并发保存丢更新: %d/%d 个 profile", len(cfg.Embedding.Profiles), n)
 	}
 }
+
+// TestProposeSkillTemplateDiscipline 钉住 propose 技能提示词的写作纪律要素
+// （外部调研借鉴：第三人称/作用域/查重路由/琐碎门控——见
+// docs/2026-08-23-memory-systems-synthesis.md §2.1）。
+func TestProposeSkillTemplateDiscipline(t *testing.T) {
+	tpl, ok := skillTemplates["openknowledge-propose"]
+	if !ok {
+		t.Fatal("skillTemplates 缺 openknowledge-propose")
+	}
+	for _, kw := range []string{"第三人称", "作用域", "查重", "琐碎"} {
+		if !strings.Contains(tpl, kw) {
+			t.Errorf("propose 技能模板应含 %q", kw)
+		}
+	}
+}

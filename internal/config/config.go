@@ -226,7 +226,7 @@ type EnforceRule struct {
 }
 
 // Capture 是知识捕获模式配置：propose（AI 提议草稿，人批准）或
-// auto（自动捕获）；TurnInterval 为自动捕获的轮次间隔。
+// auto（自动捕获）；TurnInterval 为自动捕获的轮次间隔（默认 3）。
 type Capture struct {
 	Mode         string `toml:"mode"`
 	TurnInterval int    `toml:"turn_interval"`
@@ -277,7 +277,7 @@ func Default() Config {
 				Rule: []int{180, 730}, Pitfall: []int{90, 365}, Note: []int{60, 180}, Reference: []int{180, 730},
 			}},
 			Feedback: RetrieveFeedback{Enabled: false, WindowDays: 30, MinInjections: 4, Demote: 0.8}},
-		Capture:    Capture{Mode: "propose", TurnInterval: 5},
+		Capture:    Capture{Mode: "propose", TurnInterval: 3},
 		Wiki:       Wiki{StaleCommits: 20},
 		Hooks:      Hooks{TimeoutSec: 10},
 		Provenance: Provenance{AutoBorn: true},
