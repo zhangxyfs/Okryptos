@@ -1230,3 +1230,49 @@ summary: s
 		t.Fatalf("--force 未更新正文: %q", e.Body)
 	}
 }
+
+func TestProposeShowsSimilarEntries(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi"))
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
+	t.Setenv("OK_DSH_HOME", filepath.Join(t.TempDir(), "nonexistent-dsh"))
+	t.Setenv("OK_OPENCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-opencode"))
+	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
+	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
+	t.Setenv("OK_CODEX_HOME", filepath.Join(t.TempDir(), "nonexistent-codex"))
+	t.Setenv("OK_QODER_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder"))
+	t.Setenv("OK_QODER_IDE_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder-ide"))
+	if err := os.MkdirAll(filepath.Join(home, "kimi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENAI_API_KEY", "")
+	proj := filepath.Join(home, "demo")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, proj)
+	var out, errBuf bytes.Buffer
+	if code := Init([]string{"demo"}, &out, &errBuf); code != 0 {
+		t.Fatalf("init code=%d err=%q", code, errBuf.String())
+	}
+	// 已有同域条目（Add 不支持 --body，走 --file）
+	body := filepath.Join(proj, "body.md")
+	if err := os.WriteFile(body, []byte("使用 Conventional Commits，SimHashQuirk 唯一词。"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := Add([]string{"--title", "Git 提交规范", "--type", "note", "--file", body}, &out, &errBuf); code != 0 {
+		t.Fatalf("add code=%d err=%q", code, errBuf.String())
+	}
+	// propose 新草稿：正文与已有条目同域
+	out.Reset()
+	code := Propose([]string{"--title", "提交信息常见坑", "--type", "pitfall", "--body", "Conventional Commits 的 SimHashQuirk 坑。"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("propose code=%d err=%q", code, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "疑似同域条目") || !strings.Contains(out.String(), "Git 提交规范") {
+		t.Errorf("propose 应提示疑似同域条目，got: %q", out.String())
+	}
+}

@@ -745,6 +745,18 @@ func Propose(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	fmt.Fprintln(stdout, "INDEX 已更新（草稿不参与检索与向量）")
+	// 同域候选提示（TencentDB A6 形式）：给新草稿召回 top-N 同域条目展示给
+	// 审批者，不做自动合并裁决——人审闸门不变。纯关键词检索（nil 向量，
+	// 不调 embedding）；分支未知传空串（分支过滤恒等）；失败仅警告不影响主流程。
+	cands, _, qerr := db.QueryExBranch(retrieve.Terms(*title+" "+sum), nil, pc.Config.Retrieve, "", nil)
+	if qerr != nil {
+		fmt.Fprintln(stderr, qerr)
+	} else if len(cands) > 0 {
+		fmt.Fprintln(stdout, "疑似同域条目（内容重叠时请考虑更新已有条目，而非平行新建）:")
+		for _, c := range cands {
+			fmt.Fprintf(stdout, "  - %s（%s）\n", c.Title, c.Filename)
+		}
+	}
 	return 0
 }
 
