@@ -176,8 +176,17 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 			// 一行属自限性提示：用户删掉配置即消失。GUI 日志页可按"fusion"过滤。
 			logErr("prompt fusion: rrf 模式下 alpha/beta 配置被忽略（仅 weighted 生效），建议从 config.toml 移除")
 		}
+		// 检索词净化：剥离 prompt 里回传的已知注入块（自身注入防自污染），
+		// 门控判定用原文（确认短语匹配不受净化影响）；剥空则回退原文。
+		queryPrompt := retrieve.CleanQuery(promptText)
+		if strings.TrimSpace(queryPrompt) == "" {
+			queryPrompt = promptText
+		}
+		if queryPrompt != promptText {
+			logErr("prompt clean: 已剥离回传注入块后检索")
+		}
 		if client != nil {
-			if vec, err := client.EmbedQuery(context.Background(), promptText); err != nil {
+			if vec, err := client.EmbedQuery(context.Background(), queryPrompt); err != nil {
 				logErr("prompt embed: %v", err)
 			} else {
 				queryVec, embedWarn = embedx.QueryVec(db, client, vec)
@@ -188,7 +197,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		}
 		// top_n 截断在分支过滤之后（QueryExBranch 内部保证），其他分支的差异条目
 		// 不再白白挤占名额；无 branch 标签的条目与未知分支场景不受影响。
-		h, info, err := db.QueryExBranch(retrieve.Terms(promptText), queryVec, pc.Config.Retrieve, ws.Branch, coolingSet)
+		h, info, err := db.QueryExBranch(retrieve.Terms(queryPrompt), queryVec, pc.Config.Retrieve, ws.Branch, coolingSet)
 		if err != nil {
 			logErr("prompt query: %v", err)
 		}

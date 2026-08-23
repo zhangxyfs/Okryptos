@@ -738,4 +738,36 @@ func TestInjectHitsBlockLast(t *testing.T) {
 	if hitsIdx < nudgeIdx {
 		t.Errorf("检索命中块应沉底（在 nudge 之后），got: %q", out)
 	}
+	// 评审移交加强项：直接断言检索块为末段（原断言只覆盖相对 nudge 的顺序）
+	if rest := out[hitsIdx:]; strings.Contains(rest, "\n## ") {
+		t.Errorf("检索命中块之后不应再有其他段，got: %q", out)
+	}
+}
+
+// TestInjectQueryPurified 回传的注入块不参与检索：干扰词只出现在回传的
+// 检索块里时，不得把干扰条目检索回来（防自污染，TencentDB 实测命中率可归零）。
+func TestInjectQueryPurified(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "干扰.md", "---\ntitle: 干扰条目\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\nDistractionQuirk 唯一词。\n")
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\nRetrievalQuirk 唯一词。\n")
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ndedup_turns = 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := "RetrievalQuirk 是什么\n\n## 相关知识（需要全文时读取对应文件）\n\n- **干扰条目** (note) — DistractionQuirk 摘要（/kb/干扰.md）\n"
+	out := InjectForPrompt(pc, "s-clean", projDir, prompt)
+	i := strings.Index(out, "## 相关知识")
+	if i < 0 {
+		t.Fatalf("应有检索命中块，got: %q", out)
+	}
+	hits := out[i:]
+	if strings.Contains(hits, "干扰条目") {
+		t.Errorf("回传注入块里的干扰词不应检索回干扰条目，got: %q", hits)
+	}
+	if !strings.Contains(hits, "检索经验") {
+		t.Errorf("真实查询词应命中检索经验，got: %q", hits)
+	}
 }
