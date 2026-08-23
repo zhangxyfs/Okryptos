@@ -1,0 +1,1401 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE · 管理页：草稿徽标修复 + 搜索命令 + 终端面板</title>
+<!--
+  PROTOTYPE — 可抛弃（throwaway，评审后弃用，不进生产）
+  计划：单文件复刻 GUI 管理页，演示五项需求（草稿徽标高对比 / 搜索框命令+下拉提示 / 终端面板 / 顶栏界面设置+栏目布局 / 树类目分组），
+        提供三个布局变体 A 三栏 / B 右区 Tab / C 底部抽屉，
+        用 URL 参数 ?variant=A|B|C 切换（默认 A），底部浮动条或 ← → 方向键循环切换。
+  需求文档：docs/2026-08-23-manage-search-terminal-requirements.md
+  数据：全部 mock 写死于本文件；零依赖、零构建、无持久化（内存态，刷新即重置）。
+-->
+<style>
+  :root {
+    --bg:#f5f6f8; --fg:#1f2329; --muted:#6b7280; --border:#d9dce1;
+    --card:#ffffff; --primary:#2563eb; --sel-bg:#eff6ff; --sel-fg:#1d4ed8;
+    --hover:#f3f4f6; --code-bg:#f1f5f9; --pre-bg:#14171f; --pre-fg:#d6dae4;
+    --born-bg:#4E5D73; --born-fg:#fff;
+    --pitfall-bg:#fee2e2; --pitfall-fg:#b91c1c;
+    --note-bg:#dbeafe; --note-fg:#1d4ed8;
+    --rule-bg:#ede9fe; --rule-fg:#6d28d9;
+    --ref-bg:#e0e7ff; --ref-fg:#3730a3;
+    --mand-bg:#fef3c7; --mand-fg:#92400e;
+    --tag-bg:#eef2f7; --tag-fg:#475569;
+    --ok:#16a34a; --ok-bg:#dcfce7;
+    /* 需求 1：草稿徽标实底高对比（琥珀警示色，与类型徽标蓝/绿/紫拉开） */
+    --draft-bg:#fef3c7; --draft-fg:#92400e; --draft-bd:#f59e0b;
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--fg); }
+  button { font:inherit; color:inherit; }
+
+  .proto-banner { position:fixed; top:10px; right:150px; z-index:99;
+                  background:#fff7ed; border:1px solid #fdba74; color:#9a3412;
+                  padding:3px 10px; border-radius:6px; font-size:12px; }
+
+  /* ---------- 顶栏 / 侧栏（仅装饰，还原 GUI 观感） ---------- */
+  .topbar { display:flex; align-items:center; gap:10px; height:52px; padding:0 14px;
+            background:var(--card); border-bottom:1px solid var(--border); }
+  .brand { font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px; }
+  .brand .logo { width:22px; height:22px; border-radius:6px; background:var(--primary); color:#fff;
+                 display:flex; align-items:center; justify-content:center; font-size:12px; }
+  .main { display:flex; height:calc(100vh - 52px); }
+  .side { width:52px; background:var(--card); border-right:1px solid var(--border);
+          padding:10px 4px; display:flex; flex-direction:column; gap:2px; flex:none; }
+  .mi { display:flex; align-items:center; justify-content:center; padding:9px 0; border:none;
+        background:none; border-radius:6px; color:var(--muted); cursor:pointer; width:100%; }
+  .mi:hover { background:var(--hover); color:var(--fg); }
+  .mi.active { background:var(--sel-bg); color:var(--sel-fg); }
+
+  /* ---------- 左树 ---------- */
+  .tree { width:280px; background:var(--card); border-right:1px solid var(--border);
+          display:flex; flex-direction:column; flex:none; min-height:0; }
+  .tree-head { padding:10px 10px 6px; display:flex; gap:6px; align-items:center; }
+  .tree-head .caption { font-size:12px; font-weight:600; color:var(--muted); margin-right:auto; }
+  .search-wrap { position:relative; margin:0 10px 6px; }
+  .search { margin:0; padding:5px 10px; border:1px solid var(--border); border-radius:6px;
+            width:100%; background:var(--bg); color:var(--fg); font-size:12.5px; }
+  .search::placeholder { color:var(--muted); }
+  /* 需求 2：命令下拉提示（GUI 自有浮层卡片样式：白底/边框/阴影/行高亮） */
+  .dd { display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:60;
+        background:var(--card); border:1px solid var(--border); border-radius:8px;
+        box-shadow:0 8px 24px rgba(15,23,42,.12); padding:4px; max-height:220px; overflow-y:auto; }
+  .dd-row { display:block; padding:5px 9px; border-radius:6px; cursor:pointer; font-size:12.5px;
+            white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dd-row.on { background:var(--sel-bg); text-overflow:clip; }
+  .dd-name { font-family:Consolas,monospace; font-weight:600; margin-right:8px; }
+  .dd-row.on .dd-name { color:var(--sel-fg); }
+  .dd-usage { font-family:Consolas,monospace; color:var(--muted); font-size:12px; margin-right:8px; }
+  .dd-desc { color:var(--muted); font-size:12px; }
+  /* 终端下拉：相对 .term 面板绝对定位，bottom 贴输入框上边缘、max-height 不超面板可用高度
+     （均由 JS 实测设置），高度随内容自适应，项少不留空白 */
+  .term { position:relative; }
+  .term-dd { top:auto; left:12px; right:12px; }
+  /* 高亮项横向走马灯（单向循环式）：内容复制一份拼接进 .dd-track，
+     translateX(0 → -(内容宽+间隔)) linear infinite，循环点视觉无缝；
+     只动 transform 不改布局；--shift/--dur 由 JS 按实测宽度与固定速度设置，无溢出不启用 */
+  .dd-row.on .dd-track { display:inline-block; white-space:nowrap; will-change:transform;
+                         animation:dd-marq var(--dur,2s) linear infinite; }
+  .dd-track .dd-inner { display:inline-block; }
+  .dd-track .dd-clone { margin-left:48px; }   /* 两份内容间隔，计入循环宽度 */
+  @keyframes dd-marq {
+    from { transform:translateX(0); }
+    to   { transform:translateX(calc(-1 * var(--shift,0px))); }
+  }
+  /* 需求 2：过滤条件摘要条 / 错误提示 / 命令帮助 */
+  .fbar { margin:0 10px 8px; font-size:12px; border-radius:6px; padding:5px 9px;
+          display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .fbar:empty { display:none; }
+  .fbar.info { background:var(--sel-bg); color:var(--sel-fg); }
+  .fbar.err  { background:var(--pitfall-bg); color:var(--pitfall-fg); }
+  .fbar .clear { margin-left:auto; border:1px solid currentColor; background:none; border-radius:4px;
+                 font-size:11px; padding:0 8px; cursor:pointer; color:inherit; }
+  .fbar code { background:rgba(255,255,255,.5); border-radius:3px; padding:0 4px; }
+  .tree-scroll { overflow-y:auto; flex:1; padding:0 6px 10px; }
+  .tree-empty { color:var(--muted); font-size:12.5px; text-align:center; padding:24px 8px; }
+  .tn-proj { display:flex; align-items:center; gap:5px; width:100%; border:none; background:none;
+             padding:5px 8px; border-radius:6px; cursor:pointer; font-weight:600; text-align:left; font-size:13px; }
+  .tn-proj:hover { background:var(--hover); }
+  .tn-proj .caret { width:12px; color:var(--muted); transition:transform .12s; flex:none; font-size:10px; }
+  .tn-proj.open .caret { transform:rotate(90deg); }
+  .tn-proj .cnt { margin-left:auto; color:var(--muted); font-size:11px; font-weight:400; }
+  .tn-kids { margin-left:15px; border-left:1px solid var(--border); padding-left:4px; }
+  /* 需求 5：类目子目录行（文件夹图标 + 类名 + 计数徽标，单击展开/收起、不互斥） */
+  .tn-cat { display:flex; align-items:center; gap:5px; width:100%; border:none; background:none;
+            padding:3px 8px; border-radius:6px; cursor:pointer; font-size:12.5px; text-align:left;
+            color:var(--muted); font-weight:600; }
+  .tn-cat:hover { background:var(--hover); }
+  .tn-cat .caret { width:12px; transition:transform .12s; flex:none; font-size:9px; }
+  .tn-cat.open .caret { transform:rotate(90deg); }
+  .tn-cat .cnt { margin-left:auto; font-size:11px; font-weight:400; opacity:.75; }
+  .folder-ico { flex:none; display:flex; color:var(--muted); }
+  .leaf.spec .t2 { font-weight:600; }   /* 架构总览/演进历程：目录样式特殊节点 */
+  /* 架构总览：目录+文件双重身份——箭头/图标区点击展开子章节，点名出详情 */
+  .leaf.dual { display:flex; align-items:center; gap:5px; }
+  .leaf.dual .caret { width:12px; color:var(--muted); font-size:9px; transition:transform .12s; flex:none; }
+  .leaf.dual.open .caret { transform:rotate(90deg); }
+  .leaf.dual .cnt { margin-left:auto; color:var(--muted); font-size:11px; }
+  .tn-cat .mtime { font-size:10.5px; opacity:.6; font-weight:400; margin-left:6px; }
+  .tree-more { color:var(--muted); font-size:11.5px; padding:3px 8px; }
+  .leaf { display:block; width:100%; border:none; background:none; text-align:left;
+          padding:4px 7px; border-radius:6px; cursor:pointer; }
+  .leaf:hover { background:var(--hover); }
+  .leaf.sel { background:var(--sel-bg); box-shadow:inset 2px 0 0 var(--primary); }
+  .leaf .l1 { display:flex; gap:4px; align-items:center; }
+  .leaf .t2 { display:block; font-size:12.5px; line-height:1.45; overflow:hidden;
+              text-overflow:ellipsis; white-space:nowrap; }
+  .leaf.sel .t2 { color:var(--sel-fg); }
+  .leaf.archived .t2 { color:var(--muted); text-decoration:line-through; }
+
+  /* ---------- 徽标 ---------- */
+  .badge-born { background:var(--born-bg); color:var(--born-fg); border-radius:3px; padding:0 4px;
+                font-size:10px; line-height:16px; white-space:nowrap; display:inline-flex; align-items:center; gap:2px; }
+  .badge-type { border-radius:3px; padding:0 4px; display:inline-flex; align-items:center; justify-content:center;
+                font-size:10px; line-height:16px; white-space:nowrap; flex:none; }
+  .leaf .badge-type { width:16px; height:16px; padding:0; }
+  .t-pitfall   { background:var(--pitfall-bg); color:var(--pitfall-fg); }
+  .t-note      { background:var(--note-bg); color:var(--note-fg); }
+  .t-rule      { background:var(--rule-bg); color:var(--rule-fg); }
+  .t-reference { background:var(--ref-bg); color:var(--ref-fg); }
+  .badge-mand  { background:var(--mand-bg); color:var(--mand-fg); border-radius:3px; padding:0 4px; font-size:10px; line-height:16px; }
+  /* 需求 1：实底琥珀 + 实线边（原：无底色虚线灰边，对比度低） */
+  .badge-draft { background:var(--draft-bg); color:var(--draft-fg); border:1px solid var(--draft-bd);
+                 border-radius:3px; padding:0 4px; font-size:10px; line-height:14px; font-weight:600; }
+  .badge-arch  { background:var(--hover); color:var(--muted); border-radius:3px; padding:0 4px; font-size:10px; line-height:16px; }
+  .tag { background:var(--tag-bg); color:var(--tag-fg); border-radius:4px; padding:0 6px; font-size:12px; }
+  .d-attrs .badge-type, .d-attrs .badge-born, .d-attrs .badge-mand, .d-attrs .badge-draft, .d-attrs .badge-arch { font-size:12px; line-height:20px; }
+  .d-attrs .badge-type { width:auto; height:auto; padding:0 6px; }
+
+  /* ---------- 详情 ---------- */
+  .detail { flex:1; overflow-y:auto; padding:20px 28px 60px; min-width:0; }
+  .d-path { font:12px/1.5 "Cascadia Code",Consolas,monospace; color:var(--muted); word-break:break-all; }
+  .d-filemeta { color:var(--muted); font-size:13px; margin-top:2px; }
+  .d-filemeta b { color:var(--fg); font-weight:600; }
+  .d-title { font-size:20px; margin:10px 0 6px; }
+  .d-attrs { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .d-summary { background:var(--card); border:1px solid var(--border); border-left:3px solid var(--primary);
+               border-radius:6px; padding:10px 14px; margin-bottom:14px; }
+  .d-ops { display:flex; gap:8px; margin-bottom:16px; }
+  .d-body { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:18px 22px; }
+  .md p { margin:8px 0; }
+  .md code { background:var(--code-bg); border-radius:4px; padding:1px 5px; font:13px "Cascadia Code",Consolas,monospace; }
+  .md pre { background:var(--pre-bg); color:var(--pre-fg); border-radius:8px; padding:12px 14px; overflow-x:auto; }
+  .md pre code { background:none; color:inherit; padding:0; }
+  .md ul { margin:8px 0; padding-left:24px; }
+  .placeholder { flex:1; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:15px; }
+
+  .btn { padding:6px 14px; border:1px solid var(--border); border-radius:6px; background:var(--card);
+         font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .btn:hover:not(:disabled) { border-color:var(--primary); color:var(--primary); }
+  /* 需求 1：批准 = 实心主按钮，操作组中一眼可辨 */
+  .btn-primary { background:var(--primary); border-color:var(--primary); color:#fff; }
+  .btn-primary:hover:not(:disabled) { color:#fff; filter:brightness(1.12); }
+  .btn-danger { border-color:#dc2626; color:#dc2626; }
+  .btn-danger:hover:not(:disabled) { background:#dc2626; color:#fff; }
+
+  /* ---------- 需求 3：终端面板（chat 式 CLI） ---------- */
+  .term { display:flex; flex-direction:column; min-height:0; min-width:0; background:var(--bg); }
+  .term-head { padding:9px 12px; display:flex; align-items:center; gap:8px; flex:none;
+               border-bottom:1px solid var(--border); background:var(--card); }
+  .term-head .tt { font-size:12px; font-weight:600; color:var(--muted); }
+  .term-head .sub { font-size:11px; color:var(--muted); opacity:.75; }
+  .term-hist { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
+  .t-echo { font:12.5px Consolas,monospace; color:var(--muted); margin-bottom:4px; }
+  .t-echo b { color:var(--fg); font-weight:600; }
+  /* 执行状态并到回显行尾部（省一行），卡片只承载输出 */
+  .t-status { margin-left:8px; }
+  .t-status.ok  { color:var(--ok); }
+  .t-status.err { color:#dc2626; }
+  .t-status.run { color:var(--muted); animation:pulse 1s infinite; }
+  .t-card { background:var(--card); border:1px solid var(--border); border-radius:8px;
+            padding:10px 12px; font-size:12.5px; }
+  .t-card.err { border-color:#dc2626; }
+  /* 输出按行展示、每行单行截断（完整行在 title 悬浮可见），卡片按行数自然撑高 */
+  .t-out { background:var(--pre-bg); color:var(--pre-fg); border-radius:6px;
+           padding:10px 12px; font:12px/1.6 Consolas,monospace; }
+  .t-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  @keyframes pulse { 50% { opacity:.45; } }
+  .term-chips { display:flex; flex-wrap:wrap; gap:6px; padding:8px 12px 0; flex:none; }
+  .tchip { border:1px solid var(--border); background:var(--card); border-radius:999px;
+           padding:2px 10px; font-size:11.5px; cursor:pointer; color:var(--fg);
+           font-family:Consolas,monospace; }
+  .tchip:hover { border-color:var(--primary); color:var(--primary); }
+  .term-input { display:flex; gap:8px; padding:10px 12px; flex:none; }
+  .term-input input { flex:1; padding:6px 10px; border:1px solid var(--border); border-radius:6px;
+                      background:var(--card); color:var(--fg); font:13px Consolas,monospace; }
+  .term-input input:focus { outline:none; border-color:var(--primary); }
+
+  /* 变体 A：第三栏 + 拖拽分隔条 */
+  .splitter { width:5px; cursor:col-resize; flex:none; background:transparent; }
+  .splitter:hover { background:var(--sel-bg); }
+  .term-col { border-left:1px solid var(--border); flex:none; }
+
+  /* ---------- 需求 4：顶栏控件 / 界面设置弹窗 / 栏目布局引擎 ---------- */
+  .topbar .spacer { margin-left:auto; }
+  .icon-btn { width:32px; height:32px; border:none; background:none; border-radius:6px;
+              cursor:pointer; color:var(--muted); display:flex; align-items:center; justify-content:center; }
+  .icon-btn:hover { background:var(--hover); color:var(--fg); }
+  /* 布局引擎：槽位横向排列；term=bottom 时上下结构 */
+  .layout-area { flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
+  .layout-row { flex:1; display:flex; min-width:0; min-height:0; }
+  .hsplitter { height:5px; cursor:row-resize; flex:none; }
+  .hsplitter:hover { background:var(--sel-bg); }
+  .term-strip { flex:none; border-top:1px solid var(--border); min-height:0; }
+  /* 界面设置模态 */
+  .mask { position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex;
+          align-items:center; justify-content:center; z-index:120; }
+  .modal { background:var(--card); border:1px solid var(--border); border-radius:10px;
+           width:460px; max-width:92vw; padding:18px 22px; }
+  .modal h3 { margin:0 0 6px; font-size:15px; }
+  .pdesc { color:var(--muted); font-size:12.5px; margin-bottom:10px; }
+  .sec-label2 { font-size:12px; color:var(--muted); font-weight:600; margin:10px 0 4px; }
+  .cfg-row { display:flex; align-items:center; gap:10px; margin:8px 0; }
+  .cfg-row .k { width:64px; color:var(--muted); font-size:13px; flex:none; }
+  .pselect { padding:5px 10px; border:1px solid var(--border); border-radius:6px;
+             background:var(--bg); color:var(--fg); font-size:13px; }
+  .mfoot { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+
+  /* 变体 B：右区 Tab */
+  .right-tabs { flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
+  .tabbar { display:flex; gap:2px; padding:0 12px; background:var(--card); border-bottom:1px solid var(--border); flex:none; }
+  .tabbar button { border:none; background:none; padding:9px 14px; cursor:pointer; font-size:13px;
+                   color:var(--muted); border-bottom:2px solid transparent; }
+  .tabbar button.on { color:var(--sel-fg); font-weight:600; border-bottom-color:var(--primary); }
+
+  /* 变体 C：底部抽屉 */
+  .c-area { flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
+  .drawer { flex:none; display:flex; flex-direction:column; border-top:1px solid var(--border);
+            background:var(--bg); min-height:0; }
+  .drawer.open { height:50%; }
+  .drawer-bar { padding:7px 12px; display:flex; align-items:center; gap:8px; cursor:pointer;
+                background:var(--card); border-bottom:1px solid var(--border); flex:none; user-select:none; }
+  .drawer-bar:hover { background:var(--hover); }
+  .drawer-bar .tt { font-size:12px; font-weight:600; color:var(--muted); }
+  .drawer-bar .chev { margin-left:auto; color:var(--muted); font-size:12px; }
+
+  /* ---------- 浮动变体切换条（评审工具，不属于被评审设计） ---------- */
+  .vnav { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); z-index:200;
+          display:flex; align-items:center; gap:4px; background:#111827; color:#e5e7eb;
+          border-radius:999px; padding:5px 8px; box-shadow:0 6px 24px rgba(0,0,0,.35);
+          font-size:12.5px; }
+  .vnav button { border:none; background:none; color:#9ca3af; cursor:pointer; font-size:14px;
+                 width:26px; height:26px; border-radius:999px; }
+  .vnav button:hover { background:#1f2937; color:#fff; }
+  .vnav .lbl { padding:0 8px; white-space:nowrap; font-weight:600; }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">PROTOTYPE — 可抛弃 · mock 数据</div>
+<div id="app"></div>
+<div class="vnav" id="vnav"></div>
+
+<script>
+"use strict";
+/* ================= mock 数据（3 项目 / 17 条，覆盖 rule/pitfall/note/reference） ================= */
+const PROJECTS = [
+  { name:"OpenKnowledge", root:"D:\\develop\\OpenKnowledge", entries:[
+    { file:"knowledge/Web-GUI.md", title:"Web GUI", type:"reference", born:"master",
+      tags:["wiki","gui"], mandatory:false, draft:false, archived:false,
+      size:"4.6 KB", mtime:"2026-08-17 21:34", mts:1787392800,
+      summary:"四标签 SPA：管理/引导/其他/日志；管理页含归档入口、草稿批准、项目切换",
+      body:"单页 SPA（`web/index.html` + `web/app.js` + `web/style.css`），四个标签页：管理、引导、其他、日志。\n\n- **管理**：条目列表、草稿批准、项目切换；所有请求带 token 认证。\n- **日志**：三来源实时日志查看器，2 秒轮询，只读。" },
+    { file:"knowledge/SQLite-读写并发致整轮注入静默跳过.md", title:"SQLite 读写并发致整轮注入静默跳过：开 WAL + NORMAL", type:"pitfall", born:"master",
+      tags:["sqlite","WAL","并发","注入"], mandatory:true, draft:false, archived:false,
+      size:"1.8 KB", mtime:"2026-08-02 10:12", mts:1787306400,
+      summary:"kb.db 读写并发下 hook 注入整轮静默跳过；开 WAL + synchronous=NORMAL 后消失",
+      body:"hook 注入偶发整轮静默跳过，无报错。定位为 kb.db 读写并发。\n\n```\nPRAGMA journal_mode=WAL;\nPRAGMA synchronous=NORMAL;\nPRAGMA busy_timeout=3000;\n```\n\n**教训**：SQLite 多进程读写必须开 WAL。" },
+    { file:"knowledge/GUI-开关类设置用勾选+保存两段式.md", title:"GUI 开关类设置用勾选+保存按钮两段式，不用 change 即存", type:"note", born:"master",
+      tags:["gui","交互约定"], mandatory:false, draft:false, archived:false,
+      size:"0.9 KB", mtime:"2026-07-30 15:02", mts:1787478000,
+      summary:"引导页开关统一勾选+保存按钮两段式，即存模式误触无反悔",
+      body:"引导页的开关类设置统一为**勾选 + 保存按钮**两段式，不用 change 即存。\n\n理由：即存模式下误触无反悔窗口。" },
+    { file:"knowledge/README-版本徽标会漂移.md", title:"README 版本徽标会漂移：bump 时须跑 scripts/sync-version.sh", type:"pitfall", born:"master",
+      tags:["发布","版本号","README"], mandatory:true, draft:false, archived:false,
+      size:"1.1 KB", mtime:"2026-07-25 09:40", mts:1787220000,
+      summary:"版本徽标/引用会漂移（README + 官网 site）：bump 时须跑 sync-version.sh",
+      body:"版本号 bump 后 README 徽标与 `site/` 官网引用不会自动跟随。\n\n纪律：bump 时必跑 `scripts/sync-version.sh`；pre-push 钩子已加兜底校验。" },
+    { file:"knowledge/daemon-进程模型.md", title:"daemon 进程模型", type:"reference", born:"master",
+      tags:["daemon","架构","wiki"], mandatory:false, draft:false, archived:false,
+      size:"2.3 KB", mtime:"2026-08-10 18:20", mts:1787389200,
+      summary:"单实例端口即锁；daemon.json 凭证 + fingerprint 版本自检；hook 优先转发 daemon",
+      body:"`ok daemon` 以单实例运行：默认端口 17888 即锁。\n\n- 凭证：`~/.openknowledge/daemon.json`\n- hook 路径优先转发 daemon，daemon 不在则本地处理并后台拉起" },
+    { file:"knowledge/Windows-交叉构建-Linux-包-chmod-静默无效.md", title:"Windows 宿主交叉构建 Linux 包：chmod 静默无效，权限位必须显式钉", type:"pitfall", born:"master",
+      tags:["构建","跨平台","发布","windows"], mandatory:false, draft:false, archived:false,
+      size:"1.5 KB", mtime:"2026-08-06 14:55", mts:1787468400,
+      summary:"Windows git-bash noacl 挂载下 chmod 静默失效；两段式 tar --mode 钉权限 + verify 断言",
+      body:"Windows 宿主交叉构建 Linux 包时，git-bash 的 noacl 挂载让 `chmod` **静默失效**。\n\n对策：两段式 `tar --mode` 显式钉权限位，verify 脚本断言 mode。" },
+    { file:"knowledge/混合检索准入必须按通道独立判定.md", title:"混合检索准入必须按通道独立判定", type:"pitfall", born:"master",
+      tags:["检索","混合检索","阈值"], mandatory:false, draft:true, archived:false,
+      size:"1.2 KB", mtime:"2026-08-15 11:08", mts:1787478800,
+      summary:"同域语料余弦基线会顶穿总分阈值；关键词与向量通道必须各自过准入",
+      body:"混合检索中，同域语料的向量余弦基线天然偏高，会把总分顶穿阈值。\n\n准入必须**按通道独立判定**，再融合排序。" },
+    { file:"knowledge/旧版注入设计.md", title:"旧版注入设计（已归档）", type:"reference", born:"master",
+      tags:["注入","历史"], mandatory:false, draft:false, archived:true,
+      size:"3.0 KB", mtime:"2026-06-01 08:30", mts:1780567200,
+      summary:"v1 注入设计存档：单通道关键词检索，已被混合检索取代",
+      body:"（归档条目）v1 时代的注入设计，仅供考古。" },
+    { file:"knowledge/Go-构建缓存致旧二进制被分发.md", title:"Go 构建缓存致旧二进制被分发：release 前必须 -a 全量重建", type:"pitfall", born:"master",
+      tags:["go","构建"], mandatory:false, draft:true, archived:false,
+      size:"0.8 KB", mtime:"2026-08-20 09:15", mts:1787478700,
+      summary:"go build 增量缓存命中旧版本常量，分发包版本号滞后；release 脚本加 -a 强制重建",
+      body:"`go build` 增量缓存命中了旧的版本常量包，分发出的二进制版本号滞后一个 tag。\n\n对策：release 脚本使用 `go build -a` 强制全量重建。" },
+    { file:"knowledge/hooks-超时-10s-的由来.md", title:"hooks 超时默认 10s 的由来：Windows 高负载 5s 曾丢整会话", type:"note", born:"master",
+      tags:["hooks","windows"], mandatory:true, draft:false, archived:false,
+      size:"0.7 KB", mtime:"2026-08-04 22:41", mts:1787473800,
+      summary:"2026-08-04 Windows 高负载下 5s 超时致 PostToolUse 整会话静默丢失，默认升至 10s",
+      body:"2026-08-04 事故：Windows 高负载下 5s 超时导致 PostToolUse **整会话静默丢失**。\n\n此后 hooks 超时默认 10s，引导页可调。" },
+    /* ---- 需求 5：wiki 条目（参考目录三层子结构用） ---- */
+    { file:"knowledge/wiki-架构总览.md", title:"架构总览", type:"reference", born:"master",
+      tags:["wiki"], mandatory:false, draft:false, archived:false,
+      size:"2.0 KB", mtime:"2026-08-22 20:00", mts:1787479020,
+      summary:"OpenKnowledge 架构目录地图：瘦身后的总览，细节下沉到各主题域条目",
+      body:"# 架构总览\n\n本条目是目录地图，细节见「章节」下各主题域条目：\n\n- **Web GUI**：四标签 SPA 管理界面\n- **daemon 进程模型**：单实例端口即锁\n- **多-Agent支持（agentx）**：hooks 接入矩阵" },
+    { file:"knowledge/wiki-演进历程.md", title:"演进历程", type:"reference", born:"master",
+      tags:["wiki"], mandatory:false, draft:false, archived:false,
+      size:"1.6 KB", mtime:"2026-08-22 20:05", mts:1787475600,
+      summary:"版本沿革：v1 单通道注入 → v2 混合检索 → v2.18 GUI 管理页",
+      body:"# 演进历程\n\n- v1：单通道关键词注入\n- v2.0：混合检索 + daemon\n- v2.18：GUI 管理页、日志查看器" },
+    { file:"knowledge/wiki-多-Agent支持.md", title:"多-Agent支持（agentx）", type:"reference", born:"master",
+      tags:["wiki","agentx"], mandatory:false, draft:false, archived:false,
+      size:"1.4 KB", mtime:"2026-08-21 18:30", mts:1787472000,
+      summary:"agentx 模块统一管理各 agent 的 hooks 写入与技能安装，Kimi Code/Claude Code/Codex 等",
+      body:"`internal/agentx` 统一管理各 agent 的 hooks 写入与技能安装。\n\n已支持：Kimi Code、Claude Code、Codex、OpenCode 等。" },
+    { file:"knowledge/wiki-Web-GUI-master-补充.md", title:"Web GUI（master 分支补充）", type:"reference", born:"master",
+      tags:["wiki","branch:master"], mandatory:false, draft:false, archived:false,
+      size:"0.6 KB", mtime:"2026-08-23 09:00", mts:1787476800,
+      summary:"master 分支差异条目：管理页新增终端面板与栏目布局设置",
+      body:"master 分支相对基线的差异：管理页新增终端面板、顶栏界面设置（栏目布局）。" },
+    { file:"knowledge/wiki-Web-GUI-dev-差异.md", title:"Web GUI（dev 分支差异）", type:"reference", born:"dev",
+      tags:["wiki","branch:dev"], mandatory:false, draft:false, archived:false,
+      size:"0.5 KB", mtime:"2026-08-23 09:10", mts:1787476900,
+      summary:"dev 分支差异条目（当前分支 master，不应显示在章节中）",
+      body:"dev 分支实验中的 GUI 改动。（当前分支为 master，此条目不显示）" },
+    /* ---- 无 wiki 标签的普通 reference + 多维重叠用例 ---- */
+    { file:"knowledge/配置项速查.md", title:"配置项速查", type:"reference", born:"master",
+      tags:["配置","速查"], mandatory:false, draft:false, archived:false,
+      size:"1.1 KB", mtime:"2026-08-15 16:40", mts:1787279200,
+      summary:"config.toml 各小节字段速查：daemon/embedding/hooks/capture",
+      body:"config.toml 字段速查：\n\n- `[daemon]`：port、token\n- `[embedding]`：服务列表\n- `[hooks]`：超时秒数\n- `[capture]`：模式与轮次间隔" },
+    { file:"knowledge/旧规则-提交前必跑单测.md", title:"旧规则：提交前必跑单测（废弃草稿）", type:"rule", born:"master",
+      tags:["测试","历史"], mandatory:false, draft:true, archived:true,
+      size:"0.4 KB", mtime:"2026-05-20 10:00", mts:1779271200,
+      summary:"已被 e2e 清单规则取代的废弃草稿（archived+draft 重叠用例，只应出现在归档目录）",
+      body:"（废弃草稿）早期规则：提交前必跑单测。已被「发布前必跑 e2e 清单」取代。" },
+  ]},
+  { name:"claude-code-deepseek", root:"D:\\develop\\claude-code-deepseek", entries:[
+    { file:"knowledge/DeepSeek-API-超时重试策略.md", title:"DeepSeek API 超时重试策略", type:"note", born:"main",
+      tags:["api","超时"], mandatory:false, draft:false, archived:false,
+      size:"1.0 KB", mtime:"2026-08-12 20:11", mts:1786528800,
+      summary:"流式首字节 30s 超时；重试仅对连接错误，不对 4xx",
+      body:"DeepSeek 流式接口按**首字节**计 30s 超时；重试只针对连接错误，4xx 直接抛给上层。" },
+    { file:"knowledge/guest-kongball.md", title:"guest-kongball 会话记忆", type:"reference", born:"main",
+      tags:["memory","guest"], mandatory:false, draft:false, archived:false,
+      size:"2.1 KB", mtime:"2026-08-11 09:26", mts:1786442400,
+      summary:"guest-kongball 会话的偏好与上下文记忆",
+      body:"guest-kongball 会话沉淀：偏好中文回复、表格输出；关注 token 成本。" },
+    { file:"knowledge/Windows-控制台-GBK-乱码.md", title:"Windows 控制台 GBK 乱码：子进程输出须显式转码", type:"pitfall", born:"main",
+      tags:["windows","编码"], mandatory:false, draft:true, archived:false,
+      size:"0.9 KB", mtime:"2026-08-18 14:02", mts:1787047200,
+      summary:"中文 Windows 控制台默认 GBK，Go 子进程继承后中文输出乱码；须显式 UTF-8 转码",
+      body:"中文 Windows 控制台默认代码页 GBK，子进程继承后中文输出全乱码。\n\n对策：读取子进程输出后按 GBK 解码再转 UTF-8。" },
+    { file:"knowledge/发布前必跑-e2e-清单.md", title:"发布前必跑 e2e 清单，不许只跑单测", type:"rule", born:"main",
+      tags:["测试","发布"], mandatory:false, draft:false, archived:false,
+      size:"0.6 KB", mtime:"2026-08-14 11:30", mts:1786701600,
+      summary:"单测全绿但代理链路回归漏网两次；发布前必须跑 tests/e2e 全量",
+      body:"规则：发布前必须跑 `tests/e2e` 全量，不许只跑单测。\n\n背景：单测全绿但代理链路回归已漏网两次。" },
+  ]},
+  { name:"Reasonix", root:"D:\\develop\\Reasonix", entries:[
+    { file:"knowledge/拦截器-err-非-nil-吞掉-Continue.md", title:"Reasonix 扩展 SDK：拦截器 err 非 nil 会吞掉 Continue", type:"pitfall", born:"master",
+      tags:["reasonix","sidecar","fail-open"], mandatory:true, draft:false, archived:false,
+      size:"1.3 KB", mtime:"2026-08-09 16:47", mts:1786269600,
+      summary:"sidecar 拦截器返回 err 非 nil 时宿主吞掉 Continue 决策，必须 fail-open",
+      body:"拦截器返回 `err != nil` 时宿主会吞掉 `Continue` 决策——放行语义丢失。\n\n扩展必须 **fail-open**：任何内部错误都映射为 Continue。" },
+    { file:"knowledge/扩展集成测试要跑两遍.md", title:"扩展集成测试要跑两遍：首遍暖缓存，第二遍才是真实路径", type:"rule", born:"master",
+      tags:["测试","go"], mandatory:false, draft:true, archived:false,
+      size:"0.5 KB", mtime:"2026-08-21 10:05", mts:1787306400,
+      summary:"sidecar 首跑走暖缓存路径会掩盖时序 bug；CI 中集成测试固定跑两遍",
+      body:"规则：扩展集成测试在 CI 中固定跑两遍——首遍暖缓存，第二遍才覆盖真实路径。" },
+    { file:"knowledge/sidecar-协议字段约定.md", title:"sidecar 协议字段约定：snake_case，未知字段忽略", type:"note", born:"master",
+      tags:["sidecar","协议"], mandatory:false, draft:false, archived:false,
+      size:"0.8 KB", mtime:"2026-08-16 17:22", mts:1786874400,
+      summary:"协议 JSON 一律 snake_case；解析端必须忽略未知字段以兼容旧扩展",
+      body:"sidecar 协议 JSON 字段一律 snake_case。\n\n解析端必须忽略未知字段，保证旧扩展向前兼容。" },
+  ]},
+];
+const TYPE_LABEL = { pitfall:"坑", note:"注", rule:"规", reference:"参" };
+const TYPE_VALUES = ["rule","pitfall","note","reference","draft"];
+
+/* ================= 状态 ================= */
+const VARIANTS = [["A","A — 三栏布局"],["B","B — 右区 Tab"],["C","C — 底部抽屉"]];
+/* 需求 4：栏目布局配置。left/middle/right = 横向槽位；term=bottom = 终端占底部整条。
+   变体预设映射：A = 默认三栏；B = null（右区 Tab 特殊形态，不进槽位引擎）；C = 终端在下。
+   加载优先级：localStorage 已存配置 > ?variant= 预设 > 默认 A。 */
+const DEFAULT_LAYOUT = { tree:"left", detail:"middle", term:"right" };
+const VARIANT_LAYOUT = { A:DEFAULT_LAYOUT, B:null, C:{ tree:"left", detail:"middle", term:"bottom" } };
+const LAYOUT_KEY = "ok.proto.manageLayout";
+function loadStoredLayout(){
+  try{
+    const s = JSON.parse(localStorage.getItem(LAYOUT_KEY)||"null");
+    if(s && ["left","middle","right"].includes(s.tree)
+        && ["left","middle","right"].includes(s.detail)
+        && ["left","middle","right","bottom"].includes(s.term)) return s;
+  }catch(_){}
+  return null;
+}
+const storedLayout = loadStoredLayout();
+const initVariant = (new URLSearchParams(location.search).get("variant")||"A").toUpperCase();
+const state = {
+  variant: VARIANTS.some(v=>v[0]===initVariant) ? initVariant : "A",
+  open:{ "OpenKnowledge":true }, sel:null, catOpen:{}, catDefaulted:{},
+  q:"", cmd:null, cmdErr:"", showHelp:false, scopeNote:"",
+  rightTab:"detail", drawerOpen:true,
+  treeW:300, termW:360, termH:0.4,
+  layout: storedLayout || VARIANT_LAYOUT[VARIANTS.some(v=>v[0]===initVariant)?initVariant:"A"],
+  customLayout: !!storedLayout,
+  cfgOpen:false, cfgDraft:null,
+  termHist:[], termBusy:false,
+};
+let newSeq = 0;
+
+/* ================= 工具 ================= */
+function el(tag, cls){ const n=document.createElement(tag); if(cls) n.className=cls; return n; }
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function projOf(e){ return PROJECTS.find(p=>p.entries.includes(e)); }
+function renderMd(src){
+  const lines = src.split("\n"); let html = "", i = 0;
+  const inline = s => esc(s).replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>");
+  while(i < lines.length){
+    const l = lines[i];
+    if(l.startsWith("```")){
+      const buf = []; i++;
+      while(i<lines.length && !lines[i].startsWith("```")) buf.push(lines[i++]);
+      i++; html += "<pre><code>"+esc(buf.join("\n"))+"</code></pre>"; continue;
+    }
+    if(!l.trim()){ i++; continue; }
+    if(/^\s*[-*]\s+/.test(l)){
+      const items = [];
+      while(i<lines.length && /^\s*[-*]\s+/.test(lines[i]))
+        items.push(lines[i++].replace(/^\s*[-*]\s+/,""));
+      html += "<ul>"+items.map(x=>"<li>"+inline(x)+"</li>").join("")+"</ul>"; continue;
+    }
+    html += "<p>"+inline(l)+"</p>"; i++;
+  }
+  return html;
+}
+function badges(e){
+  return '<span class="badge-born" title="born">'+esc(e.born)+'</span>'
+       + '<span class="badge-type t-'+e.type+'" title="'+e.type+'">'+TYPE_LABEL[e.type]+'</span>';
+}
+function detailAttrs(e){
+  let s = e.tags.map(x=>'<span class="tag">'+esc(x)+'</span>').join("");
+  s += e.mandatory ? '<span class="badge-mand">★ mandatory</span>'
+                   : '<span class="tag" style="opacity:.6">非 mandatory</span>';
+  if(e.draft) s += '<span class="badge-draft">草稿</span>';
+  if(e.archived) s += '<span class="badge-arch">已归档</span>';
+  return s;
+}
+
+/* ================= 需求 2：搜索框命令 ================= */
+/* 语法：[范围]/type <类型> [关键词]  ·  [范围]/tag <标签> [关键词]
+   范围：/ = 当前展开项目（无展开则退化全部 + 提示）；// = 全部项目。
+   以 / 开头时暂停即时过滤，回车生效；非法命令/类型报错不过滤；仅 / 或 // 显示帮助。 */
+function parseCommand(raw){
+  state.cmdErr=""; state.showHelp=false; state.scopeNote="";
+  const all = raw.startsWith("//");
+  const body = raw.slice(all?2:1).trim();
+  const expanded = PROJECTS.filter(p=>state.open[p.name]);
+  const degraded = !all && expanded.length===0;
+  if(!body){ state.cmd=null; state.showHelp=true; state.q=""; return; }
+  const tokens = body.split(/\s+/);
+  const kind = tokens[0], arg = tokens[1]||"";
+  if(kind!=="type" && kind!=="tag"){
+    state.cmd=null;
+    state.cmdErr = '未知命令 "/'+kind+'"，可用命令：/type <类型>、/tag <标签>（前缀 // = 全部项目）';
+    return;
+  }
+  if(kind==="type" && !TYPE_VALUES.includes(arg)){
+    state.cmd=null;
+    state.cmdErr = '非法类型 "'+(arg||"（空）")+'"，合法值：'+TYPE_VALUES.join(" | ");
+    return;
+  }
+  if(kind==="tag" && !arg){
+    state.cmd=null;
+    state.cmdErr = "/tag 需要一个标签内容，例如 /tag go";
+    return;
+  }
+  state.cmd = { all, degraded, kind, arg, keyword:tokens.slice(2).join(" ") };
+  if(degraded) state.scopeNote = "未展开项目，已在全部项目中检索";
+  state.q="";
+}
+function filteredProjects(){
+  const res = [];
+  if(state.cmd){
+    const c = state.cmd;
+    const projs = (c.all||c.degraded) ? PROJECTS : PROJECTS.filter(p=>state.open[p.name]);
+    projs.forEach(p=>{
+      let list = p.entries;
+      if(c.kind==="type")
+        list = c.arg==="draft" ? list.filter(e=>e.draft) : list.filter(e=>e.type===c.arg);
+      else {
+        const a = c.arg.toLowerCase();
+        list = list.filter(e=>e.tags.some(tg=>tg.toLowerCase().includes(a)));
+      }
+      if(c.keyword){
+        const k = c.keyword.toLowerCase();
+        list = list.filter(e=>e.title.toLowerCase().includes(k));
+      }
+      if(list.length) res.push({ p, list });
+    });
+    return res;
+  }
+  const q = state.q.trim().toLowerCase();
+  PROJECTS.forEach(p=>{
+    const list = p.entries.filter(e=>!q || e.title.toLowerCase().includes(q));
+    if(list.length) res.push({ p, list });
+  });
+  return res;
+}
+function clearFilter(){
+  state.q=""; state.cmd=null; state.cmdErr=""; state.showHelp=false; state.scopeNote="";
+  const s = document.querySelector(".search"); if(s) s.value = "";
+  paintFilterBar(); fillTree();
+}
+function paintFilterBar(){
+  const bar = document.querySelector(".fbar"); if(!bar) return;
+  bar.className = "fbar"; bar.innerHTML = "";
+  if(state.cmdErr){
+    bar.classList.add("err");
+    bar.textContent = "⚠ " + state.cmdErr;
+    const c = el("button","clear"); c.textContent = "清除"; c.onclick = clearFilter;
+    bar.appendChild(c);
+    return;
+  }
+  if(state.showHelp){
+    bar.classList.add("info");
+    bar.innerHTML = '命令：<code>/type rule|pitfall|note|reference|draft</code> 按类型过滤 · '
+                  + '<code>/tag &lt;标签&gt;</code> 按标签过滤 · 命令后可跟空格+关键词取交集 · '
+                  + '<code>//</code> 前缀 = 全部项目，<code>/</code> = 当前展开项目';
+    const c = el("button","clear"); c.textContent = "清除"; c.onclick = clearFilter;
+    bar.appendChild(c);
+    return;
+  }
+  if(state.cmd){
+    const c = state.cmd;
+    bar.classList.add("info");
+    const scope = (c.all||c.degraded) ? "全部项目" : "当前展开项目";
+    const cond = c.kind==="type" ? (c.arg==="draft"?"草稿":"type:"+c.arg) : "tag:"+c.arg;
+    let txt = scope + " · " + cond;
+    if(c.keyword) txt += ' · "'+c.keyword+'"';
+    if(c.degraded) txt += "（"+state.scopeNote+"）";
+    bar.textContent = txt;
+    const b = el("button","clear"); b.textContent = "清除"; b.onclick = clearFilter;
+    bar.appendChild(b);
+  }
+}
+
+/* ================= 左树 ================= */
+/* 命令下拉提示：/ 或 // 开头时弹出；输入单个 / 时列出 4 项（两种斜杠范围各两条），
+   // 收窄为 //type、//tag；/type␣ 后切换为 5 个合法类型值；
+   ↑↓ 高亮、Enter 补全、Esc 关闭、失焦/清空关闭。 */
+const DD_COMMANDS = [
+  { name:"type",   label:"/type",  desc:"按类型过滤（当前项目）" },
+  { name:"tag",    label:"/tag",   desc:"按标签过滤（当前项目）" },
+  { name:"//type", label:"//type", desc:"按类型过滤（全部项目）" },
+  { name:"//tag",  label:"//tag",  desc:"按标签过滤（全部项目）" },
+];
+const DD_TYPES = [
+  { name:"rule", desc:"规则" }, { name:"pitfall", desc:"踩坑" }, { name:"note", desc:"笔记" },
+  { name:"reference", desc:"参考" }, { name:"draft", desc:"草稿" },
+];
+let ddEl = null, ddIdx = 0, searchEl = null;
+/* 高亮项走马灯（单向循环）：高亮行内容复制一份包进 .dd-track，按实测内容宽设 --shift/--dur
+   （速度恒定 50px/s）；无溢出保持静止；失去高亮的行还原 track，保证 ellipsis 截断恢复 */
+const MARQ_GAP = 48, MARQ_SPEED = 50;
+function applyMarquee(container){
+  container.querySelectorAll(".dd-row").forEach(row=>{
+    const on = row.classList.contains("on");
+    let track = row.querySelector(".dd-track");
+    if(!on){
+      if(track){   // 还原结构，恢复非高亮行的 ellipsis
+        const orig = track.querySelector(".dd-inner:not(.dd-clone)");
+        row.insertBefore(orig, track);
+        track.remove();
+      }
+      return;
+    }
+    const inner = row.querySelector(".dd-inner:not(.dd-clone)");
+    if(!inner) return;
+    const range = document.createRange();    // inline span 的 scrollWidth 不可靠，用 Range 实测内容宽
+    range.selectNodeContents(inner);
+    const w = range.getBoundingClientRect().width;
+    range.detach();
+    if(w <= row.clientWidth) return;         // 无溢出：静止
+    if(!track){
+      track = el("span","dd-track");
+      row.insertBefore(track, inner);
+      track.appendChild(inner);
+      const clone = el("span","dd-inner dd-clone");
+      clone.setAttribute("aria-hidden","true");
+      clone.innerHTML = inner.innerHTML;
+      track.appendChild(clone);
+    }
+    const loop = w + MARQ_GAP;
+    track.style.setProperty("--shift", loop+"px");
+    track.style.setProperty("--dur", (loop/MARQ_SPEED)+"s");
+  });
+}
+function ddItems(){
+  const v = searchEl ? searchEl.value : "";
+  if(!v.startsWith("/")) return null;
+  const scope = v.startsWith("//") ? "//" : "/";
+  const body = v.slice(scope.length);
+  if(!body.includes(" ")){
+    // 命令阶段：// 只看 // 项；/ 下 // 项以 "/type" 形态参与前缀匹配（"/" 时全部 4 项，"/t" 只剩 type/tag）
+    const list = scope==="//"
+      ? DD_COMMANDS.filter(c=>c.name.startsWith("//") && c.name.slice(2).startsWith(body))
+      : DD_COMMANDS.filter(c=>(c.name.startsWith("//") ? c.name.slice(1) : c.name).startsWith(body));
+    return { scope, stage:"cmd", list };
+  }
+  const sp = body.indexOf(" ");
+  const cmd = body.slice(0,sp), rest = body.slice(sp+1);
+  if(cmd==="type" && !rest.includes(" "))
+    return { scope, stage:"type", list:DD_TYPES.filter(t=>t.name.startsWith(rest)) };
+  return { scope, stage:"none", list:[] };   // tag 参数自由输入 / 关键词阶段：不提示
+}
+function paintDropdown(){
+  if(!ddEl) return;
+  const d = ddItems();
+  ddEl.innerHTML = "";
+  if(!d || !d.list.length){ ddEl.style.display = "none"; return; }
+  if(ddIdx >= d.list.length) ddIdx = 0;
+  ddEl.style.display = "block";
+  d.list.forEach((it,i)=>{
+    const row = el("div","dd-row"+(i===ddIdx?" on":""));
+    row.innerHTML = '<span class="dd-inner"><span class="dd-name">'+esc(it.label||it.name)+'</span>'
+                  + '<span class="dd-desc">'+esc(it.desc)+'</span></span>';
+    row.onmousedown = e=>{ e.preventDefault(); ddPick(d, i); };   // mousedown + preventDefault 阻止输入框失焦
+    // hover 只搬高亮 class、不重建 DOM（重建会毁掉正被点击的行，导致鼠标点不中）
+    row.onmouseenter = ()=>{
+      ddIdx = i;
+      ddEl.querySelectorAll(".dd-row").forEach((r,j)=>r.classList.toggle("on", j===i));
+      applyMarquee(ddEl);
+    };
+    ddEl.appendChild(row);
+  });
+  applyMarquee(ddEl);
+}
+function ddPick(d, i){
+  const it = d.list[i];
+  if(!it) return;
+  if(d.stage==="cmd"){
+    searchEl.value = (it.name.startsWith("//") ? it.name : d.scope + it.name) + " ";  // 补全命令名，带空格等待参数
+    ddIdx = 0; paintDropdown();
+  } else {
+    searchEl.value = d.scope + "type " + it.name;  // 类型值补全完整
+    ddEl.style.display = "none";
+  }
+  searchEl.focus();
+}
+let treeScrollEl = null;
+function renderTree(){
+  const tree = el("div","tree");
+  const head = el("div","tree-head");
+  head.appendChild(Object.assign(el("span","caption"),{textContent:"知识条目"}));
+  const add = el("button","btn"); add.textContent = "+ 新建";
+  add.style.cssText = "padding:2px 10px;font-size:12px";
+  add.onclick = ()=>{
+    const p = PROJECTS.find(pp=>state.open[pp.name]) || PROJECTS[0];
+    const ne = { file:"knowledge/未命名-"+(++newSeq)+".md", title:"未命名条目（新草稿）", type:"note",
+      born:"master", tags:[], mandatory:false, draft:true, archived:false,
+      size:"0.2 KB", mtime:"2026-08-23 10:00", summary:"（新草稿，待编辑）", body:"（空）" };
+    p.entries.unshift(ne); state.sel = ne; render();
+  };
+  head.appendChild(add);
+  tree.appendChild(head);
+  const wrap = el("div","search-wrap");
+  const search = el("input","search");
+  searchEl = search;
+  search.placeholder = "过滤条目… / 命令（/type、/tag）";
+  search.value = state.cmd ? "" : state.q;
+  search.oninput = ()=>{
+    const v = search.value;
+    ddIdx = 0; paintDropdown();
+    if(v.startsWith("/")) return;            // 命令输入中：暂停即时过滤，回车生效
+    state.q = v; state.cmd = null; state.cmdErr=""; state.showHelp=false; state.scopeNote="";
+    paintFilterBar(); fillTree();
+  };
+  search.onkeydown = e=>{
+    const ddVisible = ddEl && ddEl.style.display !== "none" && ddEl.childNodes.length;
+    if(e.key==="Escape"){
+      if(ddVisible){ ddEl.style.display = "none"; e.preventDefault(); }
+      return;
+    }
+    if((e.key==="ArrowDown"||e.key==="ArrowUp") && ddVisible){
+      e.preventDefault();
+      const d = ddItems();
+      if(d && d.list.length){
+        ddIdx = (ddIdx + (e.key==="ArrowDown"?1:-1) + d.list.length) % d.list.length;
+        paintDropdown();
+      }
+      return;
+    }
+    if(e.key!=="Enter") return;
+    if(ddVisible){                            // 下拉打开时 Enter 优先选中补全
+      const d = ddItems();
+      if(d && d.list.length){ ddPick(d, ddIdx); e.preventDefault(); return; }
+    }
+    const v = search.value.trim();            // 下拉关闭时 Enter 执行过滤命令
+    if(v.startsWith("/")){
+      parseCommand(v); paintFilterBar(); fillTree();
+      if(ddEl) ddEl.style.display = "none";
+    }
+  };
+  search.onblur = ()=>{ setTimeout(()=>{ if(ddEl) ddEl.style.display = "none"; }, 120); };
+  wrap.appendChild(search);
+  ddEl = el("div","dd");
+  wrap.appendChild(ddEl);
+  tree.appendChild(wrap);
+  tree.appendChild(el("div","fbar"));
+  treeScrollEl = el("div","tree-scroll");
+  tree.appendChild(treeScrollEl);
+  fillTree();
+  paintFilterBar();
+  return tree;
+}
+/* ================= 需求 5：树按类目分组 ================= */
+/* 归组优先级 = 数组顺序（归档 > 草稿 > 注入 > 类型），每条目只入首个命中的类目 */
+const CURRENT_BRANCH = "master";
+const CATEGORIES = [
+  { key:"archived",  label:"归档", test:e=>e.archived },
+  { key:"draft",     label:"草稿", test:e=>e.draft },
+  { key:"mand",      label:"注入", test:e=>e.mandatory },
+  { key:"rule",      label:"规则", test:e=>e.type==="rule" },
+  { key:"pitfall",   label:"踩坑", test:e=>e.type==="pitfall" },
+  { key:"note",      label:"笔记", test:e=>e.type==="note" },
+  { key:"reference", label:"参考", test:()=>true },
+];
+const CAT_LAZY_N = 8;   // 类目内懒加载：超过 N 条截断 + 更多提示
+/* 类目目录与架构总览统一文件夹图标（stroke 风格）；演进历程用时钟图标占位（开发时重新设计） */
+const ICON_FOLDER_SM = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+const ICON_HISTORY = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>';
+
+function entryLeaf(e){
+  const leaf = el("button","leaf"+(state.sel===e?" sel":"")+(e.archived?" archived":""));
+  leaf.innerHTML = '<span class="l1">'+badges(e)
+    +(e.mandatory?'<span class="badge-mand">★</span>':"")
+    +(e.draft?'<span class="badge-draft">草稿</span>':"")+'</span>'
+    +'<span class="t2">'+esc(e.title)+'</span>';
+  leaf.onclick = ()=>{ state.sel=e; render(); };
+  return leaf;
+}
+/* 演进历程：文件节点（时钟图标占位，开发时重新设计），点击 = 详情区显示条目内容 */
+function specialLeaf(e){
+  const leaf = el("button","leaf spec"+(state.sel===e?" sel":""));
+  leaf.innerHTML = '<span class="l1"><span class="folder-ico">'+ICON_HISTORY+'</span></span>'
+    +'<span class="t2">'+esc(e.title)+'</span>';
+  leaf.onclick = ()=>{ state.sel=e; render(); };
+  return leaf;
+}
+function leafList(container, entries){
+  entries.slice(0, CAT_LAZY_N).forEach(e=>container.appendChild(entryLeaf(e)));
+  if(entries.length > CAT_LAZY_N)
+    container.appendChild(Object.assign(el("div","tree-more"),
+      {textContent:"… 还有 "+(entries.length-CAT_LAZY_N)+" 条"}));
+}
+function branchOk(e){   // branch:x 标签的分支差异条目按当前分支过滤
+  const bt = e.tags.find(t=>t.startsWith("branch:"));
+  return !bt || bt === "branch:"+CURRENT_BRANCH;
+}
+/* 类目最新时间（类内 max mtime，unix 秒）→ 相对时间小字 */
+function catLatest(entries){ return Math.max.apply(null, entries.map(e=>e.mts||0)); }
+function relTime(sec){
+  const d = Math.max(0, Math.floor(Date.now()/1000) - sec);
+  if(d < 60) return "刚刚";
+  if(d < 3600) return Math.floor(d/60)+" 分钟前";
+  if(d < 86400) return Math.floor(d/3600)+" 小时前";
+  return Math.floor(d/86400)+" 天前";
+}
+function catRow(label, count, ck, defaultOpen, latest){
+  const cOpen = ck in state.catOpen ? state.catOpen[ck] : defaultOpen;
+  const crow = el("button","tn-cat"+(cOpen?" open":""));
+  crow.innerHTML = '<span class="caret">▶</span><span class="folder-ico">'+ICON_FOLDER_SM+'</span>'
+    +esc(label)+'<span class="cnt">'+count+'</span>'
+    +(latest ? '<span class="mtime">'+relTime(latest)+'</span>' : "");
+  crow.onclick = ()=>{ state.catOpen[ck]=!cOpen; render(); };
+  return { crow, cOpen };
+}
+/* 架构总览：目录+文件双重身份——箭头/图标区点击 = 展开/收起子章节，点名 = 详情出内容 */
+function dualLeaf(e, childCount, ck){
+  const cOpen = ck in state.catOpen ? state.catOpen[ck] : true;
+  const leaf = el("button","leaf spec dual"+(state.sel===e?" sel":"")+(cOpen?" open":""));
+  leaf.innerHTML = '<span class="caret">▶</span><span class="folder-ico">'+ICON_FOLDER_SM+'</span>'
+    +'<span class="t2">'+esc(e.title)+'</span><span class="cnt">'+childCount+'</span>';
+  const toggle = ev=>{ ev.stopPropagation(); state.catOpen[ck]=!cOpen; render(); };
+  leaf.querySelector(".caret").onclick = toggle;
+  leaf.querySelector(".folder-ico").onclick = toggle;
+  leaf.onclick = ()=>{ state.sel=e; render(); };
+  return { leaf, cOpen };
+}
+/* 参考目录子结构（固定顺序）：架构总览（双重身份，子节点=章节条目，无中间"章节"目录）→
+   演进历程（文件节点，点击出内容）→ 其他（真目录，普通无 wiki 标签的 reference）；
+   无 wiki 条目的项目只显示"其他" */
+function renderRefGroup(sub, p, entries){
+  const overview = entries.filter(e=>e.title==="架构总览");
+  const evo = entries.filter(e=>e.title==="演进历程");
+  const isWiki = e=>e.tags.includes("wiki") && !overview.includes(e) && !evo.includes(e);
+  const chapters = entries.filter(e=>isWiki(e) && branchOk(e));
+  chapters.sort((a,b)=>{   // 分支差异条目排列在后
+    const ab = a.tags.some(t=>t.startsWith("branch:")) ? 1 : 0;
+    const bb = b.tags.some(t=>t.startsWith("branch:")) ? 1 : 0;
+    return ab-bb;
+  });
+  const plain = entries.filter(e=>!overview.includes(e)&&!evo.includes(e)&&!isWiki(e));
+  overview.forEach(e=>{
+    const { leaf, cOpen } = dualLeaf(e, chapters.length, p.name+"/reference/架构总览");
+    sub.appendChild(leaf);
+    if(cOpen && chapters.length){
+      const sub2 = el("div","tn-kids");
+      leafList(sub2, chapters);
+      sub.appendChild(sub2);
+    }
+  });
+  evo.forEach(e=>sub.appendChild(specialLeaf(e)));
+  if(plain.length){
+    const { crow, cOpen } = catRow("其他", plain.length, p.name+"/reference/其他", true);
+    sub.appendChild(crow);
+    if(cOpen){
+      const sub2 = el("div","tn-kids");
+      leafList(sub2, plain);
+      sub.appendChild(sub2);
+    }
+  }
+}
+
+function fillTree(){
+  if(!treeScrollEl) return;
+  treeScrollEl.innerHTML = "";
+  const filtering = !!(state.cmd || state.q.trim());
+  const res = filteredProjects();
+  if(!res.length){
+    treeScrollEl.appendChild(Object.assign(el("div","tree-empty"),
+      {textContent: state.cmd||state.q.trim() ? "无命中条目" : "（无条目）"}));
+    return;
+  }
+  res.forEach(({p,list})=>{
+    const open = filtering ? true : !!state.open[p.name];
+    const pj = el("button","tn-proj"+(open?" open":""));
+    pj.innerHTML = '<span class="caret">▶</span>'+esc(p.name)+'<span class="cnt">'+list.length+'</span>';
+    pj.title = p.root;
+    pj.onclick = ()=>{ state.open[p.name]=!state.open[p.name]; render(); };
+    treeScrollEl.appendChild(pj);
+    if(open){
+      const kids = el("div","tn-kids");
+      let rest = list;
+      const groups = [];
+      CATEGORIES.forEach(cat=>{
+        const entries = rest.filter(cat.test);       // 首个命中类目即归组
+        rest = rest.filter(e=>!entries.includes(e));
+        if(entries.length)                           // 空类目不显示（过滤后无命中同样隐藏）
+          groups.push({ cat, entries, latest:catLatest(entries) });
+      });
+      // 类目顺序：草稿固定置顶、归档固定沉底；中间类目按类内最新 mtime 降序动态排
+      groups.sort((a,b)=>{
+        const pin = g => g.cat.key==="draft" ? 0 : g.cat.key==="archived" ? 2 : 1;
+        const pa = pin(a), pb = pin(b);
+        return pa!==pb ? pa-pb : b.latest-a.latest;
+      });
+      /* 默认展开规则（仅项目首次展开时应用一次；手动操作写进 catOpen 后优先）：
+         有草稿 → 只展开草稿；无草稿 → 只展开类内最新 mtime 最大的类目；其余收起 */
+      if(!filtering && !(p.name in state.catDefaulted)){
+        const top = groups.find(g=>g.cat.key==="draft")
+                 || groups.slice().sort((a,b)=>b.latest-a.latest)[0];
+        groups.forEach(g=>{ state.catOpen[p.name+"/"+g.cat.key] = g===top; });
+        state.catDefaulted[p.name] = true;
+      }
+      groups.forEach(g=>{
+        const { crow, cOpen } = catRow(g.cat.label, g.entries.length,
+          p.name+"/"+g.cat.key, g.cat.key!=="archived", g.latest);  // 过滤时维持现状：未动过的类目展开（归档收起）
+        kids.appendChild(crow);
+        if(!cOpen) return;
+        const sub = el("div","tn-kids");
+        if(g.cat.key==="reference") renderRefGroup(sub, p, g.entries);
+        else leafList(sub, g.entries);
+        kids.appendChild(sub);
+      });
+      treeScrollEl.appendChild(kids);
+    }
+  });
+}
+
+/* ================= 详情 ================= */
+function renderDetail(){
+  const d = el("div","detail");
+  const e = state.sel;
+  if(!e){
+    d.appendChild(Object.assign(el("div","placeholder"),{textContent:"← 从树中选择一条知识条目"}));
+    return d;
+  }
+  d.appendChild(Object.assign(el("div","d-path"),
+    {textContent:projOf(e).root+"\\"+e.file.replace(/\//g,"\\")}));
+  const fm = el("div","d-filemeta");
+  fm.innerHTML = "<b>"+esc(e.file.split("/").pop())+"</b> · "+e.size+" · 修改于 "+e.mtime;
+  d.appendChild(fm);
+  d.appendChild(Object.assign(el("h1","d-title"),{textContent:e.title}));
+  const at = el("div","d-attrs"); at.innerHTML = detailAttrs(e); d.appendChild(at);
+  const ops = el("div","d-ops");
+  if(e.draft){
+    const ap = el("button","btn btn-primary"); ap.textContent = "批准";   // 需求 1：实心主按钮
+    ap.onclick = ()=>{ e.draft=false; render(); };
+    ops.appendChild(ap);
+  }
+  const ed = el("button","btn"); ed.textContent = "编辑"; ops.appendChild(ed);
+  const ar = el("button","btn"); ar.textContent = e.archived?"取消归档":"归档";
+  ar.onclick = ()=>{ e.archived=!e.archived; render(); };
+  ops.appendChild(ar);
+  const del = el("button","btn btn-danger"); del.textContent = "删除";
+  del.onclick = ()=>{
+    const p = projOf(e); p.entries.splice(p.entries.indexOf(e),1);
+    state.sel = null; render();
+  };
+  ops.appendChild(del);
+  d.appendChild(ops);
+  const sm = el("div","d-summary"); sm.textContent = e.summary; d.appendChild(sm);
+  const bd = el("div","d-body md"); bd.innerHTML = renderMd(e.body); d.appendChild(bd);
+  return d;
+}
+
+/* ================= 需求 3：终端面板（chat 式 CLI，mock 白名单） ================= */
+const WHITELIST = ["list","search","doctor","add","propose","approve","archive","capture","wiki","on","off"];
+/* chips 只放命令名（说明挪进输入时的命令下拉里） */
+const CHIPS = ["list","search","doctor","capture","approve","wiki"];
+/* 终端命令提示下拉：name 命令名 / usage 仅参数部分（无参为空）/ desc 一句话功能说明 */
+const TERM_CMDS = [
+  { name:"list",    usage:"",                              desc:"列出项目与条目" },
+  { name:"search",  usage:"<查询>",                        desc:"语义检索条目" },
+  { name:"doctor",  usage:"",                              desc:"环境自检" },
+  { name:"capture", usage:"[propose|auto|interval <n>]",   desc:"查看或设置沉淀模式" },
+  { name:"approve", usage:"<条目文件>",                    desc:"批准草稿条目" },
+  { name:"wiki",    usage:"<status|mark|base|diff>",       desc:"项目 wiki 状态" },
+  { name:"add",     usage:"",                              desc:"新建条目" },
+  { name:"propose", usage:"",                              desc:"提议草稿" },
+  { name:"archive", usage:"",                              desc:"归档条目" },
+  { name:"on",      usage:"",                              desc:"开启 hooks" },
+  { name:"off",     usage:"",                              desc:"关闭 hooks" },
+];
+function mockExec(args){
+  const c = args[0]||"";
+  if(!WHITELIST.includes(c)){
+    return { code:1, err:'不可用命令：'+(c||"（空）")+'\n可用命令：\n  '
+      + WHITELIST.join("\n  ") };
+  }
+  switch(c){
+    case "list": return { code:0, out:"已注册项目（"+PROJECTS.length+"）\n"
+      + PROJECTS.map(p=>"  "+p.name.padEnd(24," ")+" "+p.entries.length+" 条  "+p.root).join("\n") };
+    case "doctor": return { code:0, out:"✓ config.toml 解析正常\n✓ kb.db 可写（WAL 已开启）\n"
+      + "✓ daemon 运行中（pid 12345 · 端口 17888）\n✓ embedding 服务可用（builtin · qwen3-local）\n\n自检通过，未发现问题。" };
+    case "search": {
+      const q = args.slice(1).join(" ")||"（空查询）";
+      return { code:0, out:'查询："'+q+'" · 命中 2 条（按 score 降序）\n\n'
+        + "[0.82] 混合检索准入必须按通道独立判定（OpenKnowledge · pitfall）\n"
+        + "       同域语料余弦基线会顶穿总分阈值…\n\n"
+        + "[0.71] hooks 超时默认 10s 的由来（OpenKnowledge · note）\n"
+        + "       Windows 高负载下 5s 超时致整会话静默丢失…" };
+    }
+    case "capture": return { code:0, out:"当前沉淀模式：propose（AI 提议，人批准）\n轮次间隔：3" };
+    case "approve":
+      if(!args[1]) return { code:1, err:"用法：approve <file>，例如 approve 混合检索准入必须按通道独立判定.md" };
+      return { code:0, out:"已批准 knowledge/"+args[1]+"\n条目已入库，索引已重建。" };
+    case "wiki": return { code:0, out:"wiki status\n  OpenKnowledge        已生成（8 条 reference · 2026-08-22）\n"
+      + "  claude-code-deepseek 未生成\n  Reasonix             未生成" };
+    case "propose": return { code:0, out:"已生成 1 条沉淀草稿：混合检索调优记录.md（待批准）" };
+    case "add": return { code:0, out:"已录入草稿条目：未命名条目.md（待编辑/批准）" };
+    case "archive": return { code:0, out:"已归档 1 条：旧版注入设计.md" };
+    case "on": return { code:0, out:"已开启全部 agent 的 hooks。" };
+    case "off": return { code:0, out:"已关闭全部 agent 的 hooks。" };
+  }
+  return { code:1, err:"未实现" };
+}
+let termHistEl = null, termInputEl = null, termDdEl = null, termDdIdx = 0;
+let termHeadEl = null, termBottomEl = null, termInputRowEl = null;
+/* Esc 与发送只关闭下拉本次显示（muted）；输入变化 / ↑↓ / 失焦后重新聚焦时恢复 */
+let termDdMuted = false, termDdBlurred = false;
+/* 终端输入下拉：聚焦即弹出（空输入显示全部 11 条），首 token 阶段按前缀过滤，
+   含空格进入参数阶段关闭；Esc 与发送都只关本次显示（输入变化/↑↓/失焦后重新聚焦即恢复）。 */
+function termDdItems(){
+  const v = termInputEl ? termInputEl.value : "";
+  if(v.includes(" ")) return [];
+  if(!v) return TERM_CMDS;
+  return TERM_CMDS.filter(c=>c.name.startsWith(v));
+}
+function paintTermDropdown(){
+  if(!termDdEl) return;
+  if(termDdMuted){ termDdEl.style.display = "none"; return; }
+  const list = termDdItems();
+  termDdEl.innerHTML = "";
+  if(!list.length){ termDdEl.style.display = "none"; return; }
+  if(termDdIdx >= list.length) termDdIdx = 0;   // 默认高亮第一条，Tab/Enter 直接可用
+  termDdEl.style.display = "block";
+  /* 下边缘贴输入框上边缘（bottom = 输入行实测高度，不含 chips 行）：
+     下拉作为浮层盖住 chips 行与历史区（z-index 60），chips 保持原位仅被遮住，关闭后恢复可见；
+     高度随内容自适应，max-height 上限 = 面板高 − 头部 − 输入行高 − 边距 */
+  const rowH = termInputRowEl ? termInputRowEl.offsetHeight : 0;
+  termDdEl.style.bottom = rowH + "px";
+  const headH = (termHeadEl && termHeadEl.offsetParent) ? termHeadEl.offsetHeight : 0;  // 变体 C 头隐藏
+  const panelH = termDdEl.offsetParent ? termDdEl.offsetParent.clientHeight : 400;
+  termDdEl.style.maxHeight = Math.max(80, panelH - headH - rowH - 12) + "px";
+  list.forEach((c,i)=>{
+    const row = el("div","dd-row"+(i===termDdIdx?" on":""));
+    row.innerHTML = '<span class="dd-inner"><span class="dd-name">'+esc(c.name)+'</span>'
+                  + (c.usage ? '<span class="dd-usage">'+esc(c.usage)+'</span>' : '')
+                  + '<span class="dd-desc">'+esc(c.desc)+'</span></span>';
+    row.onmousedown = e=>{ e.preventDefault(); termDdPick(c.name); };  // mousedown + preventDefault 防 blur
+    row.onmouseenter = ()=>{
+      termDdIdx = i;
+      termDdEl.querySelectorAll(".dd-row").forEach((r,j)=>r.classList.toggle("on", j===i));
+      applyMarquee(termDdEl);
+    };
+    termDdEl.appendChild(row);
+  });
+  applyMarquee(termDdEl);
+}
+function termDdPick(name){
+  termInputEl.value = name + " ";   // 补全为命令名 + 尾随空格，等待参数
+  termDdEl.style.display = "none";
+  termInputEl.focus();
+}
+function renderTerminal(extraCls){
+  const t = el("div","term"+(extraCls?" "+extraCls:""));
+  const head = el("div","term-head");
+  termHeadEl = head;
+  head.appendChild(Object.assign(el("span","tt"),{textContent:"终端"}));
+  head.appendChild(Object.assign(el("span","sub"),{textContent:"chat 式 CLI · 白名单 mock 执行"}));
+  t.appendChild(head);
+  termHistEl = el("div","term-hist");
+  t.appendChild(termHistEl);
+  paintTermHist();
+  const bottom = el("div");
+  termBottomEl = bottom;
+  const chips = el("div","term-chips");
+  CHIPS.forEach(cmd=>{
+    const c = el("button","tchip");
+    c.textContent = cmd;
+    c.onclick = ()=>{ if(termInputEl){ termInputEl.value = cmd; termInputEl.focus(); } };
+    chips.appendChild(c);
+  });
+  bottom.appendChild(chips);
+  const row = el("div","term-input");
+  termInputRowEl = row;
+  const inWrap = el("div","search-wrap");
+  inWrap.style.cssText = "flex:1;margin:0";
+  termInputEl = el("input");
+  termInputEl.style.width = "100%";
+  termInputEl.placeholder = "输入命令，例如 list";
+  termInputEl.oninput = ()=>{ termDdMuted = false; termDdIdx = 0; paintTermDropdown(); };
+  termInputEl.onfocus = ()=>{                     // 失焦后重新聚焦时恢复弹出（程序性 refocus 不算）
+    if(termDdBlurred){ termDdMuted = false; termDdBlurred = false; }
+    termDdIdx = 0; paintTermDropdown();
+  };
+  termInputEl.onkeydown = e=>{
+    const ddVisible = termDdEl && termDdEl.style.display !== "none" && termDdEl.childNodes.length;
+    if(e.key==="Escape"){
+      if(ddVisible){ termDdEl.style.display = "none"; termDdMuted = true; e.preventDefault(); }
+      return;
+    }
+    if(e.key==="ArrowDown"||e.key==="ArrowUp"){     // ↑↓ 随时唤出/移动高亮
+      e.preventDefault();
+      termDdMuted = false;
+      const list = termDdItems();
+      if(list.length){
+        termDdIdx = (termDdIdx + (e.key==="ArrowDown"?1:-1) + list.length) % list.length;
+        paintTermDropdown();
+      }
+      return;
+    }
+    if(e.key==="Tab" && ddVisible){                  // Tab 补全当前高亮命令，阻止焦点移走
+      e.preventDefault();
+      const list = termDdItems();
+      if(list.length) termDdPick(list[termDdIdx].name);
+      return;
+    }
+    if(e.key!=="Enter") return;
+    if(ddVisible){                            // 下拉打开时 Enter 优先补全，不发送
+      const list = termDdItems();
+      if(list.length){ termDdPick(list[termDdIdx].name); e.preventDefault(); return; }
+    }
+    sendTerm();
+  };
+  termInputEl.onblur = ()=>{
+    termDdBlurred = true;
+    setTimeout(()=>{ if(termDdEl) termDdEl.style.display = "none"; }, 120);
+  };
+  inWrap.appendChild(termInputEl);
+  row.appendChild(inWrap);
+  const send = el("button","btn btn-primary"); send.textContent = "发送";
+  send.onclick = sendTerm;
+  row.appendChild(send);
+  bottom.appendChild(row);
+  t.appendChild(bottom);
+  // 下拉挂到 .term 面板下（相对面板绝对定位，向上顶到面板顶部），由 paintTermDropdown 实测 top/bottom
+  termDdEl = el("div","dd term-dd");
+  t.appendChild(termDdEl);
+  return t;
+}
+/* 输出块：按行拆分，每行单行截断 + title 悬浮看全文 */
+function outBlock(text){
+  const box = el("div","t-out");
+  (text||"").split("\n").forEach(l=>{
+    const ln = el("div","t-line");
+    ln.textContent = l; ln.title = l;
+    box.appendChild(ln);
+  });
+  return box;
+}
+function paintTermHist(){
+  if(!termHistEl) return;
+  termHistEl.innerHTML = "";
+  state.termHist.forEach(h=>{
+    const item = el("div");
+    const echo = el("div","t-echo");
+    // 状态并到命令行尾部（省一行）：执行中/成功/失败 只留一行回显 + 纯输出卡片
+    const st = h.pending ? '<span class="t-status run">⏳ 执行中…</span>'
+           : h.code===0 ? '<span class="t-status ok">✓ 执行成功</span>'
+           : '<span class="t-status err">✗ 执行失败</span>';
+    echo.innerHTML = "&gt;_ <b>"+esc(h.cmd)+"</b> "+st;
+    item.appendChild(echo);
+    if(h.pending){
+      // 无卡片：状态已在回显行
+    } else if(h.code===0){
+      const card = el("div","t-card ok");
+      card.appendChild(outBlock(h.out));
+      item.appendChild(card);
+    } else {
+      const card = el("div","t-card err");
+      card.appendChild(outBlock(h.err));
+      item.appendChild(card);
+    }
+    termHistEl.appendChild(item);
+  });
+  termHistEl.scrollTop = termHistEl.scrollHeight;
+}
+function sendTerm(){
+  if(!termInputEl) return;
+  const v = termInputEl.value.trim();
+  if(!v || state.termBusy) return;
+  state.termBusy = true;
+  state.termHist.push({ cmd:v, pending:true });
+  paintTermHist();
+  termInputEl.value = "";
+  termDdMuted = true;               // 发送后关闭下拉（保持聚焦也不弹），让最新回显+结果卡片可见
+  if(termDdEl) termDdEl.style.display = "none";
+  setTimeout(()=>{
+    const h = state.termHist[state.termHist.length-1];
+    const args = v.split(/\s+/).filter(Boolean);   // 用户输入不带 ok 前缀，按第一个 token 直接匹配子命令
+    const r = mockExec(args);
+    h.pending = false; h.code = r.code; h.out = r.out; h.err = r.err;
+    state.termBusy = false;
+    paintTermHist();
+    if(termInputEl){ termDdBlurred = false; termInputEl.focus(); }  // 程序性 refocus 不触发下拉重弹
+  }, 300);
+}
+
+/* ================= 需求 4：栏目布局引擎 + 界面设置弹窗 ================= */
+const SLOT_LABEL = { left:"左", middle:"中", right:"右", bottom:"下" };
+const PANEL_LABEL = { tree:"条目树", detail:"详情", term:"终端" };
+const ICON_GEAR = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+const ICON_MOON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+
+/* 栏目节点：树/终端定宽（可拖），详情自适应 */
+function panelNode(key){
+  if(key==="tree"){ const n = renderTree(); n.style.width = state.treeW+"px"; return n; }
+  if(key==="term"){ const n = renderTerminal("term-col"); n.style.width = state.termW+"px"; return n; }
+  return renderDetail();
+}
+/* 相邻栏目间的竖分隔条：拖动调整相邻定宽栏目（tree/term）的宽度 */
+function addVSplitter(row, left, right){
+  const target = (left && left.k!=="detail") ? { k:left.k, node:left.node, dir:1 }
+               : (right && right.k!=="detail") ? { k:right.k, node:right.node, dir:-1 } : null;
+  if(!target) return;
+  const sp = el("div","splitter");
+  row.appendChild(sp);
+  const wkey = target.k==="tree" ? "treeW" : "termW";
+  sp.onmousedown = e0=>{
+    e0.preventDefault();
+    const startX = e0.clientX, startW = state[wkey];
+    const mv = ev=>{
+      state[wkey] = Math.min(620, Math.max(220, startW + target.dir*(ev.clientX-startX)));
+      target.node.style.width = state[wkey]+"px";
+    };
+    const up = ()=>{ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+    document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
+  };
+}
+/* 按槽位顺序（左→中→右）放置栏目，空槽自动压缩 */
+function placePanels(row, cfg, keys){
+  const order = { left:0, middle:1, right:2 };
+  const placed = keys.slice().sort((a,b)=>order[cfg[a]]-order[cfg[b]]);
+  let prev = null;
+  placed.forEach(k=>{
+    const node = panelNode(k);
+    if(prev) addVSplitter(row, prev, { k, node });
+    row.appendChild(node);
+    prev = { k, node };
+  });
+}
+function renderLayout(main, cfg){
+  const area = el("div","layout-area");
+  main.appendChild(area);
+  if(cfg.term==="bottom"){
+    // 终端在下：上部 = 树+详情横向两栏，下部 = 终端整条（默认高 40%，横分隔条可拖）
+    const upper = el("div","layout-row");
+    area.appendChild(upper);
+    placePanels(upper, cfg, ["tree","detail"]);
+    const hsp = el("div","hsplitter");
+    area.appendChild(hsp);
+    const term = renderTerminal("term-strip");
+    term.style.height = (state.termH*100)+"%";
+    area.appendChild(term);
+    hsp.onmousedown = e0=>{
+      e0.preventDefault();
+      const startY = e0.clientY, startH = state.termH, areaH = area.clientHeight;
+      const mv = ev=>{
+        state.termH = Math.min(0.7, Math.max(0.2, startH + (startY-ev.clientY)/areaH));
+        term.style.height = (state.termH*100)+"%";
+      };
+      const up = ()=>{ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+      document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
+    };
+  } else {
+    const row = el("div","layout-row");
+    area.appendChild(row);
+    placePanels(row, cfg, ["tree","detail","term"]);
+  }
+}
+
+/* 界面设置弹窗：两段式（弹窗内改动只落草稿态，保存才生效）；冲突槽位置灰不可选 */
+function renderCfgModal(){
+  const d = state.cfgDraft;
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:"界面设置"}));
+  const desc = el("div","pdesc");
+  desc.textContent = "这里只收纳纯 UI 设置（不碰后端配置）。";
+  m.appendChild(desc);
+  m.appendChild(Object.assign(el("div","sec-label2"),{textContent:"栏目布局（管理页）"}));
+  const SLOTS = { tree:["left","middle","right"], detail:["left","middle","right"],
+                  term:["left","middle","right","bottom"] };
+  ["tree","detail","term"].forEach(p=>{
+    const row = el("div","cfg-row");
+    row.appendChild(Object.assign(el("span","k"),{textContent:PANEL_LABEL[p]}));
+    const sel = el("select","pselect");
+    SLOTS[p].forEach(v=>{
+      // 已被其他栏目占用的左/中/右槽位不显示（"下"不占槽位）
+      if(v!=="bottom" && ["tree","detail","term"].some(q=>q!==p && d[q]===v)) return;
+      const op = el("option");
+      op.value = v; op.textContent = SLOT_LABEL[v];
+      sel.appendChild(op);
+    });
+    sel.value = d[p];
+    sel.onchange = ()=>{ state.cfgDraft[p] = sel.value; render(); };
+    row.appendChild(sel);
+    m.appendChild(row);
+  });
+  const hint = el("div","pdesc");
+  hint.textContent = "已被占用的位置不出现在选项中；终端选「下」时占底部整条，树与详情在上方两栏排列。保存后立即重排并记住此布局。";
+  hint.style.marginTop = "4px";
+  m.appendChild(hint);
+  const foot = el("div","mfoot");
+  const rst = el("button","btn"); rst.textContent = "恢复默认"; rst.style.marginRight = "auto";
+  rst.onclick = ()=>{ state.cfgDraft = Object.assign({}, DEFAULT_LAYOUT); render(); };
+  const cancel = el("button","btn"); cancel.textContent = "取消";
+  cancel.onclick = ()=>{ state.cfgOpen = false; render(); };
+  const ok = el("button","btn btn-primary"); ok.textContent = "保存";
+  ok.onclick = ()=>{
+    state.layout = Object.assign({}, state.cfgDraft);
+    state.customLayout = true;
+    try{ localStorage.setItem(LAYOUT_KEY, JSON.stringify(state.layout)); }catch(_){}
+    state.cfgOpen = false; render();
+  };
+  foot.appendChild(rst); foot.appendChild(cancel); foot.appendChild(ok);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = e=>{ if(e.target===mask){ state.cfgOpen = false; render(); } };
+  return mask;
+}
+
+/* ================= 整体渲染 ================= */
+function render(){
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  const bar = el("div","topbar");
+  const brand = el("div","brand");
+  brand.innerHTML = '<span class="logo">ok</span>OkManager';
+  bar.appendChild(brand);
+  bar.appendChild(el("div","spacer"));
+  const cfgBtn = el("button","icon-btn");
+  cfgBtn.innerHTML = ICON_GEAR; cfgBtn.title = "界面设置";
+  cfgBtn.onclick = ()=>{
+    state.cfgDraft = Object.assign({}, state.layout||DEFAULT_LAYOUT);
+    state.cfgOpen = true; render();
+  };
+  bar.appendChild(cfgBtn);
+  const themeBtn = el("button","icon-btn");
+  themeBtn.innerHTML = ICON_MOON; themeBtn.title = "深色模式（原型未实现）";
+  bar.appendChild(themeBtn);
+  const langBtn = el("button","icon-btn");
+  langBtn.textContent = "EN"; langBtn.title = "语言切换（原型未实现）";
+  langBtn.style.fontSize = "12px";
+  bar.appendChild(langBtn);
+  app.appendChild(bar);
+  const main = el("div","main");
+  app.appendChild(main);
+
+  const side = el("aside","side");
+  ["📖","🧭","⚙","📄","▦"].forEach((ico,i)=>{
+    const b = el("button","mi"+(i===0?" active":""));
+    b.textContent = ico; b.title = ["管理","引导","设置","日志","其他"][i];
+    side.appendChild(b);
+  });
+  main.appendChild(side);
+
+  if(state.layout===null){
+    // 预设 B（无已存配置时）：树 | 右区顶部 Tab（详情 / 终端）
+    main.appendChild(renderTree());
+    const wrap = el("div","right-tabs");
+    const tabbar = el("div","tabbar");
+    [["detail","详情"],["terminal","终端"]].forEach(([k,label])=>{
+      const b = el("button", state.rightTab===k?"on":"");
+      b.textContent = label;
+      b.onclick = ()=>{ state.rightTab=k; render(); };
+      tabbar.appendChild(b);
+    });
+    wrap.appendChild(tabbar);
+    wrap.appendChild(state.rightTab==="detail" ? renderDetail() : renderTerminal());
+    main.appendChild(wrap);
+  } else {
+    renderLayout(main, state.layout);   // 需求 4：按栏目布局配置渲染
+  }
+  if(state.cfgOpen) app.appendChild(renderCfgModal());
+  paintVnav();
+}
+
+/* ================= 浮动变体切换条 ================= */
+function paintVnav(){
+  const nav = document.getElementById("vnav");
+  nav.innerHTML = "";
+  const prev = el("button"); prev.textContent = "‹"; prev.onclick = ()=>cycleVariant(-1);
+  const lbl = el("span","lbl");
+  lbl.textContent = state.customLayout ? "自定义布局（已存配置）"
+                  : VARIANTS.find(v=>v[0]===state.variant)[1];
+  const next = el("button"); next.textContent = "›"; next.onclick = ()=>cycleVariant(1);
+  nav.appendChild(prev); nav.appendChild(lbl); nav.appendChild(next);
+}
+function cycleVariant(d){
+  const i = VARIANTS.findIndex(v=>v[0]===state.variant);
+  state.variant = VARIANTS[(i+d+VARIANTS.length)%VARIANTS.length][0];
+  // 切换预设变体 = 清掉已存布局配置，回到预设
+  try{ localStorage.removeItem(LAYOUT_KEY); }catch(_){}
+  state.customLayout = false;
+  state.layout = VARIANT_LAYOUT[state.variant];
+  history.replaceState(null,"",location.pathname+"?variant="+state.variant);
+  render();
+}
+document.addEventListener("keydown", e=>{
+  if(state.cfgOpen){
+    if(e.key==="Escape"){ state.cfgOpen = false; render(); }
+    return;   // 弹窗打开时不响应变体切换方向键
+  }
+  const tag = ((e.target&&e.target.tagName)||"").toLowerCase();
+  if(tag==="input"||tag==="textarea") return;   // 聚焦输入框时不拦截方向键
+  if(e.key==="ArrowLeft") cycleVariant(-1);
+  else if(e.key==="ArrowRight") cycleVariant(1);
+});
+
+render();
+</script>
+</body>
+</html>
