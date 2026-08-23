@@ -32,6 +32,9 @@ func quickClient() *http.Client { return &http.Client{Timeout: healthTimeout} }
 // Ensure 在 daemon 不在时后台拉起（15s 防抖，防止多会话同时 spawn 风暴）。
 func Ensure() {
 	if info, err := daemonx.Load(); err == nil && info.Healthy(quickClient()) {
+		// 防抖标记没有别的删除路径，不清会永久滞留、误导排障（看似"拉起中"）。
+		// 健康分支先于防抖判断，不影响 15s 防抖语义。
+		_ = os.Remove(daemonx.Path() + ".spawning")
 		return
 	}
 	mark := daemonx.Path() + ".spawning"

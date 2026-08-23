@@ -18,8 +18,14 @@
 - 客户端发现顺序：读 daemon.json → 健康则直接用 → 不健康/不存在则拉起
 - 拉起目标：当前 exe 同目录的 `okd.exe`（Linux 为 `okd`），无参数；不存在则回退"自身 exe + `daemon` 参数"（旧部署/单二进制开发）
 - 拉起方式：DETACHED 后台进程，stdio 追加写入 `~/.openknowledge/daemon.log`（按行带时间戳）
-- 防抖：拉起前写 `daemon.json.spawning` 标记，15s 内不重复拉起
+- 防抖：拉起前写 `daemon.json.spawning` 标记，15s 内不重复拉起；daemon 健康后客户端删除该标记（2026-08-22 增补：此前无删除路径，标记永久滞留会误导排障）
 - 版本切换：daemon.json 指纹 ≠ 拉起目标指纹 → 客户端先 `POST /api/shutdown` 再删凭证再拉起
+
+## 子命令兼容转发（okd，2026-08-22 增补）
+
+- gui-split（2026-08-21）前的注册形态是 `okd.exe hook/on/off/setup ...`；okd 现仅自有 `stop`，其余**已知 ok 子命令转发给同目录 `ok.exe`**（`internal/daemonx.CliTargetFor` 解析；孤儿 okd——无同目录 ok——报错退出 1），stdio 与退出码原样透传
+- 未知参数维持"启动 daemon"语义；新增 ok 子命令必须同步 `internal/daemon/forward_cli.go` 的子命令表
+- hooks/技能注册一律写 ok 路径：daemon 进程内 `os.Executable()` 是 okd，直写会注册出失效命令（okd 收到 hook 子命令只会空转启动 daemon，破坏 hook JSON 协议）
 
 ## 停服
 

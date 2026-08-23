@@ -63,6 +63,28 @@ func TestForwardHookOK(t *testing.T) {
 	}
 }
 
+// daemon 健康时顺手清掉 .spawning 残留：防抖标记没有任何删除路径，一次拉起
+// 后永久滞留，排障时会误读成"正在拉起中"（2026-08-22 实际踩过）。
+func TestEnsureRemovesStaleSpawningMarkWhenHealthy(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	_ = stubSpawn(t)
+	fp, err := daemonx.ExeFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := fakeDaemon(t, fp, HookResponse{})
+	defer srv.Close()
+	saveInfo(t, srv.Listener.Addr().(*net.TCPAddr).Port, fp)
+	mark := daemonx.Path() + ".spawning"
+	if err := os.WriteFile(mark, []byte("1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	Ensure()
+	if _, err := os.Stat(mark); !os.IsNotExist(err) {
+		t.Fatal("stale spawning mark should be removed when daemon is healthy")
+	}
+}
+
 func TestForwardHookStaleDaemonFallsBack(t *testing.T) {
 	t.Setenv("OK_HOME", t.TempDir())
 	calls := stubSpawn(t)

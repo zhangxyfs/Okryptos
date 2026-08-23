@@ -53,6 +53,8 @@ UI 原型：`web/prototype-manager-v2.html`（功能面以此为准）
 ### 4.2 okd.exe（windowsgui）
 
 - 新建 `cmd/okd`，平移 `internal/daemon`（server/client/sidecar/spawn）+ `internal/gui`（api/browser/window）
+- **兼容转发（2026-08-22 增补）**：gui-split 前注册的 hooks/技能命令是 `okd.exe hook ...` 形态，拆分后 okd 只认 stop——存量注册若不兼容会静默失败（ZCode 实测：hook 每次触发空转启动 daemon，stdout 打"daemon 已在运行"破坏 JSON 协议，全部注入失效）。okd 对已知 ok 子命令（`internal/daemon/forward_cli.go`，与 cmd/ok 分发面同步维护）转发同目录 ok 并透传 stdio 与退出码；stop/未知参数维持原语义；孤儿 okd（无同目录 ok）显式报错退出 1
+- **hooks/技能注册必须落 ok 路径**：GUI API（daemon 进程内）经 `daemonx.CliTargetFor` 把 `os.Executable()`（=okd）换算成同目录 ok 再写入 agent 配置——直写 okd 等于注册失效命令（同上实证）
 - 托盘：驻留、退出入口、打开配置中心入口
 - 单实例：`daemon.json` + 健康检查保证（现有机制）
 - 编译：`-ldflags "-H windowsgui"`；日志全量落 `daemon.log`，不依赖控制台 stdout
