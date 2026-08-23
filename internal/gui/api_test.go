@@ -445,6 +445,59 @@ func TestEntryDuplicate409(t *testing.T) {
 	}
 }
 
+// TestEntriesSortOrder 验证 /api/entries 顺序：草稿置顶，其余按 mtime 倒序
+// （GUI 树原样渲染本端点顺序；文件名字典序会让界面排序看起来错乱）。
+func TestEntriesSortOrder(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	knowledge := filepath.Join(okHome, "projects", "demo", "knowledge")
+	now := time.Now()
+	mk := func(file string, draft bool, age time.Duration) {
+		t.Helper()
+		e := &entry.Entry{Title: file, Type: "note", Draft: draft, Summary: "s", Body: "b"}
+		path := filepath.Join(knowledge, file)
+		if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mtime := now.Add(-age)
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 文件名字典序（a < b < c）与期望顺序刻意相反，确保测的是排序而非写入顺序
+	mk("a-old.md", false, 48*time.Hour)
+	mk("b-new.md", false, 1*time.Hour)
+	mk("c-mid-draft.md", true, 24*time.Hour)
+
+	code, data := do(t, "GET", srv.URL+"/api/entries?project=demo", testToken, nil)
+	if code != 200 {
+		t.Fatalf("list: status = %d, body %s", code, data)
+	}
+	var list []struct {
+		File  string `json:"file"`
+		Draft bool   `json:"draft"`
+	}
+	if err := json.Unmarshal(data, &list); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, len(list))
+	for i, e := range list {
+		got[i] = e.File
+	}
+	want := []string{"c-mid-draft.md", "b-new.md", "a-old.md"}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected list length: %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order = %v, want %v (draft first, then mtime desc)", got, want)
+		}
+	}
+}
+
 func TestEntryValidation(t *testing.T) {
 	h, _, okHome := newEnv(t)
 	mkProject(t, okHome, "demo")
@@ -2012,5 +2065,144 @@ func TestAPILogsUnchanged(t *testing.T) {
 	_, data = do(t, "GET", srv.URL+"/api/logs?tail=3&sig="+res.Sig, testToken, nil)
 	if strings.Contains(string(data), `"unchanged":true`) || !strings.Contains(string(data), "line2") {
 		t.Fatalf("文件变化后应返回新全量: %s", data)
+	}
+}
+
+// ---------- 终端 ----------
+
+// fake ok CLI 子进程入口：terminalCLI 被测试替换为测试二进制自身后，子进程带着
+// OK_TERMINAL_FAKE_OK=1 启动，在本 init 中按参数扮演 ok 并退出（不进入测试框架）。
+// list 回显 cwd 以验证工作目录传递；search sleep 用于超时路径（双平台通用，无需构建真 ok）。
+func init() {
+	if os.Getenv("OK_TERMINAL_FAKE_OK") != "1" {
+		return
+	}
+	args := os.Args[1:]
+	if len(args) == 0 {
+		os.Exit(1)
+	}
+	switch args[0] {
+	case "list":
+		cwd, _ := os.Getwd()
+		fmt.Printf("条目列表 cwd=%s\n", cwd)
+		os.Exit(0)
+	case "search":
+		if len(args) > 1 && args[1] == "sleep" {
+			time.Sleep(30 * time.Second)
+			os.Exit(1) // 应被超时 kill，走不到这里
+		}
+		fmt.Println("搜索结果")
+		os.Exit(0)
+	}
+	os.Exit(2)
+}
+
+// fakeTerminalCLI 把终端执行目标替换为测试二进制自身（fake ok）。
+func fakeTerminalCLI(t *testing.T) {
+	t.Helper()
+	t.Setenv("OK_TERMINAL_FAKE_OK", "1") // 子进程默认继承父进程环境
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := terminalCLI
+	terminalCLI = func() (string, error) { return exe, nil }
+	t.Cleanup(func() { terminalCLI = old })
+}
+
+type terminalResp struct {
+	Code   int    `json:"code"`
+	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
+}
+
+func TestTerminalExecWhitelistRejected(t *testing.T) {
+	h, _, _ := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, data := do(t, "POST", srv.URL+"/api/terminal/exec", testToken, map[string]any{
+		"args": []string{"index"},
+	})
+	if code != 200 {
+		t.Fatalf("status = %d, body %s", code, data)
+	}
+	var resp terminalResp
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code == 0 {
+		t.Fatalf("白名单外命令应返回非零 code: %+v", resp)
+	}
+	if !strings.Contains(resp.Stderr, "不可用命令") ||
+		!strings.Contains(resp.Stderr, "list") || !strings.Contains(resp.Stderr, "search") {
+		t.Fatalf("应提示不可用命令并列出可用命令: %q", resp.Stderr)
+	}
+}
+
+func TestTerminalExecList(t *testing.T) {
+	fakeTerminalCLI(t)
+	h, _, okHome := newEnv(t)
+	// 注册路径必须真实存在：子进程 cmd.Dir 指向它
+	root := filepath.Join(t.TempDir(), "projroot")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reg := &registry.Registry{}
+	if err := reg.AddProject("demo", root); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	_ = okHome
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, data := do(t, "POST", srv.URL+"/api/terminal/exec", testToken, map[string]any{
+		"args": []string{"list"}, "project": "demo",
+	})
+	if code != 200 {
+		t.Fatalf("status = %d, body %s", code, data)
+	}
+	var resp terminalResp
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code != 0 {
+		t.Fatalf("list 应成功: %+v", resp)
+	}
+	// 叶子目录名是我们自建的，不受 Windows 8.3 短名影响
+	if !strings.Contains(resp.Stdout, "条目列表") || !strings.Contains(resp.Stdout, "projroot") {
+		t.Fatalf("stdout 应含 fake 输出与项目根目录 cwd: %q", resp.Stdout)
+	}
+}
+
+func TestTerminalExecTimeout(t *testing.T) {
+	fakeTerminalCLI(t)
+	old := terminalExecTimeout
+	terminalExecTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { terminalExecTimeout = old })
+
+	h, _, _ := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	start := time.Now()
+	code, data := do(t, "POST", srv.URL+"/api/terminal/exec", testToken, map[string]any{
+		"args": []string{"search", "sleep"},
+	})
+	if code != 200 {
+		t.Fatalf("status = %d, body %s", code, data)
+	}
+	var resp terminalResp
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code != 124 || !strings.Contains(resp.Stderr, "超时") {
+		t.Fatalf("超时应返回 code=124 且 stderr 含超时提示: %+v", resp)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("超时 kill 未生效，耗时 %v", elapsed)
 	}
 }

@@ -2,6 +2,7 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -18,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"openknowledge/internal/agentx"
+	"openknowledge/internal/daemonx"
 	"openknowledge/internal/backup"
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
@@ -70,6 +73,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("DELETE /api/entry", h.apiEntryDelete)
 	api("DELETE /api/project", h.apiProjectDelete)
 	api("GET /api/search", h.apiSearch)
+	api("POST /api/terminal/exec", h.apiTerminalExec)
 	api("POST /api/approve", h.apiApprove)
 	api("POST /api/entry/archive", h.apiEntryArchive)
 	api("GET /api/capture", h.apiCaptureGet)
@@ -304,8 +308,11 @@ func syncIndex(st *store.Store) error {
 	return nil
 }
 
-// exePath 返回当前可执行文件的真实路径（解析符号链接）。
-func exePath() (string, error) {
+// cliExePath 返回注册 hooks/技能时应写入的 CLI（ok）入口路径。GUI API 跑在
+// daemon（okd）进程里，os.Executable 是 okd——gui-split 后 okd 无子命令，
+// 注册它等于注册失效命令（每次触发空转启动 daemon），经 daemonx.CliTargetFor
+// 换成同目录 ok。
+func cliExePath() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -313,7 +320,7 @@ func exePath() (string, error) {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
-	return exe, nil
+	return daemonx.CliTargetFor(exe)
 }
 
 // ---------- JSON 类型 ----------
@@ -692,6 +699,17 @@ func (h *Handler) apiEntries(w http.ResponseWriter, r *http.Request) {
 	for _, e := range entries {
 		out = append(out, summaryOf(e))
 	}
+	// 树形 UI 原样渲染本端点顺序：草稿置顶（待人批准的最显眼），其余按 mtime 倒序，
+	// 文件名升序稳定并列。entry.Load 本身按文件名字典序，不满足界面需求。
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Draft != out[j].Draft {
+			return out[i].Draft
+		}
+		if out[i].Mtime != out[j].Mtime {
+			return out[i].Mtime > out[j].Mtime
+		}
+		return out[i].File < out[j].File
+	})
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -932,6 +950,152 @@ func (h *Handler) apiSearch(w http.ResponseWriter, r *http.Request) {
 		out = append(out, hitJSON{File: hit.Filename, Title: hit.Title, Score: hit.Score})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// ---------- 终端 ----------
+
+// terminalWhitelist 终端面板允许执行的 ok 子命令；hook/daemon/init/setup/index 等
+// 内部或破坏性命令排除在外（见 docs/2026-08-23-manage-search-terminal-requirements.md 需求 3）。
+var terminalWhitelist = []string{
+	"list", "search", "add", "propose", "approve", "archive", "capture", "wiki", "doctor", "on", "off",
+}
+
+// terminalExecTimeout 终端命令超时（超时 kill 子进程）；测试可调小。
+var terminalExecTimeout = 10 * time.Second
+
+// terminalMaxOutput 单程（stdout/stderr）输出上限，超出截断并标注，防 list 类命令刷屏。
+const terminalMaxOutput = 64 * 1024
+
+// terminalCLI 返回要执行的 ok CLI 路径（okd 承载时换同目录 ok）；测试可替换。
+var terminalCLI = cliExePath
+
+type terminalExecRequest struct {
+	Args    []string `json:"args"`
+	Project string   `json:"project"`
+}
+
+type terminalExecResponse struct {
+	Code   int    `json:"code"`
+	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
+}
+
+// truncBuffer 带上限的输出缓冲：写满 limit 后丢弃后续字节并记截断标记，
+// String 在截断时追加中文标注。
+type truncBuffer struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func (b *truncBuffer) Write(p []byte) (int, error) {
+	room := b.limit - b.buf.Len()
+	if room > len(p) {
+		room = len(p)
+	}
+	if room > 0 {
+		b.buf.Write(p[:room])
+	}
+	if room < len(p) {
+		b.truncated = true
+	}
+	return len(p), nil
+}
+
+func (b *truncBuffer) String() string {
+	if !b.truncated {
+		return b.buf.String()
+	}
+	return b.buf.String() + "\n...（输出超过上限，已截断）"
+}
+
+// apiTerminalExec 以子进程执行白名单内的 ok 子命令：参数数组不经 shell（杜绝注入），
+// 超时 kill，stdout/stderr 截断至 64KB 照回（非零退出也不吞输出）。
+func (h *Handler) apiTerminalExec(w http.ResponseWriter, r *http.Request) {
+	var req terminalExecRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if len(req.Args) == 0 || strings.TrimSpace(req.Args[0]) == "" {
+		writeErr(w, http.StatusBadRequest, "缺少命令")
+		return
+	}
+	allowed := false
+	for _, c := range terminalWhitelist {
+		if req.Args[0] == c {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		writeJSON(w, http.StatusOK, terminalExecResponse{
+			Code:   1,
+			Stderr: fmt.Sprintf("不可用命令: %q（可用命令: %s）", req.Args[0], strings.Join(terminalWhitelist, "、")),
+		})
+		return
+	}
+	// 工作目录：指定项目时取注册表登记的根目录（Paths[0]），否则沿用进程 cwd
+	cwd := ""
+	if req.Project != "" {
+		if !validProjectName(req.Project) {
+			writeErr(w, http.StatusBadRequest, fmt.Sprintf("非法项目名: %q", req.Project))
+			return
+		}
+		reg, err := registry.Load(registry.DefaultPath())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		found := false
+		for _, p := range reg.Projects {
+			if p.Name == req.Project {
+				found = true
+				if len(p.Paths) > 0 {
+					cwd = p.Paths[0]
+				}
+				break
+			}
+		}
+		if !found {
+			writeErr(w, http.StatusNotFound, fmt.Sprintf("项目未注册: %s", req.Project))
+			return
+		}
+	}
+	exe, err := terminalCLI()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("定位 ok CLI 失败: %v", err))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), terminalExecTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, req.Args...)
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	var stdout, stderr truncBuffer
+	stdout.limit, stderr.limit = terminalMaxOutput, terminalMaxOutput
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	runErr := cmd.Run()
+	resp := terminalExecResponse{Stdout: stdout.String(), Stderr: stderr.String()}
+	switch {
+	case ctx.Err() == context.DeadlineExceeded:
+		// CommandContext 已 kill 子进程；退出码借用 timeout(1) 的 124 约定
+		resp.Code = 124
+		msg := fmt.Sprintf("命令超时（%v），已终止", terminalExecTimeout)
+		if resp.Stderr != "" {
+			resp.Stderr = strings.TrimRight(resp.Stderr, "\r\n") + "\n" + msg
+		} else {
+			resp.Stderr = msg
+		}
+	case runErr != nil:
+		var exitErr *exec.ExitError
+		if !errors.As(runErr, &exitErr) {
+			writeErr(w, http.StatusInternalServerError, fmt.Sprintf("命令启动失败: %v", runErr))
+			return
+		}
+		resp.Code = exitErr.ExitCode()
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ---------- 草稿批准与捕获模式 ----------
@@ -1650,7 +1814,7 @@ func (h *Handler) apiUninstall(w http.ResponseWriter, _ *http.Request) {
 // 三条 hook 统一使用该超时；响应列出每个 agent 的安装目标。单 agent 失败不影响
 // 其余（成功项保持落盘，幂等可重试），全部尝试后有失败则 500 聚合报告。
 func (h *Handler) apiSetupHooks(w http.ResponseWriter, r *http.Request) {
-	exe, err := exePath()
+	exe, err := cliExePath()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1702,7 +1866,7 @@ func (h *Handler) apiSetupHooks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) apiSetupSkills(w http.ResponseWriter, _ *http.Request) {
-	exe, err := exePath()
+	exe, err := cliExePath()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
