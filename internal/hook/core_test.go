@@ -14,6 +14,7 @@ import (
 	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/state"
+	"openknowledge/internal/wiki"
 )
 
 // core_test.go 直接覆盖 InjectForPrompt / TrackTouched / CheckStop（不经 Handler），
@@ -700,5 +701,41 @@ func TestCheckStopReminderTriviaGate(t *testing.T) {
 	}
 	if !strings.Contains(reason, "琐碎") {
 		t.Errorf("自省提醒应含琐碎任务反例，got: %q", reason)
+	}
+}
+
+// TestInjectHitsBlockLast 段序固定：一次性提示行（wiki nudge）在检索命中块之前，
+// 检索块永远沉底（保 prompt cache 前缀稳定；净化约定依赖此序）。
+func TestInjectHitsBlockLast(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	initGitRepo(t, projDir, 1)
+	first := gitHead(t, projDir)
+	// runGit 不带身份环境变量，空提交须内联 -c（同 hook_test.go 既有用法）
+	runGit(t, projDir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "second")
+	if err := wiki.SaveState(filepath.Join(kbRoot, "state"), &wiki.State{
+		BaseBranch: "master",
+		Cursors:    map[string]wiki.BranchCursor{"master": {LastCommit: first}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[wiki]\nstale_commits = 1\n[retrieve]\ndedup_turns = 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n独角兽紫晶 OrderQuirk 词。\n")
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := InjectForPrompt(pc, "s-order", projDir, "OrderQuirk 是什么")
+	nudgeIdx := strings.Index(out, "wiki 已落后")
+	hitsIdx := strings.Index(out, "## 相关知识")
+	if nudgeIdx < 0 {
+		t.Fatalf("应触发 wiki 落后 nudge，got: %q", out)
+	}
+	if hitsIdx < 0 {
+		t.Fatalf("应有检索命中块，got: %q", out)
+	}
+	if hitsIdx < nudgeIdx {
+		t.Errorf("检索命中块应沉底（在 nudge 之后），got: %q", out)
 	}
 }

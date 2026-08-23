@@ -88,7 +88,9 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 	ws := wiki.CheckStatus(pc.Store.StateDir(), cwd, pc.Config.Wiki.StaleCommits)
 	// mandatory 段与其余段分离：mandatory 是"必须遵守"类规则，注入优先级最高，
 	// 预算截断绝不波及（否则长 INDEX/检索会把尾部 mandatory 静默砍掉）。
-	var mandatoryText, restText strings.Builder
+	// hitsText 单列：检索命中块恒为注入文本末段（每轮变动的内容沉底，
+	// 保上游 prompt cache 前缀跨轮字节一致）。
+	var mandatoryText, restText, hitsText strings.Builder
 	mandatory, err := db.Mandatory()
 	if err != nil {
 		logErr("prompt mandatory: %v", err)
@@ -211,18 +213,18 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		hits = h
 	}
 	if len(hits) > 0 {
-		restText.WriteString("## 相关知识（需要全文时读取对应文件）\n\n")
+		hitsText.WriteString("## 相关知识（需要全文时读取对应文件）\n\n")
 		names := make([]string, 0, len(hits))
 		for _, h := range hits {
 			p := index.StripControls(filepath.ToSlash(filepath.Join(pc.Store.KnowledgeDir(), h.Filename)))
 			if h.Summary != "" {
-				fmt.Fprintf(&restText, "- **%s** (%s) — %s（%s）\n", index.SanitizeInline(h.Title), index.SanitizeInline(h.Type), index.SanitizeInline(h.Summary), p)
+				fmt.Fprintf(&hitsText, "- **%s** (%s) — %s（%s）\n", index.SanitizeInline(h.Title), index.SanitizeInline(h.Type), index.SanitizeInline(h.Summary), p)
 			} else {
-				fmt.Fprintf(&restText, "- **%s** (%s)（%s）\n", index.SanitizeInline(h.Title), index.SanitizeInline(h.Type), p)
+				fmt.Fprintf(&hitsText, "- **%s** (%s)（%s）\n", index.SanitizeInline(h.Title), index.SanitizeInline(h.Type), p)
 			}
 			names = append(names, h.Filename)
 		}
-		restText.WriteString("\n")
+		hitsText.WriteString("\n")
 		// 注入事件 + 会话挂账（采纳归因的数据源；原始大小写 basename）；
 		// fail-open：写失败仅记日志
 		if err := db.RecordEvents(index.EventInjected, names); err != nil {
@@ -235,19 +237,33 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 			logErr("prompt inject state: %v", err)
 		}
 	}
-	// L4：mandatory 永不被截断；其余段（INDEX + 检索）在剩余预算内截断。
+	// L4：mandatory 永不被截断；INDEX 与检索块在剩余预算内分段截断。
+	// 段序固定（保上游 prompt cache 前缀跨轮字节一致）：
+	// [分支上下文行] → mandatory → INDEX → 一次性提示行 → 检索命中块（恒沉底，
+	// 每轮变动的内容放最后；后续查询净化约定依赖"检索块恒为末段"此序）。
 	budget := pc.Config.Inject.MaxTokens
 	out := ""
+	restBudget := budget
 	if mandatoryText.Len() > 0 {
 		out = mandatoryText.String()
-		if restBudget := budget - store.EstimateTokens(mandatoryText.String()); restBudget > 0 {
-			out += store.TruncateToBudget(restText.String(), restBudget)
-		}
-	} else {
-		out = store.TruncateToBudget(restText.String(), budget)
+		restBudget = budget - store.EstimateTokens(out)
 	}
-	// 分支上下文行（注入开头）与 nudge（末尾）复用前移的同一份 Status
-	if line := wikiContextLine(ws); line != "" && strings.TrimSpace(out) != "" {
+	idxOut := ""
+	if restBudget > 0 {
+		idxOut = store.TruncateToBudget(restText.String(), restBudget)
+		out += idxOut
+	}
+	// 检索命中块先物化、最后追加（沉底）：预算 = 其余段预算减 INDEX 实耗；
+	// 一次性提示行不占检索预算（与旧行为一致：提示行在预算截断之外追加）。
+	hitsSeg := ""
+	if hitsText.Len() > 0 {
+		if hitsBudget := restBudget - store.EstimateTokens(idxOut); hitsBudget > 0 {
+			hitsSeg = store.TruncateToBudget(hitsText.String(), hitsBudget)
+		}
+	}
+	// 分支上下文行（注入开头）与 nudge（检索块之前）复用前移的同一份 Status。
+	// 非空判定计入 hitsSeg：仅检索命中的轮次（无 mandatory/INDEX）上下文行不丢。
+	if line := wikiContextLine(ws); line != "" && strings.TrimSpace(out+hitsSeg) != "" {
 		out = line + "\n" + out
 	}
 	if nudge := wikiNudge(pc, st, ws); nudge != "" {
@@ -319,6 +335,8 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 			out += "\n[OpenKnowledge] 语义检索退化：" + embedWarn + "\n"
 		}
 	}
+	// 检索命中块沉底：恒为注入文本末段（段序固定约定，见上方 L4 注释）
+	out += hitsSeg
 	return out
 }
 
