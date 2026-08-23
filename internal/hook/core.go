@@ -226,11 +226,21 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		names := make([]string, 0, len(hits))
 		for _, h := range hits {
 			p := index.StripControls(filepath.ToSlash(filepath.Join(pc.Store.KnowledgeDir(), h.Filename)))
+			var line string
 			if h.Summary != "" {
-				fmt.Fprintf(&hitsText, "- **%s** (%s) — %s（%s）\n", index.SanitizeInline(h.Title), index.SanitizeInline(h.Type), index.SanitizeInline(h.Summary), p)
+				line = fmt.Sprintf("- **%s** (%s) — %s（%s）\n", index.SanitizeInline(h.Title), index.SanitizeInline(h.Type), index.SanitizeInline(h.Summary), p)
 			} else {
-				fmt.Fprintf(&hitsText, "- **%s** (%s)（%s）\n", index.SanitizeInline(h.Title), index.SanitizeInline(h.Type), p)
+				line = fmt.Sprintf("- **%s** (%s)（%s）\n", index.SanitizeInline(h.Title), index.SanitizeInline(h.Type), p)
 			}
+			// 单条预算：一条超长指针行不得吃掉整个检索段预算（缺省 0=不限制）。
+			// 截断记账沿用 mandatory 超预算告警风格；TruncateToBudget 已 rune 安全。
+			if limit := pc.Config.Inject.EntryMaxTokens; limit > 0 {
+				if est := store.EstimateTokens(line); est > limit {
+					logErr("prompt entry budget: 条目 %s 指针行约 %d token 超单条上限 %d，已截断", h.Filename, est, limit)
+					line = strings.TrimRight(store.TruncateToBudget(line, limit), "\n") + "\n"
+				}
+			}
+			hitsText.WriteString(line)
 			names = append(names, h.Filename)
 		}
 		hitsText.WriteString("\n")

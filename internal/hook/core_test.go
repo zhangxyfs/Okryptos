@@ -771,3 +771,42 @@ func TestInjectQueryPurified(t *testing.T) {
 		t.Errorf("真实查询词应命中检索经验，got: %q", hits)
 	}
 }
+
+// TestInjectEntryBudgetTruncatesLongSummary 单条指针行超 entry_max_tokens 时截断
+// （一条超长 summary 不得吃掉整个检索段预算）；缺省 0 不限制保持旧语义。
+func TestInjectEntryBudgetTruncatesLongSummary(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	longSummary := strings.Repeat("这是一段很长的摘要用来占用预算。", 20)
+	writeEntry(t, kbRoot, "检索.md", "---\ntitle: 检索经验\ntype: note\ntags: []\nsummary: "+longSummary+"\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\nBudgetQuirk 唯一词。\n")
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ndedup_turns = 0\n[inject]\nentry_max_tokens = 30\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := InjectForPrompt(pc, "s-budget", projDir, "BudgetQuirk 是什么")
+	i := strings.Index(out, "## 相关知识")
+	if i < 0 {
+		t.Fatalf("应有检索命中块，got: %q", out)
+	}
+	if !strings.Contains(out[i:], "…(已截断)") {
+		t.Errorf("超限指针行应被截断并带标记，got: %q", out[i:])
+	}
+	// 对照：缺省（0=不限制）不截断
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[retrieve]\ndedup_turns = 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc2, err2 := project.FromCwd(projDir)
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	out2 := InjectForPrompt(pc2, "s-budget2", projDir, "BudgetQuirk 再问")
+	j := strings.Index(out2, "## 相关知识")
+	if j < 0 {
+		t.Fatalf("对照组应有检索命中块，got: %q", out2)
+	}
+	if strings.Contains(out2[j:], "…(已截断)") {
+		t.Errorf("缺省不限制时不应截断指针行，got: %q", out2[j:])
+	}
+}

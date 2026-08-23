@@ -136,6 +136,10 @@ type Inject struct {
 	// max_tokens 截断的段，超限时注入告警行提醒精简，不硬截断
 	// （截断"必守"条目违背语义）。
 	MandatoryMaxTokens int `toml:"mandatory_max_tokens"`
+	// EntryMaxTokens 检索注入单条指针行的 token 上限（默认 0=不限制，保持旧
+	// 语义）。一条超长 summary 的条目此前可吃掉整个检索段预算；超限时指针行
+	// 截断（…(已截断) 标记）并记 ok.log，GUI 日志页可按"entry budget"过滤。
+	EntryMaxTokens int `toml:"entry_max_tokens"`
 }
 
 // Index 控制 INDEX.md 渲染预算。

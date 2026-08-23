@@ -3,6 +3,7 @@ package store
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestTruncateToBudget(t *testing.T) {
@@ -34,5 +35,21 @@ func TestEstimateTokens(t *testing.T) {
 	// 纯拉丁按 4 字符/token 计
 	if got := EstimateTokens(strings.Repeat("a", 8)); got != 2 {
 		t.Fatalf("latin estimate = %d, want 2", got)
+	}
+}
+
+// TestTruncateToBudgetCJKRuneSafe 钉死 CJK 截断的 rune 安全与标记成本预扣：
+// 结果必须是合法 UTF-8（不断字）且含标记不超预算。
+func TestTruncateToBudgetCJKRuneSafe(t *testing.T) {
+	s := strings.Repeat("汉字混排ab", 50)
+	got := TruncateToBudget(s, 20)
+	if !utf8.ValidString(got) {
+		t.Errorf("截断结果必须是合法 UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, "…(已截断)") {
+		t.Errorf("截断结果应带标记: %q", got)
+	}
+	if est := EstimateTokens(got); est > 20 {
+		t.Errorf("含标记不应超预算: est=%d > 20", est)
 	}
 }
