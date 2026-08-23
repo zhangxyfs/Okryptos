@@ -448,12 +448,9 @@ func (qoderAgent) HooksInstalled() bool {
 	if events == nil {
 		return false
 	}
-	exe, err := os.Executable()
+	exe, err := currentCLIExe()
 	if err != nil {
 		return false
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
 	}
 	// hooksConfig.enabled 关闭/缺失 = 集成失效（hooks 静默不派发），视为未安装。
 	return qoderHooksCurrent(events, exe) && qoderHooksConfigEnabled(cfg)

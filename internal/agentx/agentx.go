@@ -5,6 +5,8 @@ package agentx
 import (
 	"os"
 	"path/filepath"
+
+	"openknowledge/internal/daemonx"
 )
 
 // Agent 一个 AI 编码 agent 的集成适配器。
@@ -56,4 +58,19 @@ func SkillsHome() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".agents", "skills")
+}
+
+// currentCLIExe 返回 HooksInstalled 比对用的 CLI（ok）入口路径。daemon（okd）
+// 进程内 os.Executable() 是 okd——注册路径已统一换算（gui cliExePath、
+// selfHealHooks），检测路径不换算会把已安装的 ok 形态误判为"未接入"
+// （读写视角分裂，与 H-04 同族的读侧漏网）。
+func currentCLIExe() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return daemonx.CliTargetFor(exe)
 }

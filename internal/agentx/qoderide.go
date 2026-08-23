@@ -402,12 +402,9 @@ func (qoderIdeAgent) HooksInstalled() bool {
 	if events == nil {
 		return false
 	}
-	exe, err := os.Executable()
+	exe, err := currentCLIExe()
 	if err != nil {
 		return false
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
 	}
 	return lingmaHooksCurrent(events, exe)
 }

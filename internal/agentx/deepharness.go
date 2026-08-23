@@ -97,12 +97,9 @@ func (dshAgent) HooksInstalled() bool {
 		return false
 	}
 	// 旧 exe 路径视为过期（与 zcodeAgent 同款，以解析后的当前可执行文件为基准）
-	exe, err := os.Executable()
+	exe, err := currentCLIExe()
 	if err != nil {
 		return false
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
 	}
 	if content != renderDSHPlugin(exe) {
 		return false
