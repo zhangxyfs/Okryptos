@@ -11,7 +11,8 @@
   --rule-bg:#ede9fe; --rule-fg:#6d28d9;
   --ref-bg:#e0e7ff; --ref-fg:#3730a3;
   --mand-bg:#fef3c7; --mand-fg:#92400e;
-  --draft-fg:#6b7280; --draft-bd:#d1d5db;
+  /* 需求 1：草稿徽标实底高对比（琥珀警示色，与类型徽标蓝/绿/紫拉开） */
+  --draft-bg:#fef3c7; --draft-fg:#92400e; --draft-bd:#f59e0b;
   --tag-bg:#eef2f7; --tag-fg:#475569;
 }
 [data-theme="dark"] {
@@ -24,7 +25,7 @@
   --rule-bg:#2a2340; --rule-fg:#c4b5fd;
   --ref-bg:#232a45; --ref-fg:#a5b4fc;
   --mand-bg:#3a2f14; --mand-fg:#fbbf24;
-  --draft-fg:#8a8f9c; --draft-bd:#3a4150;
+  --draft-bg:#45330e; --draft-fg:#fcd34d; --draft-bd:#d97706;
   --tag-bg:#232a38; --tag-fg:#aab2c0;
 }
 * { box-sizing:border-box; }
@@ -43,13 +44,18 @@ button { font:inherit; color:inherit; }
 .brand { font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px; }
 .brand .logo { width:22px; height:22px; border-radius:6px; background:var(--primary); color:#fff;
                display:flex; align-items:center; justify-content:center; font-size:12px; }
-/* 中/EN 胶囊切换（仿 OpenViking 右上角）；margin-left:auto 把右侧控件组推到顶栏尾部 */
-.lang-seg { display:flex; border:1px solid var(--border); border-radius:999px; overflow:hidden; margin-left:auto; }
+/* 中/EN 胶囊切换（仿 OpenViking 右上角） */
+.lang-seg { display:flex; border:1px solid var(--border); border-radius:999px; overflow:hidden; }
 .lang-seg button { border:none; background:none; padding:4px 12px; cursor:pointer; font-size:12px; color:var(--muted); }
 .lang-seg button.on { background:var(--fg); color:var(--bg); font-weight:600; }
 .theme-btn { width:32px; height:32px; border:none; background:none; border-radius:999px;
              cursor:pointer; color:var(--muted); display:flex; align-items:center; justify-content:center; }
 .theme-btn:hover { background:var(--hover); color:var(--fg); }
+/* 需求 4：界面设置齿轮按钮（图标按钮，无文字）；margin-left:auto 把右侧控件组推到顶栏尾部 */
+.icon-btn { width:32px; height:32px; border:none; background:none; border-radius:6px;
+            cursor:pointer; color:var(--muted); display:flex; align-items:center; justify-content:center; }
+.icon-btn:hover { background:var(--hover); color:var(--fg); }
+.ui-btn { margin-left:auto; }
 
 /* ---------- 主体 ---------- */
 .main { display:flex; height:calc(100vh - 52px); }
@@ -111,6 +117,23 @@ button { font:inherit; color:inherit; }
             white-space:nowrap; }
 .leaf.sel .t2 { color:var(--sel-fg); }
 .leaf.archived .t2 { color:var(--muted); text-decoration:line-through; }
+/* 需求 5：类目子目录行（文件夹图标 + 类名 + 计数徽标，单击展开/收起、类目间不互斥） */
+.tn-cat { display:flex; align-items:center; gap:5px; width:100%; border:none; background:none;
+          padding:3px 6px; border-radius:6px; cursor:pointer; font-size:12.5px; text-align:left;
+          color:var(--muted); font-weight:600; }
+.tn-cat:hover { background:var(--hover); }
+.tn-cat .caret { width:12px; transition:transform .12s; flex:none; font-size:9px; text-align:center; }
+.tn-cat.open .caret { transform:rotate(90deg); }
+.tn-cat .folder { color:var(--muted); display:flex; flex:none; }
+.tn-cat .cnt { margin-left:auto; font-size:11px; font-weight:400; opacity:.75; flex:none; }
+.leaf.spec .t2 { font-weight:600; }   /* 架构总览/演进历程：参考目录特殊节点 */
+/* 架构总览：目录+文件双重身份——箭头/图标区点击展开子章节，点名出详情 */
+.leaf.dual { display:flex; align-items:center; gap:5px; }
+.leaf.dual .caret { width:12px; color:var(--muted); font-size:9px; transition:transform .12s; flex:none; }
+.leaf.dual .folder { color:var(--muted); display:flex; flex:none; }
+.leaf.dual.open .caret { transform:rotate(90deg); }
+.leaf.dual .t2 { flex:1; min-width:0; }
+.leaf.dual .cnt { margin-left:auto; color:var(--muted); font-size:11px; flex:none; }
 
 /* 树栏拖拽分隔条（反馈2）：常态透明 6px 热区，hover/拖拽中显选中底色细条 */
 .tree-resizer { width:6px; flex:none; cursor:col-resize; background:transparent; transition:background .12s; }
@@ -122,6 +145,89 @@ body.tree-resizing { cursor:col-resize; user-select:none; }
 .tt-pop { position:fixed; transform:translateY(-50%); background:#111827; color:#fff;
           font-size:12px; padding:4px 10px; border-radius:4px; z-index:90;
           max-width:min(480px,60vw); white-space:normal; word-break:break-all; }
+
+/* ---------- 需求 2：搜索框命令下拉提示 / 过滤条件摘要条 ---------- */
+/* 下拉浮层卡片：输入框下方绝对定位，行高亮用选中底色 */
+.search-wrap { position:relative; flex:1; min-width:0; }
+.search-wrap .search { margin:0; width:100%; }
+.dd { display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:60;
+      background:var(--card); border:1px solid var(--border); border-radius:8px;
+      box-shadow:0 8px 24px rgba(15,23,42,.12); padding:4px; max-height:220px; overflow-y:auto; }
+.dd-row { display:block; padding:5px 9px; border-radius:6px; cursor:pointer; font-size:12.5px;
+          white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dd-row.on { background:var(--sel-bg); text-overflow:clip; }
+.dd-name { font-family:Consolas,monospace; font-weight:600; margin-right:8px; }
+.dd-row.on .dd-name { color:var(--sel-fg); }
+.dd-usage { font-family:Consolas,monospace; color:var(--muted); font-size:12px; margin-right:8px; }
+.dd-desc { color:var(--muted); font-size:12px; }
+/* 高亮项横向走马灯（单向循环式）：内容复制一份拼接进 .dd-track，translateX(0 → -(内容宽+间隔))
+   linear infinite，循环点视觉无缝；只动 transform 不改布局；--shift/--dur 由 JS 按实测宽度设置 */
+.dd-row.on .dd-track { display:inline-block; white-space:nowrap; will-change:transform;
+                       animation:dd-marq var(--dur,2s) linear infinite; }
+.dd-track .dd-inner { display:inline-block; }
+.dd-track .dd-clone { margin-left:48px; }   /* 两份内容间隔，计入循环宽度 */
+@keyframes dd-marq {
+  from { transform:translateX(0); }
+  to   { transform:translateX(calc(-1 * var(--shift,0px))); }
+}
+/* 过滤条件摘要条 / 错误提示 / 命令帮助（树区域顶部一行，附清除按钮） */
+.fbar { margin:0 10px 8px; font-size:12px; border-radius:6px; padding:5px 9px;
+        display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.fbar:empty { display:none; }
+.fbar.info { background:var(--sel-bg); color:var(--sel-fg); }
+.fbar.err  { background:var(--pitfall-bg); color:var(--pitfall-fg); }
+.fbar .clear { margin-left:auto; border:1px solid currentColor; background:none; border-radius:4px;
+               font-size:11px; padding:0 8px; cursor:pointer; color:inherit; }
+.fbar code { background:rgba(255,255,255,.5); border-radius:3px; padding:0 4px; }
+.tree-empty { color:var(--muted); font-size:12.5px; text-align:center; padding:24px 8px; }
+
+/* ---------- 需求 3：终端面板（chat 式 CLI） ---------- */
+.term { position:relative; display:flex; flex-direction:column; min-height:0; min-width:0;
+        background:var(--bg); }
+.term-head { padding:9px 12px; display:flex; align-items:center; gap:8px; flex:none;
+             border-bottom:1px solid var(--border); background:var(--card); }
+.term-head .tt { font-size:12px; font-weight:600; color:var(--muted); }
+.term-head .sub { font-size:11px; color:var(--muted); opacity:.75; }
+.term-hist { flex:1; min-height:0; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
+.t-echo { font:12.5px Consolas,monospace; color:var(--muted); margin-bottom:4px; }
+.t-echo b { color:var(--fg); font-weight:600; }
+/* 执行状态并到回显行尾部（省一行），卡片只承载输出 */
+.t-status { margin-left:8px; }
+.t-status.ok  { color:var(--ok); }
+.t-status.err { color:#dc2626; }
+.t-status.run { color:var(--muted); animation:pulse 1s infinite; }
+.t-card { background:var(--card); border:1px solid var(--border); border-radius:8px;
+          padding:10px 12px; font-size:12.5px; }
+.t-card.err { border-color:#dc2626; }
+/* 输出按行展示、每行单行截断（完整行在 title 悬浮可见），卡片按行数自然撑高 */
+.t-out { background:var(--pre-bg); color:var(--pre-fg); border-radius:6px;
+         padding:10px 12px; font:12px/1.6 Consolas,monospace; }
+.t-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+@keyframes pulse { 50% { opacity:.45; } }
+.term-chips { display:flex; flex-wrap:wrap; gap:6px; padding:8px 12px 0; flex:none; }
+.tchip { border:1px solid var(--border); background:var(--card); border-radius:999px;
+         padding:2px 10px; font-size:11.5px; cursor:pointer; color:var(--fg);
+         font-family:Consolas,monospace; }
+.tchip:hover { border-color:var(--primary); color:var(--primary); }
+.term-input { display:flex; gap:8px; padding:10px 12px; flex:none; }
+.term-input .term-in { flex:1; min-width:0; padding:6px 10px; border:1px solid var(--border); border-radius:6px;
+                       background:var(--card); color:var(--fg); font:13px Consolas,monospace; }
+.term-input .term-in:focus { outline:none; border-color:var(--primary); }
+/* 终端命令下拉：相对 .term 面板绝对定位，bottom 贴输入框上边缘、max-height 不超面板可用高度
+   （均由 JS 实测设置），高度随内容自适应，项少不留空白 */
+.term-dd { top:auto; left:12px; right:12px; }
+
+/* ---------- 需求 4：栏目布局引擎（槽位横向排列；term=bottom 时上下结构） ---------- */
+.layout-area { flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
+.layout-row { flex:1; display:flex; min-width:0; min-height:0; }
+.layout-row .detail { min-width:0; }
+.term-col { border-left:1px solid var(--border); flex:none; }
+.hsplitter { height:6px; cursor:row-resize; flex:none; background:transparent; transition:background .12s; }
+.hsplitter:hover, body.tree-resizing .hsplitter { background:var(--sel-bg); }
+.term-strip { flex:none; border-top:1px solid var(--border); min-height:0; }
+/* 界面设置弹窗：栏目位置行 */
+.cfg-row { display:flex; align-items:center; gap:10px; margin:8px 0; }
+.cfg-row .k { width:64px; color:var(--muted); font-size:13px; flex:none; }
 
 /* 详情（v1-A 文档流） */
 .detail { flex:1; overflow-y:auto; padding:20px 28px 60px; }
@@ -147,7 +253,9 @@ body.tree-resizing { cursor:col-resize; user-select:none; }
 .t-rule      { background:var(--rule-bg); color:var(--rule-fg); }
 .t-reference { background:var(--ref-bg); color:var(--ref-fg); }
 .badge-mand  { background:var(--mand-bg); color:var(--mand-fg); border-radius:3px; padding:0 4px; font-size:10px; line-height:16px; }
-.badge-draft { background:none; color:var(--draft-fg); border:1px dashed var(--draft-bd); border-radius:3px; padding:0 4px; font-size:10px; line-height:14px; }
+/* 需求 1：实底琥珀 + 实线边（原：无底色虚线灰边，对比度低看不清） */
+.badge-draft { background:var(--draft-bg); color:var(--draft-fg); border:1px solid var(--draft-bd);
+               border-radius:3px; padding:0 4px; font-size:10px; line-height:14px; font-weight:600; }
 .badge-arch  { background:var(--hover); color:var(--muted); border-radius:3px; padding:0 4px; font-size:10px; line-height:16px; }
 .tag { background:var(--tag-bg); color:var(--tag-fg); border-radius:4px; padding:0 6px; font-size:12px; }
 /* 继承徽标（wiki 基线 inherited 态）+ hover 浮动窗（v2.18.2 变体 C bubble，仅 hover 出现） */

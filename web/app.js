@@ -43,7 +43,7 @@ async function api(path, opts){
 const I18N = {
   zh: {
     manage:"管理", setup:"引导", prefs:"设置", logs:"日志", misc:"其他",
-    treeCaption:"知识条目", filter:"过滤条目…", pickEntry:"← 从树中选择一条知识条目",
+    treeCaption:"知识条目", filter:"过滤条目… / 命令（/type、/tag）", pickEntry:"← 从树中选择一条知识条目",
     modified:"修改于",
     mandatory:"★ mandatory", optional:"非 mandatory", draft:"草稿", archived:"已归档",
     collapseTip:"收起/展开侧栏",
@@ -143,10 +143,39 @@ const I18N = {
     llmGo:"去配置",
     inheritBadge:"继承基线",
     inheritBubble:"wiki 基线继承自 {src} · 落后 {n} commit",
+    /* 需求 2：搜索框命令 */
+    cmdUnknown:'未知命令 "/{c}"，可用命令：/type <类型>、/tag <标签>（前缀 // = 全部项目）',
+    cmdBadType:'非法类型 "{v}"，合法值：rule | pitfall | note | reference | draft',
+    cmdEmpty:"（空）",
+    cmdNeedTag:"/tag 需要一个标签内容，例如 /tag go",
+    cmdHelp:'命令：<code>/type rule|pitfall|note|reference|draft</code> 按类型过滤 · <code>/tag &lt;标签&gt;</code> 按标签过滤 · 命令后可跟空格+关键词取交集 · <code>//</code> 前缀 = 全部项目，<code>/</code> = 当前展开项目',
+    scopeAll:"全部项目", scopeOpen:"当前展开项目", scopeDegraded:"未展开项目，已在全部项目中检索",
+    clearFilter:"清除", noHit:"无命中条目",
+    ddTypeCur:"按类型过滤（当前项目）", ddTagCur:"按标签过滤（当前项目）",
+    ddTypeAll:"按类型过滤（全部项目）", ddTagAll:"按标签过滤（全部项目）",
+    /* 需求 3：终端面板 */
+    termTitle:"终端", termSub:"chat 式 CLI · ok 前缀自动补齐",
+    termPh:"输入命令，例如 list", termSend:"发送",
+    termRunning:"⏳ 执行中…", termOk:"执行成功", termErr:"执行失败",
+    termBadCmd:"不可用命令：{c}", termAvail:"可用命令：",
+    tc_list:"列出项目与条目", tc_search:"语义检索条目", tc_doctor:"环境自检",
+    tc_capture:"查看或设置沉淀模式", tc_approve:"批准草稿条目", tc_wiki:"项目 wiki 状态",
+    tc_add:"新建条目", tc_propose:"提议草稿", tc_archive:"归档条目",
+    tc_on:"开启 hooks", tc_off:"关闭 hooks",
+    /* 需求 4：界面设置弹窗 + 栏目布局 */
+    uiSettings:"界面设置", uiDesc:"这里只收纳纯 UI 设置（不碰后端配置）。",
+    layoutSec:"栏目布局（管理页）",
+    panelTree:"条目树", panelDetail:"详情", panelTerm:"终端",
+    slotLeft:"左", slotMiddle:"中", slotRight:"右", slotBottom:"下",
+    layoutHint:"已被占用的位置不出现在选项中；终端选「下」时占底部整条，树与详情在上方两栏排列。保存后立即重排并记住此布局。",
+    resetDefault:"恢复默认",
+    /* 需求 5：树类目分组 */
+    catDraft:"草稿", catMandatory:"注入", catReference:"参考", catNote:"笔记",
+    catPitfall:"踩坑", catRule:"规则", catArchived:"归档", catOther:"其他",
   },
   en: {
     manage:"Manage", setup:"Setup", prefs:"Settings", logs:"Logs", misc:"Misc",
-    treeCaption:"Entries", filter:"Filter entries…", pickEntry:"← Select an entry from the tree",
+    treeCaption:"Entries", filter:"Filter entries… / commands (/type, /tag)", pickEntry:"← Select an entry from the tree",
     modified:"Modified",
     mandatory:"★ mandatory", optional:"optional", draft:"Draft", archived:"Archived",
     collapseTip:"Collapse/expand sidebar",
@@ -246,6 +275,35 @@ const I18N = {
     llmGo:"Configure",
     inheritBadge:"Inherited baseline",
     inheritBubble:"wiki baseline inherited from {src} · {n} commits behind",
+    /* Requirement 2: search-box commands */
+    cmdUnknown:'Unknown command "/{c}"; available: /type <type>, /tag <tag> (prefix // = all projects)',
+    cmdBadType:'Invalid type "{v}"; valid: rule | pitfall | note | reference | draft',
+    cmdEmpty:"(empty)",
+    cmdNeedTag:"/tag needs a tag value, e.g. /tag go",
+    cmdHelp:'Commands: <code>/type rule|pitfall|note|reference|draft</code> filter by type · <code>/tag &lt;tag&gt;</code> filter by tag · append a space + keyword to intersect · <code>//</code> prefix = all projects, <code>/</code> = expanded project',
+    scopeAll:"All projects", scopeOpen:"Expanded project", scopeDegraded:"No project expanded; searched all projects",
+    clearFilter:"Clear", noHit:"No matching entries",
+    ddTypeCur:"Filter by type (expanded project)", ddTagCur:"Filter by tag (expanded project)",
+    ddTypeAll:"Filter by type (all projects)", ddTagAll:"Filter by tag (all projects)",
+    /* Requirement 3: terminal panel */
+    termTitle:"Terminal", termSub:"chat-style CLI · the ok prefix is implied",
+    termPh:"Type a command, e.g. list", termSend:"Send",
+    termRunning:"⏳ Running…", termOk:"Succeeded", termErr:"Failed",
+    termBadCmd:"Unavailable command: {c}", termAvail:"Available commands:",
+    tc_list:"List projects and entries", tc_search:"Semantic search entries", tc_doctor:"Environment self-check",
+    tc_capture:"View or set capture mode", tc_approve:"Approve a draft entry", tc_wiki:"Project wiki status",
+    tc_add:"Add an entry", tc_propose:"Propose a draft", tc_archive:"Archive entries",
+    tc_on:"Enable hooks", tc_off:"Disable hooks",
+    /* Requirement 4: UI settings modal + panel layout */
+    uiSettings:"UI settings", uiDesc:"Pure UI preferences only (no backend config).",
+    layoutSec:"Panel layout (Manage)",
+    panelTree:"Entry tree", panelDetail:"Detail", panelTerm:"Terminal",
+    slotLeft:"Left", slotMiddle:"Middle", slotRight:"Right", slotBottom:"Bottom",
+    layoutHint:"Occupied slots are hidden from the options. Terminal at Bottom spans the full lower strip with tree and detail side by side above. Saving re-arranges immediately and remembers this layout.",
+    resetDefault:"Reset to default",
+    /* Requirement 5: tree category groups */
+    catDraft:"Drafts", catMandatory:"Injected", catReference:"Reference", catNote:"Notes",
+    catPitfall:"Pitfalls", catRule:"Rules", catArchived:"Archived", catOther:"Other",
   },
 };
 
@@ -262,6 +320,7 @@ const ICON = {
   logs:   svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
   misc:   svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>'),
   folder: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>', 14),
+  history: svg('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>'),   // 演进历程：自绘时钟（需求 5）
   branch: svg('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>', 10),
   panel:  svg('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>'),
   moon:   svg('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'),
@@ -525,9 +584,30 @@ async function toggleAgent(a){
 }
 
 /* ================= 状态 ================= */
+/* 需求 4 布局常量前置：state 初始化即调 loadLayout（const 不提升，须先声明） */
+const LAYOUT_KEY = "ok-manage-layout";   // 栏目布局 localStorage 键
+const TERM_W_KEY = "ok-term-w";          // 终端栏宽度（槽位布局）
+const TERM_H_KEY = "ok-term-h";          // 终端条高度比例（bottom 布局）
+const DEFAULT_LAYOUT = { tree:"left", detail:"middle", term:"right" };
+function loadLayout(){
+  try{
+    const s = JSON.parse(localStorage.getItem(LAYOUT_KEY)||"null");
+    if(s && ["left","middle","right"].indexOf(s.tree)>=0
+        && ["left","middle","right"].indexOf(s.detail)>=0
+        && ["left","middle","right","bottom"].indexOf(s.term)>=0
+        && s.tree!==s.detail
+        && (s.term==="bottom" || (s.term!==s.tree && s.term!==s.detail))) return s;
+  }catch(_){}
+  return Object.assign({}, DEFAULT_LAYOUT);
+}
 const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
                 open:{}, openTouched:false, sel:null, projSel:null, q:"", mgmtFb:null, treeShown:{},
+                catOpen:{},                                                   // 需求 5：类目目录展开态（会话级）
+                catDefaulted:{},                                              // 需求 5：首展默认展开每项目只应用一次
+                cmd:null, cmdRaw:"", cmdErr:"", cmdHelp:false, scopeNote:"",   // 需求 2：搜索框命令态
+                termHist:[],                                                  // 需求 3：终端会话级历史
                 edView:"read",   // 详情区态：read 只读 | edit 内联编辑 | cmp 优化对照
+                layout:loadLayout(), cfgOpen:false, cfgDraft:null,            // 需求 4：栏目布局 + 设置弹窗
                 logSrc:{ ok:true, daemon:true, sidecar:true }, logSem:false, logQ:"",
                 logAuto:true, logStick:true, miscFb:null };
 const t = k => I18N[state.lang][k];
@@ -824,10 +904,11 @@ let optAbort = null;  // 优化进行中的 AbortController；退出编辑态即
 let edDraft = null, edBase = null, edCmp = null;   // 内联编辑草稿/脏态基线/优化结果（同时只存一份）
 let edErr = "", edSavedFb = false;   // 编辑态保存失败错误（操作行 fb2 err）/ 只读态 ✓已保存 闪示
 const README = {};      // project → {data, err} 项目 README/wiki 概述缓存（条目变更即失效）
-const LAZY_STEP = 50;   // 树内条目懒加载步进：项目条目 >50 时先渲 50，滚到底附近再追加下一批
+const LAZY_STEP = 50;   // 树内条目懒加载步进（需求 5 起下沉到类目）：类目内条目 >50 先渲 50，滚到底附近再追加
 const TREE_W_KEY = "ok-tree-w";   // 树栏宽度 localStorage 键（拖拽分隔条持久化）
 let treeTip = null;     // 截断标题悬浮窗节点（body 级，同时只一个）
 let mgmtPollBusy = false;         // 管理页 4s 轮询重入保护
+let nmLastClick = null;           // 项目名双击检测 {name,t}：单击即重渲换节点，原生 dblclick 不可靠
 
 function fmtTime(unix){
   if(!unix) return "";
@@ -877,6 +958,7 @@ function refreshManage(){
   }).then(()=>{
     if(state.menu!=="manage" || edBusy()) return;   // 编辑/对照态中不重渲（草稿优先）
     const ae = document.activeElement;
+    if(termBusy || (ae && ae.classList && ae.classList.contains("term-in"))) return;   // 终端输入/执行态不打断（需求 3）
     if(ae && ae.classList && ae.classList.contains("search")){
       const sc = document.querySelector(".tree-scroll");
       if(sc) fillTree(sc);
@@ -948,6 +1030,7 @@ async function pollManage(){
     if(!edBusy() && state.sel && !findEntry(state.sel.project, state.sel.file)){ state.sel = null; DETAIL = null; }
     if(edBusy()) return;   // 编辑/对照态中缓存照更、界面不重渲，不打断表单
     const ae = document.activeElement;
+    if(termBusy || (ae && ae.classList && ae.classList.contains("term-in"))) return;   // 终端输入/执行态不打断（需求 3）
     if(ae && ae.classList && ae.classList.contains("search")){
       const sc = document.querySelector(".tree-scroll");
       if(sc) fillTree(sc);
@@ -989,18 +1072,250 @@ function detailAttrs(e, proj){
   return s;
 }
 
+/* ---------- 需求 2：搜索框命令（规范源 prototype-manage-terminal.html，按本文件约定重写） ----------
+   语法：[范围]/type <类型> [关键词]  ·  [范围]/tag <标签> [关键词]
+   范围：/ = 当前展开项目（无展开则退化全部 + 摘要条提示）；// = 全部项目。
+   以 / 开头时暂停即时过滤，回车生效；非法命令/类型报错不过滤；仅 / 或 // 显示帮助。
+   命令下拉：/ 弹 4 项（两种斜杠范围各两条），// 收窄 2 项，前缀过滤，type␣ 后提示 5 个合法类型值；
+   ↑↓ 高亮、Enter/Tab 补全、Esc 关闭、mousedown 抢在 blur 前选中（hover 只搬高亮 class 不重建 DOM）。 */
+const TYPE_VALUES = ["rule","pitfall","note","reference","draft"];
+function ddCommands(){ return [
+  { name:"type",   label:"/type",  desc:t("ddTypeCur") },
+  { name:"tag",    label:"/tag",   desc:t("ddTagCur") },
+  { name:"//type", label:"//type", desc:t("ddTypeAll") },
+  { name:"//tag",  label:"//tag",  desc:t("ddTagAll") },
+];}
+function ddTypes(){ return [
+  { name:"rule", desc:t("typeRule") }, { name:"pitfall", desc:t("typePitfall") },
+  { name:"note", desc:t("typeNote") }, { name:"reference", desc:t("typeReference") },
+  { name:"draft", desc:t("draft") },
+];}
+let searchEl = null, ddEl = null, ddIdx = 0;
+/* 高亮项走马灯（单向循环，搜索/终端两个下拉共用）：高亮行内容复制一份包进 .dd-track，
+   按实测内容宽设 --shift/--dur（速度恒定 50px/s）；无溢出保持静止；失去高亮的行还原 track，
+   保证 ellipsis 截断恢复 */
+const MARQ_GAP = 48, MARQ_SPEED = 50;
+function applyMarquee(container){
+  container.querySelectorAll(".dd-row").forEach(row=>{
+    const on = row.classList.contains("on");
+    let track = row.querySelector(".dd-track");
+    if(!on){
+      if(track){   // 还原结构，恢复非高亮行的 ellipsis
+        const orig = track.querySelector(".dd-inner:not(.dd-clone)");
+        row.insertBefore(orig, track);
+        track.remove();
+      }
+      return;
+    }
+    const inner = row.querySelector(".dd-inner:not(.dd-clone)");
+    if(!inner) return;
+    const range = document.createRange();    // inline span 的 scrollWidth 不可靠，用 Range 实测内容宽
+    range.selectNodeContents(inner);
+    const w = range.getBoundingClientRect().width;
+    range.detach();
+    if(w <= row.clientWidth) return;         // 无溢出：静止
+    if(!track){
+      track = el("span","dd-track");
+      row.insertBefore(track, inner);
+      track.appendChild(inner);
+      const clone = el("span","dd-inner dd-clone");
+      clone.setAttribute("aria-hidden","true");
+      clone.innerHTML = inner.innerHTML;
+      track.appendChild(clone);
+    }
+    const loop = w + MARQ_GAP;
+    track.style.setProperty("--shift", loop+"px");
+    track.style.setProperty("--dur", (loop/MARQ_SPEED)+"s");
+  });
+}
+function ddItems(){
+  const v = searchEl ? searchEl.value : "";
+  if(!v.startsWith("/")) return null;
+  const scope = v.startsWith("//") ? "//" : "/";
+  const body = v.slice(scope.length);
+  if(!body.includes(" ")){
+    // 命令阶段：// 只看 // 项；/ 下 // 项以 "/type" 形态参与前缀匹配（"/" 时全部 4 项，"/t" 只剩 type/tag）
+    const list = scope==="//"
+      ? ddCommands().filter(c=>c.name.startsWith("//") && c.name.slice(2).startsWith(body))
+      : ddCommands().filter(c=>(c.name.startsWith("//") ? c.name.slice(1) : c.name).startsWith(body));
+    return { scope:scope, stage:"cmd", list:list };
+  }
+  const sp = body.indexOf(" ");
+  const cmd = body.slice(0,sp), rest = body.slice(sp+1);
+  if(cmd==="type" && !rest.includes(" "))
+    return { scope:scope, stage:"type", list:ddTypes().filter(x=>x.name.startsWith(rest)) };
+  return { scope:scope, stage:"none", list:[] };   // tag 参数自由输入 / 关键词阶段：不提示
+}
+function paintSearchDropdown(){
+  if(!ddEl) return;
+  const d = ddItems();
+  ddEl.innerHTML = "";
+  if(!d || !d.list.length){ ddEl.style.display = "none"; return; }
+  if(ddIdx >= d.list.length) ddIdx = 0;
+  ddEl.style.display = "block";
+  d.list.forEach((it,i)=>{
+    const row = el("div","dd-row"+(i===ddIdx?" on":""));
+    row.innerHTML = '<span class="dd-inner"><span class="dd-name">'+esc(it.label||it.name)+'</span>'
+                  + '<span class="dd-desc">'+esc(it.desc)+'</span></span>';
+    row.onmousedown = e=>{ e.preventDefault(); ddPick(d, i); };   // mousedown + preventDefault 阻止输入框失焦
+    // hover 只搬高亮 class、不重建 DOM（重建会毁掉正被点击的行，导致鼠标点不中）
+    row.onmouseenter = ()=>{
+      ddIdx = i;
+      ddEl.querySelectorAll(".dd-row").forEach((r,j)=>r.classList.toggle("on", j===i));
+      applyMarquee(ddEl);
+    };
+    ddEl.appendChild(row);
+  });
+  applyMarquee(ddEl);
+}
+function ddPick(d, i){
+  const it = d.list[i];
+  if(!it || !searchEl) return;
+  if(d.stage==="cmd"){
+    searchEl.value = (it.name.startsWith("//") ? it.name : d.scope + it.name) + " ";  // 补全命令名，带空格等待参数
+    ddIdx = 0; paintSearchDropdown();
+  } else {
+    searchEl.value = d.scope + "type " + it.name;  // 类型值补全完整
+    ddEl.style.display = "none";
+  }
+  searchEl.focus();
+}
+function parseCommand(raw){
+  state.cmdErr=""; state.cmdHelp=false; state.scopeNote="";
+  const all = raw.startsWith("//");
+  const body = raw.slice(all?2:1).trim();
+  const expanded = MGMT && MGMT.list ? MGMT.list.filter(p=>state.open[p.name]===true) : [];
+  const degraded = !all && expanded.length===0;
+  if(!body){ state.cmd=null; state.cmdRaw=""; state.cmdHelp=true; state.q=""; return; }
+  const tokens = body.split(/\s+/);
+  const kind = tokens[0], arg = tokens[1]||"";
+  if(kind!=="type" && kind!=="tag"){
+    state.cmd=null; state.cmdRaw="";
+    state.cmdErr = t("cmdUnknown").replace("{c}", kind);
+    return;
+  }
+  if(kind==="type" && TYPE_VALUES.indexOf(arg)<0){
+    state.cmd=null; state.cmdRaw="";
+    state.cmdErr = t("cmdBadType").replace("{v}", arg||t("cmdEmpty"));
+    return;
+  }
+  if(kind==="tag" && !arg){
+    state.cmd=null; state.cmdRaw="";
+    state.cmdErr = t("cmdNeedTag");
+    return;
+  }
+  state.cmd = { all:all, degraded:degraded, kind:kind, arg:arg, keyword:tokens.slice(2).join(" ") };
+  state.cmdRaw = raw;
+  if(degraded) state.scopeNote = t("scopeDegraded");
+  state.q="";
+}
+function clearFilter(){
+  state.q=""; state.cmd=null; state.cmdRaw=""; state.cmdErr=""; state.cmdHelp=false; state.scopeNote="";
+  if(searchEl) searchEl.value = "";
+  paintFilterBar();
+  const sc = document.querySelector(".tree-scroll"); if(sc) fillTree(sc);
+}
+function paintFilterBar(){
+  const bar = document.querySelector(".fbar"); if(!bar) return;
+  bar.className = "fbar"; bar.innerHTML = "";
+  if(state.cmdErr){
+    bar.classList.add("err");
+    bar.textContent = "⚠ " + state.cmdErr;
+    const c = el("button","clear"); c.textContent = t("clearFilter"); c.onclick = clearFilter;
+    bar.appendChild(c);
+    return;
+  }
+  if(state.cmdHelp){
+    bar.classList.add("info");
+    bar.innerHTML = t("cmdHelp");
+    const c = el("button","clear"); c.textContent = t("clearFilter"); c.onclick = clearFilter;
+    bar.appendChild(c);
+    return;
+  }
+  if(state.cmd){
+    const c = state.cmd;
+    bar.classList.add("info");
+    const scope = (c.all||c.degraded) ? t("scopeAll") : t("scopeOpen");
+    const cond = c.kind==="type" ? (c.arg==="draft" ? t("draft") : "type:"+c.arg) : "tag:"+c.arg;
+    let txt = scope + " · " + cond;
+    if(c.keyword) txt += ' · "'+c.keyword+'"';
+    if(c.degraded) txt += "（"+state.scopeNote+"）";
+    bar.textContent = txt;
+    const b = el("button","clear"); b.textContent = t("clearFilter"); b.onclick = clearFilter;
+    bar.appendChild(b);
+  }
+}
+/* 过滤汇总：命令（state.cmd）优先于普通文本（state.q）；返回 null 表示项目不在命令范围内 */
+function filteringOn(){ return !!(state.cmd || state.q.trim()); }
+function filteredEntries(p){
+  const c = state.cmd, q = state.q.trim().toLowerCase();
+  if(c){
+    if(!(c.all || c.degraded) && state.open[p.name]!==true) return null;   // 范围外
+    let list = p.entries;
+    if(c.kind==="type") list = c.arg==="draft" ? list.filter(e=>e.draft) : list.filter(e=>e.type===c.arg);
+    else { const a=c.arg.toLowerCase(); list = list.filter(e=>(e.tags||[]).some(tg=>String(tg).toLowerCase().includes(a))); }
+    if(c.keyword){ const k=c.keyword.toLowerCase(); list = list.filter(e=>e.title.toLowerCase().includes(k)); }
+    return list;
+  }
+  return p.entries.filter(e=>!q || e.title.toLowerCase().includes(q));
+}
+
 function renderTree(){
   const tree = el("div","tree");
   tree.style.width = treeWidth()+"px";   // 拖拽分隔条的持久化宽度（反馈2）
   const head = el("div","tree-head");
   head.appendChild(Object.assign(el("span","caption"),{textContent:t("treeCaption")}));
   tree.appendChild(head);
-  // 工具行：过滤框 + 新建按钮（方案决策：新建在树头部搜索框旁）
+  // 工具行：过滤框（含命令下拉浮层，需求 2）+ 新建按钮（方案决策：新建在树头部搜索框旁）
   const tools = el("div","tree-tools");
+  const wrap = el("div","search-wrap");
   const search = el("input","search");
-  search.placeholder = t("filter"); search.value = state.q;
-  search.oninput = ()=>{ state.q = search.value; fillTree(scroll); };
-  tools.appendChild(search);
+  searchEl = search;
+  search.placeholder = t("filter"); search.value = state.cmdRaw || state.q;
+  search.oninput = ()=>{
+    const v = search.value;
+    ddIdx = 0; paintSearchDropdown();
+    if(v.startsWith("/")) return;            // 命令输入中：暂停即时过滤，回车生效
+    state.q = v; state.cmd = null; state.cmdRaw = "";
+    state.cmdErr = ""; state.cmdHelp = false; state.scopeNote = "";
+    paintFilterBar(); fillTree(scroll);
+  };
+  search.onkeydown = e=>{
+    const ddVisible = ddEl && ddEl.style.display !== "none" && ddEl.childNodes.length;
+    if(e.key==="Escape"){
+      if(ddVisible){ ddEl.style.display = "none"; e.preventDefault(); }
+      return;
+    }
+    if((e.key==="ArrowDown"||e.key==="ArrowUp") && ddVisible){
+      e.preventDefault();
+      const d = ddItems();
+      if(d && d.list.length){
+        ddIdx = (ddIdx + (e.key==="ArrowDown"?1:-1) + d.list.length) % d.list.length;
+        paintSearchDropdown();
+      }
+      return;
+    }
+    if(e.key==="Tab" && ddVisible){               // Tab 同 Enter：补全选中项
+      const d = ddItems();
+      if(d && d.list.length){ ddPick(d, ddIdx); e.preventDefault(); }
+      return;
+    }
+    if(e.key!=="Enter") return;
+    if(ddVisible){                            // 下拉打开时 Enter 优先选中补全
+      const d = ddItems();
+      if(d && d.list.length){ ddPick(d, ddIdx); e.preventDefault(); return; }
+    }
+    const v = search.value.trim();            // 下拉关闭时 Enter 执行过滤命令
+    if(v.startsWith("/")){
+      parseCommand(v); paintFilterBar(); fillTree(scroll);
+      if(ddEl) ddEl.style.display = "none";
+    }
+  };
+  search.onblur = ()=>{ setTimeout(()=>{ if(ddEl) ddEl.style.display = "none"; }, 120); };
+  wrap.appendChild(search);
+  ddEl = el("div","dd");
+  wrap.appendChild(ddEl);
+  tools.appendChild(wrap);
   const add = el("button","btn tree-add");
   add.textContent = t("mgNew");
   add.disabled = !MGMT || !MGMT.list.length;
@@ -1012,6 +1327,7 @@ function renderTree(){
   };
   tools.appendChild(add);
   tree.appendChild(tools);
+  tree.appendChild(el("div","fbar"));   // 需求 2：过滤条件摘要 / 错误提示 / 命令帮助行
   const scroll = el("div","tree-scroll");
   // 截断标题悬浮窗（反馈5）：事件委托挂在树容器，仅当标题被截断（scrollWidth>clientWidth）才显示
   scroll.addEventListener("mouseover", ev=>{
@@ -1022,14 +1338,173 @@ function renderTree(){
     showTreeTip(leaf, t2.textContent);
   });
   scroll.addEventListener("mouseleave", hideTreeTip);
-  // 懒加载（反馈7）：滚到底附近时给还有未渲条目的展开项目追加一批
+  // 懒加载（反馈7 + 需求 5 下沉到类目）：滚到底附近时给还有未渲条目的展开类目追加一批
   scroll.addEventListener("scroll", ()=>{
     hideTreeTip();
     if(scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 60) growTreeShown(scroll);
   });
   tree.appendChild(scroll);
   fillTree(scroll);
+  paintFilterBar();
   return tree;
+}
+/* ---------- 需求 5：树按类目分组（规范源 prototype-manage-terminal.html，按本文件约定重写） ----------
+   归组优先级 归档 > 草稿 > 注入 > 类型（多维重叠每条目只入首个命中类目）；空类目不渲染；
+   类目单击展开/收起、互不互斥（项目级手风琴保留），展开态存 state.catOpen（会话级）。
+   类目渲染顺序：草稿固定置顶、归档固定沉底，中间类目按类内最新 mtime（catLatest）降序；
+   项目首次非过滤态展开时 applyDefaultCatOpen 写默认展开态（每项目只应用一次）。 */
+const CATEGORY_ORDER = ["archived","draft","mandatory","rule","pitfall","note","reference"];  // 归组优先级
+const CATEGORY_I18N = { draft:"catDraft", mandatory:"catMandatory", reference:"catReference",
+                        note:"catNote", pitfall:"catPitfall", rule:"catRule", archived:"catArchived" };
+function groupEntries(entries){
+  const g = { archived:[], draft:[], mandatory:[], rule:[], pitfall:[], note:[], reference:[] };
+  entries.forEach(e=>{
+    if(e.archived) g.archived.push(e);
+    else if(e.draft) g.draft.push(e);
+    else if(e.mandatory) g.mandatory.push(e);
+    else if(e.type==="rule") g.rule.push(e);
+    else if(e.type==="pitfall") g.pitfall.push(e);
+    else if(e.type==="note") g.note.push(e);
+    else g.reference.push(e);
+  });
+  return g;
+}
+// 类内最新 mtime：类目动态排序与首展默认展开的共同依据
+function catLatest(entries){
+  let m = 0;
+  entries.forEach(e=>{ const t = e.mtime||0; if(t>m) m = t; });
+  return m;
+}
+// 类目渲染顺序：草稿固定置顶、归档固定沉底，中间类目按 catLatest 降序；空类目不参与
+function sortCategories(groups){
+  const mid = ["mandatory","reference","note","pitfall","rule"].filter(k=>groups[k] && groups[k].length);
+  mid.sort((a,b)=>catLatest(groups[b])-catLatest(groups[a]));
+  const order = [];
+  if(groups.draft && groups.draft.length) order.push("draft");
+  order.push.apply(order, mid);
+  if(groups.archived && groups.archived.length) order.push("archived");
+  return order;
+}
+/* 项目首次非过滤态展开时的默认类目展开（state.catDefaulted 每项目只应用一次；过滤态由调用方
+   跳过，不触发也不标记 defaulted）：有草稿只展开草稿目录；无草稿展开 catLatest 最大的类目
+   （归档不参与）；其余收。catOpen 已有键 = 用户手动展开/收起过，优先于默认不覆盖 */
+function applyDefaultCatOpen(p, g){
+  if(state.catDefaulted[p.name]) return;
+  state.catDefaulted[p.name] = true;
+  const order = sortCategories(g);
+  let openKey = null;
+  if(g.draft.length) openKey = "draft";
+  else{
+    let best = 0;
+    order.forEach(k=>{
+      if(k==="archived") return;                 // 归档不优先
+      const m = catLatest(g[k]);
+      if(m > best){ best = m; openKey = k; }
+    });
+  }
+  order.forEach(k=>{
+    const ck = p.name+"/"+k;
+    if(!(ck in state.catOpen)) state.catOpen[ck] = (k===openKey);
+  });
+}
+// 条目行（徽标渲染复用 badges()/badge-mand/badge-draft 既有函数与样式，不重写）
+function entryLeaf(p, e){
+  const sel = state.sel && state.sel.project===p.name && state.sel.file===e.file;
+  const leaf = el("button","leaf"+(sel?" sel":"")+(e.archived?" archived":""));
+  leaf.innerHTML = '<span class="l1">'+badges(e)
+    +(e.mandatory?'<span class="badge-mand">★</span>':"")
+    +(e.draft?'<span class="badge-draft">'+t("draft")+'</span>':"")+'</span>'
+    +'<span class="t2">'+esc(e.title)+'</span>';
+  leaf.onclick = ()=>{ exitEdit(); state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
+  return leaf;
+}
+// 类目内懒加载（懒加载下沉到类目内，需求 5）：treeShown 键 = 项目/类目[/子目录]
+function leafList(container, p, ck, entries){
+  const shown = state.treeShown[ck] || LAZY_STEP;
+  entries.slice(0, shown).forEach(e=>container.appendChild(entryLeaf(p, e)));
+  if(entries.length > shown)
+    container.appendChild(Object.assign(el("div","lazy-more"),
+      {textContent:t("lazyMore").replace("{n}", String(entries.length - shown))}));
+}
+/* 类目行：文件夹图标 + 类名 + 计数徽标；单击展开/收起（归档默认收起，其余默认展开；
+   过滤命中后空类目由调用方跳过不渲染） */
+function renderCatGroup(kids, p, key, entries){
+  const ck = p.name+"/"+key;
+  const cOpen = ck in state.catOpen ? state.catOpen[ck] : key!=="archived";
+  const crow = el("button","tn-cat"+(cOpen?" open":""));
+  crow.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>'
+    +esc(t(CATEGORY_I18N[key]))+'<span class="cnt">'+entries.length+'</span>';
+  crow.onclick = ()=>{ state.catOpen[ck]=!cOpen; render(); };
+  kids.appendChild(crow);
+  if(!cOpen) return;
+  const sub = el("div","tn-kids");
+  if(key==="reference") renderRefGroup(sub, p, entries);
+  else leafList(sub, p, ck, entries);
+  kids.appendChild(sub);
+}
+/* 参考目录子结构（固定顺序：架构总览 → 演进历程 → 其他；无 wiki 条目的项目只显示"其他"）：
+   架构总览 = 目录+文件双重身份——箭头/图标区点击展开收起子章节，点名=选中出详情，子节点直接是
+   章节条目（tags 含 wiki 且标题非架构总览/演进历程），无"章节"中间层；演进历程 = 文件节点（时钟图标）；
+   其他 = 真目录，收 tags 不含 wiki 的普通 reference。branch: 差异条目按当前分支过滤，匹配条排后 */
+// 参考类目拆分子结构（渲染与懒加载 growTreeShown 共用，保证 treeShown 子键口径一致）
+function refSubGroups(p, entries){
+  const overview = entries.filter(e=>e.title==="架构总览");
+  const evo = entries.filter(e=>e.title==="演进历程");
+  const isChapter = e=>(e.tags||[]).indexOf("wiki")>=0 && overview.indexOf(e)<0 && evo.indexOf(e)<0;
+  const bi = BRANCH[p.name];
+  if(bi === undefined) loadBranchInfo(p.name);   // 分支上下文惰性拉取（到位后重渲即按分支过滤）
+  const cur = bi && bi.current_branch;
+  const branchTag = e=>{ const tg=(e.tags||[]).find(x=>x.indexOf("branch:")===0); return tg?tg.slice(7):""; };
+  const chapters = entries.filter(e=>isChapter(e) && (!cur || !branchTag(e) || branchTag(e)===cur));
+  chapters.sort((a,b)=>(branchTag(a)?1:0)-(branchTag(b)?1:0));   // 分支差异条目排列在后
+  const plain = entries.filter(e=>overview.indexOf(e)<0 && evo.indexOf(e)<0 && !isChapter(e));
+  // 架构总览缺位时章节无宿主节点，回落进"其他"保证可达（chapters 清空，growTreeShown 总览子键自然空操作）
+  if(!overview.length){ plain.push.apply(plain, chapters); chapters.length = 0; }
+  return { overview:overview, evo:evo, chapters:chapters, plain:plain };
+}
+function renderRefGroup(sub, p, entries){
+  const sg = refSubGroups(p, entries);
+  const overview = sg.overview, evo = sg.evo, chapters = sg.chapters, plain = sg.plain;
+  overview.forEach(e=>{
+    const ck = p.name+"/reference/架构总览";
+    const cOpen = ck in state.catOpen ? state.catOpen[ck] : true;
+    const sel = state.sel && state.sel.project===p.name && state.sel.file===e.file;
+    const leaf = el("button","leaf spec dual"+(sel?" sel":"")+(cOpen?" open":""));
+    leaf.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>'
+      +'<span class="t2">'+esc(e.title)+'</span><span class="cnt">'+chapters.length+'</span>';
+    const toggle = ev=>{ ev.stopPropagation(); state.catOpen[ck]=!cOpen; render(); };
+    leaf.querySelector(".caret").onclick = toggle;
+    leaf.querySelector(".folder").onclick = toggle;
+    leaf.onclick = ()=>{ exitEdit(); state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
+    sub.appendChild(leaf);
+    if(cOpen && chapters.length){
+      const sub2 = el("div","tn-kids");
+      leafList(sub2, p, ck, chapters);
+      sub.appendChild(sub2);
+    }
+  });
+  evo.forEach(e=>{
+    const sel = state.sel && state.sel.project===p.name && state.sel.file===e.file;
+    const leaf = el("button","leaf spec"+(sel?" sel":""));
+    leaf.innerHTML = '<span class="l1"><span class="folder">'+ICON.history+'</span></span>'
+      +'<span class="t2">'+esc(e.title)+'</span>';
+    leaf.onclick = ()=>{ exitEdit(); state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
+    sub.appendChild(leaf);
+  });
+  if(plain.length){
+    const ck = p.name+"/reference/其他";
+    const cOpen = ck in state.catOpen ? state.catOpen[ck] : true;
+    const crow = el("button","tn-cat"+(cOpen?" open":""));
+    crow.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>'
+      +esc(t("catOther"))+'<span class="cnt">'+plain.length+'</span>';
+    crow.onclick = ()=>{ state.catOpen[ck]=!cOpen; render(); };
+    sub.appendChild(crow);
+    if(cOpen){
+      const sub2 = el("div","tn-kids");
+      leafList(sub2, p, ck, plain);
+      sub.appendChild(sub2);
+    }
+  }
 }
 function fillTree(scroll){
   hideTreeTip();
@@ -1039,69 +1514,90 @@ function fillTree(scroll){
     scroll.appendChild(Object.assign(el("div","pdesc fb2 err"),{textContent:t("mgTreeErr")+MGMT.loadErr}));
     return;
   }
-  const q = state.q.trim().toLowerCase();
+  const filtering = filteringOn();
+  let hits = 0;
   MGMT.list.forEach(p=>{
-    const list = p.entries.filter(e=>!q || e.title.toLowerCase().includes(q));
-    if(q && !list.length) return;   // 过滤时无命中项目整组隐藏（原型语义）；无过滤时空项目也显示（否则树里不可见）
-    const open = q ? true : state.open[p.name] === true;   // 手风琴（反馈7）：至多一个项目展开
+    const list = filteredEntries(p);
+    if(list===null) return;                 // 命令范围外的项目整组隐藏（需求 2）
+    if(filtering && !list.length) return;   // 过滤时无命中项目整组隐藏（原型语义）；无过滤时空项目也显示（否则树里不可见）
+    hits += list.length;
+    const open = filtering ? true : state.open[p.name] === true;   // 手风琴（反馈7）：至多一个项目展开
     // 项目行双热区（manage-fix3 反馈2）：名前 图标/箭头区=展开/收起；项目名区（含计数）=选中
     // 项目并右侧预览 README。两区行为独立，hover 各有视觉提示（style.css .pj-toggle/.pj-name）
     const pj = el("div","tn-proj"+(open?" open":"")+(!state.sel && state.projSel===p.name?" psel":""));
     pj.title = p.err ? t("mgTreeErr")+p.err : (p.paths||[]).join("\n");
     const tg = el("span","pj-toggle");
     tg.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>';
-    tg.onclick = ev=>{
-      ev.stopPropagation();
+    const toggleOpen = ()=>{                          // 展开/收起：箭头区单击、项目名双击共用
       exitEdit();
       state.openTouched = true;
       if(open){ state.open[p.name] = false; }              // 再点收起 → 全收起
       else { state.open = {}; state.open[p.name] = true; } // 展开即互斥收起其他
       render();
     };
+    tg.onclick = ev=>{ ev.stopPropagation(); toggleOpen(); };
     const nm = el("span","pj-name");
     nm.innerHTML = '<span class="nm">'+esc(p.name)+'</span><span class="cnt">'+(p.err?"!":list.length)+'</span>';
     nm.onclick = ()=>{
       exitEdit();
       state.sel = null; DETAIL = null;
       state.projSel = p.name; loadReadme(p.name);          // 点项目名 → 右侧显示项目 README（反馈3）
+      const now = Date.now();                              // 双击项目名 = 展开/收起（计时检测，见 nmLastClick 注释）
+      if(nmLastClick && nmLastClick.name===p.name && now-nmLastClick.t<400){ nmLastClick = null; toggleOpen(); return; }
+      nmLastClick = { name:p.name, t:now };
       render();
     };
     pj.appendChild(tg); pj.appendChild(nm);
     scroll.appendChild(pj);
     if(open){
       const kids = el("div","tn-kids");
-      const shown = state.treeShown[p.name] || LAZY_STEP;
-      list.slice(0, shown).forEach(e=>{
-        const sel = state.sel && state.sel.project===p.name && state.sel.file===e.file;
-        const leaf = el("button","leaf"+(sel?" sel":"")+(e.archived?" archived":""));
-        leaf.innerHTML = '<span class="l1">'+badges(e)
-          +(e.mandatory?'<span class="badge-mand">★</span>':"")
-          +(e.draft?'<span class="badge-draft">'+t("draft")+'</span>':"")+'</span>'
-          +'<span class="t2">'+esc(e.title)+'</span>';
-        leaf.onclick = ()=>{ exitEdit(); state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
-        kids.appendChild(leaf);
+      const g = groupEntries(list);   // 需求 5：项目下按类目分组渲染，空类目不显示
+      if(!filtering) applyDefaultCatOpen(p, g);   // 首展默认展开（过滤态不触发、不标记 defaulted）
+      sortCategories(g).forEach(key=>{            // 草稿置顶/归档沉底，中间按类内最新 mtime 降序
+        renderCatGroup(kids, p, key, g[key]);
       });
-      if(list.length > shown){
-        kids.appendChild(Object.assign(el("div","lazy-more"),
-          {textContent:t("lazyMore").replace("{n}", String(list.length - shown))}));
-      }
       scroll.appendChild(kids);
     }
   });
+  if(filtering && !hits)   // 需求 2：过滤无命中时给空态提示
+    scroll.appendChild(Object.assign(el("div","tree-empty"),{textContent:t("noHit")}));
 }
-// growTreeShown 懒加载追加（反馈7）：第一个还有未渲条目的展开项目步进 LAZY_STEP，
-// 原位重填树；追加在列表尾部，scrollTop 天然不变
+// growTreeShown 懒加载追加（反馈7 + 需求 5 下沉到类目）：第一个还有未渲条目的展开类目步进
+// LAZY_STEP，原位重填树；追加在列表尾部，scrollTop 天然不变。
+// 参考类目消费的是子目录键（renderRefGroup/refSubGroups 口径）：架构总览=章节、其他=普通 reference，
+// 故对两个子键分别步进，而非父键 …/reference
 function growTreeShown(scroll){
   if(!MGMT || !MGMT.list) return;
-  const q = state.q.trim().toLowerCase();
+  const filtering = filteringOn();
   for(const p of MGMT.list){
-    if(!(q ? true : state.open[p.name]===true)) continue;
-    const total = p.entries.filter(e=>!q || e.title.toLowerCase().includes(q)).length;
-    const shown = state.treeShown[p.name] || LAZY_STEP;
-    if(total > shown){
-      state.treeShown[p.name] = shown + LAZY_STEP;
-      fillTree(scroll);
-      return;
+    if(!(filtering ? true : state.open[p.name]===true)) continue;
+    const list = filteredEntries(p);
+    if(list===null) continue;
+    const g = groupEntries(list);
+    for(const key of sortCategories(g)){
+      if(key==="reference"){
+        const sg = refSubGroups(p, g.reference);
+        const subKeys = [ ["架构总览", sg.chapters], ["其他", sg.plain] ];
+        let grew = false;
+        for(const sk of subKeys){
+          const ck = p.name+"/reference/"+sk[0];
+          const shown = state.treeShown[ck] || LAZY_STEP;
+          if(sk[1].length > shown){
+            state.treeShown[ck] = shown + LAZY_STEP;
+            grew = true;
+            break;
+          }
+        }
+        if(grew){ fillTree(scroll); return; }
+        continue;
+      }
+      const ck = p.name+"/"+key;
+      const shown = state.treeShown[ck] || LAZY_STEP;
+      if(g[key].length > shown){
+        state.treeShown[ck] = shown + LAZY_STEP;
+        fillTree(scroll);
+        return;
+      }
     }
   }
 }
@@ -1131,27 +1627,371 @@ function treeWidth(){
   const w = parseInt(localStorage.getItem(TREE_W_KEY)||"", 10);
   return isNaN(w) ? 360 : clampTreeW(w);
 }
-// 拖拽分隔条：mousedown 后 document 级 mousemove/mouseup 跟随，松手写回 localStorage
-function renderTreeResizer(){
-  const bar = el("div","tree-resizer");
-  bar.addEventListener("mousedown", ev=>{
-    ev.preventDefault();
-    const treeEl = document.querySelector(".tree");
-    if(!treeEl) return;
-    const startX = ev.clientX, startW = treeEl.getBoundingClientRect().width;
+/* ---------- 需求 3：终端面板（chat 式 CLI，规范源 prototype-manage-terminal.html 按本文件约定重写） ----------
+   命令不带 ok 前缀（后端隐式补齐）；历史流 = 命令回显条 + 成功/失败结果卡片（输出按行单行截断 +
+   title 悬浮全文）；底部输入框 + 发送按钮 + 命令 chips（纯命令名，点击填入）；
+   输入框命令下拉：聚焦即显示全部白名单命令，首 token 前缀过滤，Tab/Enter 补全（下拉打开时
+   Enter 优先补全不发送），发送后自动关闭露出历史，输入变化/↑↓/重新聚焦再弹。 */
+const TERM_WHITELIST = ["list","search","doctor","capture","approve","wiki","add","propose","archive","on","off"];
+/* chips 只放命令名（说明挪进输入时的命令下拉里） */
+const TERM_CHIPS = ["list","search","doctor","capture","approve","wiki"];
+/* 终端命令提示下拉：name 命令名 / usage 仅参数部分（无参为空）/ desc 一句话功能说明（i18n 键） */
+const TERM_CMDS = [
+  { name:"list",    usage:"",                            desc:"tc_list" },
+  { name:"search",  usage:"<查询>",                      desc:"tc_search" },
+  { name:"doctor",  usage:"",                            desc:"tc_doctor" },
+  { name:"capture", usage:"[propose|auto|interval <n>]", desc:"tc_capture" },
+  { name:"approve", usage:"<条目文件>",                  desc:"tc_approve" },
+  { name:"wiki",    usage:"<status|mark|base|diff>",     desc:"tc_wiki" },
+  { name:"add",     usage:"",                            desc:"tc_add" },
+  { name:"propose", usage:"",                            desc:"tc_propose" },
+  { name:"archive", usage:"",                            desc:"tc_archive" },
+  { name:"on",      usage:"",                            desc:"tc_on" },
+  { name:"off",     usage:"",                            desc:"tc_off" },
+];
+let termHistEl = null, termInputEl = null, termDdEl = null, termDdIdx = 0;
+let termHeadEl = null, termInputRowEl = null;
+let termBusy = false;                    // 命令执行中（loading 态防卡 + 轮询重渲屏蔽）
+/* Esc 与发送只关闭下拉本次显示（muted）；输入变化 / ↑↓ / 失焦后重新聚焦时恢复 */
+let termDdMuted = false, termDdBlurred = false;
+function termDdItems(){
+  const v = termInputEl ? termInputEl.value : "";
+  if(v.includes(" ")) return [];          // 含空格进入参数阶段：关闭
+  if(!v) return TERM_CMDS;
+  return TERM_CMDS.filter(c=>c.name.startsWith(v));
+}
+function paintTermDropdown(){
+  if(!termDdEl) return;
+  if(termDdMuted){ termDdEl.style.display = "none"; return; }
+  const list = termDdItems();
+  termDdEl.innerHTML = "";
+  if(!list.length){ termDdEl.style.display = "none"; return; }
+  if(termDdIdx >= list.length) termDdIdx = 0;   // 默认高亮第一条，Tab/Enter 直接可用
+  termDdEl.style.display = "block";
+  /* 下边缘贴输入框上边缘（bottom = 输入行实测高度，不含 chips 行）：
+     下拉作为浮层盖住 chips 行与历史区（z-index 60），chips 保持原位仅被遮住，关闭后恢复可见；
+     高度随内容自适应，max-height 上限 = 面板高 − 头部 − 输入行高 − 边距 */
+  const rowH = termInputRowEl ? termInputRowEl.offsetHeight : 0;
+  termDdEl.style.bottom = rowH + "px";
+  const headH = (termHeadEl && termHeadEl.offsetParent) ? termHeadEl.offsetHeight : 0;
+  const panelH = termDdEl.offsetParent ? termDdEl.offsetParent.clientHeight : 400;
+  termDdEl.style.maxHeight = Math.max(80, panelH - headH - rowH - 12) + "px";
+  list.forEach((c,i)=>{
+    const row = el("div","dd-row"+(i===termDdIdx?" on":""));
+    row.innerHTML = '<span class="dd-inner"><span class="dd-name">'+esc(c.name)+'</span>'
+                  + (c.usage ? '<span class="dd-usage">'+esc(c.usage)+'</span>' : '')
+                  + '<span class="dd-desc">'+esc(t(c.desc))+'</span></span>';
+    row.onmousedown = e=>{ e.preventDefault(); termDdPick(c.name); };  // mousedown + preventDefault 防 blur
+    row.onmouseenter = ()=>{
+      termDdIdx = i;
+      termDdEl.querySelectorAll(".dd-row").forEach((r,j)=>r.classList.toggle("on", j===i));
+      applyMarquee(termDdEl);
+    };
+    termDdEl.appendChild(row);
+  });
+  applyMarquee(termDdEl);
+}
+function termDdPick(name){
+  if(!termInputEl) return;
+  termInputEl.value = name + " ";   // 补全为命令名 + 尾随空格，等待参数
+  termDdEl.style.display = "none";
+  termInputEl.focus();
+}
+function renderTerminal(extraCls){
+  const tp = el("div","term"+(extraCls?" "+extraCls:""));
+  const head = el("div","term-head");
+  termHeadEl = head;
+  head.appendChild(Object.assign(el("span","tt"),{textContent:t("termTitle")}));
+  head.appendChild(Object.assign(el("span","sub"),{textContent:t("termSub")}));
+  tp.appendChild(head);
+  termHistEl = el("div","term-hist");
+  tp.appendChild(termHistEl);
+  paintTermHist();
+  const chips = el("div","term-chips");
+  TERM_CHIPS.forEach(cmd=>{
+    const c = el("button","tchip");
+    c.textContent = cmd;
+    c.onclick = ()=>{
+      if(!termInputEl) return;
+      termInputEl.value = cmd; termDdMuted = false; termDdIdx = 0;
+      termInputEl.focus(); paintTermDropdown();
+    };
+    chips.appendChild(c);
+  });
+  tp.appendChild(chips);
+  const row = el("div","term-input");
+  termInputRowEl = row;
+  termInputEl = el("input","term-in");
+  termInputEl.placeholder = t("termPh");
+  termInputEl.oninput = ()=>{ termDdMuted = false; termDdIdx = 0; paintTermDropdown(); };
+  termInputEl.onfocus = ()=>{                     // 失焦后重新聚焦时恢复弹出（程序性 refocus 不算）
+    if(termDdBlurred){ termDdMuted = false; termDdBlurred = false; }
+    termDdIdx = 0; paintTermDropdown();
+  };
+  termInputEl.onkeydown = e=>{
+    const ddVisible = termDdEl && termDdEl.style.display !== "none" && termDdEl.childNodes.length;
+    if(e.key==="Escape"){
+      if(ddVisible){ termDdEl.style.display = "none"; termDdMuted = true; e.preventDefault(); }
+      return;
+    }
+    if(e.key==="ArrowDown"||e.key==="ArrowUp"){     // ↑↓ 随时唤出/移动高亮
+      e.preventDefault();
+      termDdMuted = false;
+      const list = termDdItems();
+      if(list.length){
+        termDdIdx = (termDdIdx + (e.key==="ArrowDown"?1:-1) + list.length) % list.length;
+        paintTermDropdown();
+      }
+      return;
+    }
+    if(e.key==="Tab" && ddVisible){                  // Tab 补全当前高亮命令，阻止焦点移走
+      e.preventDefault();
+      const list = termDdItems();
+      if(list.length) termDdPick(list[termDdIdx].name);
+      return;
+    }
+    if(e.key!=="Enter") return;
+    if(ddVisible){                            // 下拉打开时 Enter 优先补全，不发送
+      const list = termDdItems();
+      if(list.length){ termDdPick(list[termDdIdx].name); e.preventDefault(); return; }
+    }
+    sendTerm();
+  };
+  termInputEl.onblur = ()=>{
+    termDdBlurred = true;
+    setTimeout(()=>{ if(termDdEl) termDdEl.style.display = "none"; }, 120);
+  };
+  row.appendChild(termInputEl);
+  const send = el("button","btn btn-primary"); send.textContent = t("termSend");
+  send.onclick = sendTerm;
+  row.appendChild(send);
+  tp.appendChild(row);
+  // 下拉挂到 .term 面板下（相对面板绝对定位，向上顶到面板顶部），由 paintTermDropdown 实测 bottom/maxHeight
+  termDdEl = el("div","dd term-dd");
+  tp.appendChild(termDdEl);
+  return tp;
+}
+/* 输出块：按行拆分，每行单行截断 + title 悬浮看全文 */
+function outBlock(text){
+  const box = el("div","t-out");
+  (text||"").split("\n").forEach(l=>{
+    const ln = el("div","t-line");
+    ln.textContent = l; ln.title = l;
+    box.appendChild(ln);
+  });
+  return box;
+}
+function paintTermHist(){
+  if(!termHistEl) return;
+  termHistEl.innerHTML = "";
+  state.termHist.forEach(h=>{
+    const item = el("div");
+    const echo = el("div","t-echo");
+    // 状态并到命令行尾部（省一行）：执行中/成功/失败 只留一行回显 + 纯输出卡片
+    const st = h.pending ? '<span class="t-status run">'+esc(t("termRunning"))+'</span>'
+           : h.code===0 ? '<span class="t-status ok">✓ '+esc(t("termOk"))+'</span>'
+           : '<span class="t-status err">✗ '+esc(t("termErr"))+'</span>';
+    echo.innerHTML = "&gt;_ <b>"+esc(h.cmd)+"</b> "+st;
+    item.appendChild(echo);
+    if(h.pending){
+      // 无卡片：状态已在回显行
+    } else if(h.code===0){
+      const card = el("div","t-card ok");
+      card.appendChild(outBlock(h.out));
+      item.appendChild(card);
+    } else {
+      const card = el("div","t-card err");
+      card.appendChild(outBlock(h.err));
+      item.appendChild(card);
+    }
+    termHistEl.appendChild(item);
+  });
+  termHistEl.scrollTop = termHistEl.scrollHeight;   // 最新在底部，发送后自动滚到底
+}
+function sendTerm(){
+  if(!termInputEl || termBusy) return;              // loading 态防卡：执行中不允许并发发送
+  const v = termInputEl.value.trim();
+  if(!v) return;
+  termBusy = true;
+  state.termHist.push({ cmd:v, pending:true });
+  paintTermHist();
+  termInputEl.value = "";
+  termDdMuted = true;               // 发送后关闭下拉（保持聚焦也不弹），让最新回显+结果卡片可见
+  if(termDdEl) termDdEl.style.display = "none";
+  const finish = (code, out, err)=>{
+    const h = state.termHist[state.termHist.length-1];
+    h.pending = false; h.code = code; h.out = out; h.err = err;
+    termBusy = false;
+    paintTermHist();
+    if(termInputEl){ termDdBlurred = false; termInputEl.focus(); }  // 程序性 refocus 不触发下拉重弹
+  };
+  const args = v.split(/\s+/).filter(Boolean);   // 用户输入不带 ok 前缀，按第一个 token 匹配子命令
+  if(TERM_WHITELIST.indexOf(args[0])<0){         // 白名单外命令前端先行拦截（后端同样会拦）
+    finish(1, "", t("termBadCmd").replace("{c}", args[0]||t("cmdEmpty"))
+      + "\n" + t("termAvail") + "\n  " + TERM_WHITELIST.join("\n  "));
+    return;
+  }
+  // 工作目录语义：当前选中条目项目 > 选中项目（README 视图）> 当前展开项目
+  const proj = (state.sel && state.sel.project) || state.projSel
+    || (MGMT && MGMT.list && (MGMT.list.find(p=>state.open[p.name]===true)||{}).name) || "";
+  const body = { args:args };
+  if(proj) body.project = proj;
+  api("/api/terminal/exec", { method:"POST", body:body })
+    .then(r=>{ r = r||{}; finish(r.code||0, r.stdout||r.stderr||"", r.stderr||r.stdout||""); })
+    .catch(err=>{ finish(1, "", err.message); });
+}
+
+/* ---------- 需求 4：栏目布局引擎 + 界面设置弹窗（规范源 prototype-manage-terminal.html 变体 A/C） ----------
+   left/middle/right = 横向槽位（栏目相对顺序由槽位决定，空槽自动压缩）；term=bottom = 终端占底部
+   整条，上方由树+详情两栏横向排列。配置存 localStorage（UI 偏好属前端态），保存两段式生效。
+   拖拽分隔条沿用既有语义（body.tree-resizing 期间轮询不重渲），宽度/高度同样持久化。
+   常量与 loadLayout 在 state 初始化前声明（见「状态」段头）。 */
+function clampTermW(w){
+  return Math.round(Math.min(Math.max(240, window.innerWidth*0.5), Math.max(220, w)));
+}
+function termWidth(){
+  const w = parseInt(localStorage.getItem(TERM_W_KEY)||"", 10);
+  return isNaN(w) ? 360 : clampTermW(w);
+}
+function termHeight(){
+  const h = parseFloat(localStorage.getItem(TERM_H_KEY)||"");
+  return isNaN(h) ? 0.4 : Math.min(0.7, Math.max(0.2, h));
+}
+/* 栏目节点：树/终端定宽（可拖），详情自适应 */
+function panelNode(key){
+  if(key==="tree") return renderTree();   // 宽度由 renderTree 内联（treeWidth，持久化）
+  if(key==="term"){ const n = renderTerminal("term-col"); n.style.width = termWidth()+"px"; return n; }
+  return renderDetail();
+}
+/* 相邻栏目间的竖分隔条：拖动调整相邻定宽栏目（tree/term）的宽度，松手写回 localStorage；
+   复用 .tree-resizer 样式与 body.tree-resizing 轮询屏蔽（原 renderTreeResizer 泛化） */
+function addVSplitter(row, left, right){
+  const target = (left && left.k!=="detail") ? { k:left.k, node:left.node, dir:1 }
+               : (right && right.k!=="detail") ? { k:right.k, node:right.node, dir:-1 } : null;
+  if(!target) return;
+  const sp = el("div","tree-resizer");
+  row.appendChild(sp);
+  const key = target.k==="tree" ? TREE_W_KEY : TERM_W_KEY;
+  const clamp = target.k==="tree" ? clampTreeW : clampTermW;
+  sp.addEventListener("mousedown", e0=>{
+    e0.preventDefault();
+    const startX = e0.clientX, startW = target.node.getBoundingClientRect().width;
     document.body.classList.add("tree-resizing");
-    const move = e=>{ treeEl.style.width = clampTreeW(startW + e.clientX - startX)+"px"; };
+    const mv = ev=>{ target.node.style.width = clamp(startW + target.dir*(ev.clientX-startX))+"px"; };
     const up = ()=>{
-      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mousemove", mv);
       document.removeEventListener("mouseup", up);
       document.body.classList.remove("tree-resizing");
-      localStorage.setItem(TREE_W_KEY, String(clampTreeW(treeEl.getBoundingClientRect().width)));
+      localStorage.setItem(key, String(clamp(target.node.getBoundingClientRect().width)));
     };
-    document.addEventListener("mousemove", move);
+    document.addEventListener("mousemove", mv);
     document.addEventListener("mouseup", up);
   });
-  return bar;
 }
+/* 按槽位顺序（左→中→右）放置栏目，空槽自动压缩 */
+function placePanels(row, cfg, keys){
+  const order = { left:0, middle:1, right:2 };
+  const placed = keys.slice().sort((a,b)=>order[cfg[a]]-order[cfg[b]]);
+  let prev = null;
+  placed.forEach(k=>{
+    const node = panelNode(k);
+    if(prev) addVSplitter(row, prev, { k:k, node:node });
+    row.appendChild(node);
+    prev = { k:k, node:node };
+  });
+}
+function renderManageLayout(main){
+  const cfg = state.layout;
+  const area = el("div","layout-area");
+  main.appendChild(area);
+  if(cfg.term==="bottom"){
+    // 终端在下：上部 = 树+详情横向两栏，下部 = 终端整条（默认高 40%，横分隔条可拖并持久化）
+    const upper = el("div","layout-row");
+    area.appendChild(upper);
+    placePanels(upper, cfg, ["tree","detail"]);
+    const hsp = el("div","hsplitter");
+    area.appendChild(hsp);
+    const term = renderTerminal("term-strip");
+    term.style.height = (termHeight()*100)+"%";
+    area.appendChild(term);
+    hsp.addEventListener("mousedown", e0=>{
+      e0.preventDefault();
+      const startY = e0.clientY, startH = termHeight(), areaH = area.clientHeight;
+      document.body.classList.add("tree-resizing");
+      const mv = ev=>{
+        term.style.height = (Math.min(0.7, Math.max(0.2, startH + (startY-ev.clientY)/areaH))*100)+"%";
+      };
+      const up = ()=>{
+        document.removeEventListener("mousemove", mv);
+        document.removeEventListener("mouseup", up);
+        document.body.classList.remove("tree-resizing");
+        localStorage.setItem(TERM_H_KEY,
+          String(Math.min(0.7, Math.max(0.2, term.getBoundingClientRect().height/area.clientHeight))));
+      };
+      document.addEventListener("mousemove", mv);
+      document.addEventListener("mouseup", up);
+    });
+  } else {
+    const row = el("div","layout-row");
+    area.appendChild(row);
+    placePanels(row, cfg, ["tree","detail","term"]);
+  }
+}
+
+/* 界面设置弹窗：两段式（弹窗内改动只落草稿态 cfgDraft，保存才生效）；冲突槽位置灰不可选 */
+function renderCfgModal(){
+  const d = state.cfgDraft;
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.style.width = "460px";
+  m.appendChild(Object.assign(el("h3"),{textContent:t("uiSettings")}));
+  m.appendChild(Object.assign(el("div","pdesc"),{textContent:t("uiDesc")}));
+  m.appendChild(Object.assign(el("div","sec-label"),{textContent:t("layoutSec")}));
+  const SLOTS = { tree:["left","middle","right"], detail:["left","middle","right"],
+                  term:["left","middle","right","bottom"] };
+  const SLOT_KEY = { left:"slotLeft", middle:"slotMiddle", right:"slotRight", bottom:"slotBottom" };
+  const PANEL_KEY = { tree:"panelTree", detail:"panelDetail", term:"panelTerm" };
+  ["tree","detail","term"].forEach(p=>{
+    const row = el("div","cfg-row");
+    row.appendChild(Object.assign(el("span","k"),{textContent:t(PANEL_KEY[p])}));
+    const sel = el("select","pselect");
+    SLOTS[p].forEach(v=>{
+      // 已被其他栏目占用的左/中/右槽位不显示（"下"不占槽位）
+      if(v!=="bottom" && ["tree","detail","term"].some(q=>q!==p && d[q]===v)) return;
+      const op = el("option");
+      op.value = v; op.textContent = t(SLOT_KEY[v]);
+      sel.appendChild(op);
+    });
+    sel.value = d[p];
+    sel.onchange = ()=>{ state.cfgDraft[p] = sel.value; render(); };
+    row.appendChild(sel);
+    m.appendChild(row);
+  });
+  const hint = el("div","pdesc");
+  hint.textContent = t("layoutHint");
+  hint.style.marginTop = "4px";
+  m.appendChild(hint);
+  const foot = el("div","mfoot");
+  const rst = el("button","btn"); rst.textContent = t("resetDefault"); rst.style.marginRight = "auto";
+  rst.onclick = ()=>{ state.cfgDraft = Object.assign({}, DEFAULT_LAYOUT); render(); };
+  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+  cancel.onclick = ()=>{ state.cfgOpen = false; render(); };
+  const ok = el("button","btn btn-primary"); ok.textContent = t("save");
+  ok.onclick = ()=>{
+    state.layout = Object.assign({}, state.cfgDraft);
+    try{ localStorage.setItem(LAYOUT_KEY, JSON.stringify(state.layout)); }catch(_){}
+    state.cfgOpen = false; render();
+  };
+  foot.appendChild(rst); foot.appendChild(cancel); foot.appendChild(ok);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = e=>{ if(e.target===mask){ state.cfgOpen = false; render(); } };
+  return mask;
+}
+// 界面设置弹窗打开时 Esc 关闭（点遮罩/取消同效，两段式放弃草稿）
+document.addEventListener("keydown", e=>{
+  if(state.cfgOpen && e.key==="Escape"){ state.cfgOpen = false; render(); }
+});
 
 // 项目节点详情（反馈3）：项目名 + README/wiki 概述来源行 + renderMdRich 正文（manage-fix4：
 // 表格/白名单内联 HTML/details 折叠块/外链图，相对路径图经 readme-asset 端点真实分发）；
@@ -1201,7 +2041,7 @@ function renderDetail(){
     ops.appendChild(Object.assign(el("span","fb2"+(state.mgmtFb.err?" err":"")),{textContent:state.mgmtFb.txt}));
   const mk = (label, cls, fn)=>{ const b=el("button",cls); b.textContent=label; b.onclick=fn; return b; };
   ops.appendChild(mk(t("opEdit"), "btn", ()=>startEdit(proj, e.file)));
-  if(e.draft) ops.appendChild(mk(t("opApprove"), "btn", ()=>approveEntry(proj, e)));
+  if(e.draft) ops.appendChild(mk(t("opApprove"), "btn btn-primary", ()=>approveEntry(proj, e)));   // 需求 1：实心主按钮
   ops.appendChild(mk(e.archived?t("opUnarchive"):t("opArchive"), "btn", ()=>archiveEntry(proj, e, e.archived)));
   ops.appendChild(mk(t("opDelete"), "btn btn-danger", ()=>delEntry(proj, e)));
   d.appendChild(ops);
@@ -2866,6 +3706,11 @@ function renderBody(app){
   collapse.innerHTML = ICON.panel; collapse.title = t("collapseTip");
   collapse.onclick = ()=>{ state.collapsed=!state.collapsed; render(); };
   bar.appendChild(collapse);
+  // 需求 4：界面设置齿轮按钮（图标按钮无文字），在语言/主题切换左侧
+  const uiBtn = el("button","icon-btn ui-btn");
+  uiBtn.innerHTML = ICON.prefs; uiBtn.title = t("uiSettings");
+  uiBtn.onclick = ()=>{ state.cfgDraft = Object.assign({}, state.layout); state.cfgOpen = true; render(); };
+  bar.appendChild(uiBtn);
   const lang = el("div","lang-seg");
   [["zh","中"],["en","EN"]].forEach(([k,label])=>{
     const b = el("button", state.lang===k?"on":"");
@@ -2907,28 +3752,22 @@ function renderBody(app){
   // （占位分支已随 Task 7 引导页接入移除；notImpl 键同步删除）
   if(state.menu==="manage"){
     loadManage();
-    main.appendChild(renderTree());
-    main.appendChild(renderTreeResizer());   // 树栏拖拽分隔条（反馈2）
-    main.appendChild(renderDetail());
-    return;
+    renderManageLayout(main);   // 需求 4：三栏目（树/详情/终端）按槽位配置渲染
   }
-  if(state.menu==="logs"){
+  else if(state.menu==="logs"){
     main.appendChild(renderLogs());
-    return;
   }
-  if(state.menu==="misc"){
+  else if(state.menu==="misc"){
     main.appendChild(renderMisc());
-    return;
   }
-  if(state.menu==="setup"){
+  else if(state.menu==="setup"){
     main.appendChild(renderSetup());
-    return;
   }
-  if(state.menu==="prefs"){
+  else if(state.menu==="prefs"){
     main.appendChild(renderPrefs());
-    return;
   }
   /* 五页已全部接入，无占位分支 */
+  if(state.cfgOpen) app.appendChild(renderCfgModal());   // 需求 4：界面设置弹窗（顶栏级，不限当前页）
 }
 
 /* 刷新恢复选中菜单：菜单点击时写入 location.hash，启动时读回（非法值回退 manage） */
