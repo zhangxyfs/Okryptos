@@ -67,40 +67,44 @@
 
 ## 3. 模块架构
 
-单 module（`openknowledge`），15 个包，严格单向依赖、无环：
+单 module（`openknowledge`），internal/ 下 30 个包（含 `rxext/sdk` 子包）+ `cmd/` 三入口（ok/okd/okmanager），严格单向依赖、无环：
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ cmd/ok                （二进制入口 + 子命令调度）     │
+│ cmd/ok·okd·okmanager （三 exe：CLI 入口/daemon/GUI） │
 └───────┬───────────────────┬─────────────────┬───────┘
         │                   │                 │
 ┌───────▼────────┐  ┌───────▼────────┐  ┌─────▼─────────────┐
 │ internal/cli   │  │ internal/gui   │  │ internal/hook     │
-│ （人用的命令）  │  │ （Web GUI）    │  │ （kimi hooks 入口）│
+│ （人用的命令）  │  │ （Web GUI）    │  │ （hooks 入口）     │
 └───────┬────────┘  └───────┬────────┘  └─────┬─────────────┘
         │                   │         ┌───────▼────────┐
         │                   │         │ internal/project│（cwd→项目）
         │                   │         └───────┬────────┘
    ┌────▼───────────────────▼─────────────────▼───────────────────┐
    │ 基础层（被上层直接组合）                                       │
-   │ registry · entry · config · store · embed · index ·          │
-   │ retrieve · state · enforce · setupx                          │
+   │ registry · entry · config · store · embed · embedx ·         │
+   │ embedsidecar · index · retrieve · state · enforce · setupx · │
+   │ agentx（宿主适配）· rxext（Reasonix 扩展）· daemon · daemonx │
+   │ tray · webdir · fsx（原子写/文件锁）· logx（日志/轮替）·     │
+   │ llmx · backup · wiki · procx · version                       │
    └───────────────────────────────────────────────────────────────┘
 ```
 
-**依赖关系**（→ 表示 import）：
+**依赖关系**（→ 表示 import；仅列主干，完整以 `go list -deps` 为准）：
 
-- `cmd/ok` → `cli`、`gui`、`hook`
-- `cli` → `registry`、`entry`、`store`、`embed`、`index`、`retrieve`、`project`、`config`、`setupx`
-- `gui` → `registry`、`entry`、`store`、`index`、`retrieve`、`config`、`setupx`
-- `hook` → `project`、`registry`、`store`、`embed`、`index`、`retrieve`、`state`、`enforce`
-- `setupx` → `registry`、`config`、`embed`（setup 引导共享逻辑，cli 与 gui 复用）
+- `cmd/ok` → `cli`、`gui`、`hook`、`daemon`、`rxext`；`cmd/okd`（daemon 常驻）→ `daemon`、`gui`、`tray`；`cmd/okmanager`（GUI 拉起器）→ `daemon`
+- `cli` → `registry`、`entry`、`store`、`embed`、`index`、`retrieve`、`project`、`config`、`setupx`、`backup`、`agentx`
+- `gui` → `registry`、`entry`、`store`、`index`、`retrieve`、`config`、`setupx`、`agentx`、`llmx`、`wiki`、`webdir`
+- `hook` → `project`、`registry`、`store`、`embed`、`index`、`retrieve`、`state`、`enforce`、`setupx`、`wiki`
+- `agentx`（多 agent 宿主适配层，hook/cli/gui/setupx 共享）→ `fsx`、`config`、`registry`、`daemonx`
+- `rxext`（+`rxext/sdk`，Reasonix 扩展协议 sidecar）→ `hook`、`agentx`、`logx`
+- `daemon`/`daemonx` → `gui`、`embedsidecar`、`tray`、`webdir`（单实例端口锁、指纹校验）
+- `setupx` → `registry`、`config`、`embed`、`embedsidecar`、`agentx`（setup 引导共享逻辑，cli 与 gui 复用）
 - `project` → `registry`、`config`、`store`
 - `index` → `entry`、`embed`、`retrieve`、`config`（+ modernc.org/sqlite）
-- `retrieve` / `embed` / `store` → 仅标准库
 - `enforce` → `config`、`state`（+ doublestar）
-- `registry` → BurntSushi/toml；`entry` → yaml.v3；`config` → BurntSushi/toml
-- `state` → 仅标准库
+- `fsx`（原子写 tmp+fsync+rename、WithFileLock 文件锁）、`logx`（按行时间戳 Writer + 大小轮替归档）、`llmx`、`procx`、`version`、`backup`、`wiki`、`embedx`、`embedsidecar` → 仅标准库 + 少量上述基础包
 
 **分层原则**：`hook`、`cli`、`gui` 是三个互不 import 的应用层；`project` 是 hook 与 cli 共享的项目解析层；`setupx` 是 cli 与 gui 共享的引导逻辑层；其余为单一职责的基础包。
 
@@ -160,14 +164,28 @@ OpenKnowledge/
 │   │   ├── toggle.go              #   On/Off 全局开关
 │   │   └── *_test.go
 │   ├── setupx/                    # setup 共享逻辑（cli 与 gui 复用）
-│   │   ├── setupx.go              #   HooksBlockFor/UpsertHooksBlock/InstallSkills/SaveEmbedding/TestEmbedding/Enable/Disable
+│   │   ├── setupx.go              #   HooksBlockFor/UpsertHooksBlock/InstallSkills/EnsureSkills/SkillsInstalled/SaveEmbedding/TestEmbedding/Enable/Disable
+│   │   ├── skills/                #   内嵌技能模板（SKILL.md，{{EXE}} 烘焙）
 │   │   └── setupx_test.go
+│   ├── agentx/                    # ★ 多 agent 宿主适配层（kimi/claude/codex/qoder/zcode/opencode/pi/reasonix/dsh…）
+│   │   ├── agentx.go              #   Agent 接口、Register/Detected/All、SkillsHome、CLIExe
+│   │   └── <宿主>.go              #   各适配器 Install/Remove/EnsureHooks（宿主 settings 读-改-写一律 WithFileLock）
+│   ├── rxext/                     # Reasonix 扩展协议 sidecar（sdk/ 子包为扩展 SDK）
+│   │   └── serve.go               #   input.receive/tool.after/compaction.complete 三拦截器，fail-open
+│   ├── daemon/ + daemonx/         # GUI 常驻 daemon（端口即单实例锁、指纹校验、Ensure/Stop）
+│   ├── embedsidecar/ + embedx/    # llama-server sidecar 生命周期（want 标记调和、崩溃计数）
+│   ├── fsx/                       # ★ 原子写（tmp+fsync+rename）与 WithFileLock 文件锁——全仓库文件写出口
+│   ├── logx/                      # 按行时间戳 Writer + 日志大小轮替归档（RotateIfOversize/CleanArchives）
+│   ├── llmx/                      # LLM 调用（超时按场景区分、temperature 缺省不传）
+│   ├── backup/                    # 导出/导入 zip 包（防 zip-slip/zip-bomb、路径与项目名校验）
+│   ├── tray/ · webdir/ · procx/ · version/   # 托盘、embed 前端资源、进程、版本
 │   └── gui/                       # ★ 配置中心 API + 静态页分发（okd 承载；ok gui / OkManager 双入口）
-│       ├── server.go              #   127.0.0.1 随机端口服务、令牌生成、浏览器自动打开（同步最大化）
-│       ├── api.go                 #   Handler 路由、令牌鉴权、管理 API（条目 CRUD/检索/setup/toggle）
-│       ├── window_windows.go      #   Windows 窗口最大化兜底（maximizeWindowByTitle）
+│       ├── server.go              #   hostGuard/withAuth 路由管线、令牌 fragment 下发
+│       ├── api.go                 #   管理 API（条目 CRUD/检索/setup/toggle/终端白名单执行）
+│       ├── llm.go · embedding.go · changelog.go · api_enforce.go · api_hookstimeout.go
+│       ├── browser.go · browser_windows.go · browser_unix.go
 │       ├── window_other.go        #   非 Windows 平台无操作实现
-│       └── api_test.go
+│       └── *_test.go
 ├── web/                           # 配置中心前端（零依赖原生 HTML/JS/CSS，五菜单：管理/引导/设置/日志/其他）
 │   ├── index.html                 #   页面骨架（{{TOKEN}} 占位符由服务端注入令牌）
 │   ├── app.js                     #   条目 CRUD、检索预览、引导流程、心跳（5s）
@@ -452,7 +470,12 @@ hook prompt（基础注入之后）
 
 ```
 ~/.openknowledge/
-├── ok.log                  # hook 错误日志（fail-open 的唯一痕迹）
+├── ok.log                  # hook/CLI/GUI 侧错误与优化日志（fail-open 的唯一痕迹）
+├── daemon.log              # daemon（okd）输出日志
+├── logs/                   # 大小轮替归档（R3 接入）：ok/daemon/sidecar 日志超 8MB 时在
+│                           #   句柄释放窗口改名归档为 <名>-<日期>_<时分秒>.log，保留 7 天
+│                           #   （CleanArchives 在轮替发生与 daemon 启动时清理；Windows 上被
+│                           #   占用的文件改不了名，失败跳过本轮 fail-open）
 ├── registry.toml           # 项目注册表：[[project]] name + paths
 ├── config.toml             # 全局配置：[[embedding.profiles]]/inject/retrieve 默认值
 ├── hooks-disabled          # 全局开关标志文件（存在即全部静默）
@@ -581,6 +604,8 @@ dsh 适配器（`deepharness.go` + 内嵌模板 `dsh_plugin.js`）：DeepSeek Ha
 ---
 
 ## 11. 依赖关系图
+
+（早期核心链路快照；完整包清单与主干依赖以 §3 为准——agentx/rxext/daemon/fsx/logx 等新增层未画入本图。）
 
 ```
                  ┌─────────┐
@@ -741,7 +766,7 @@ go build ./...         # 编译检查
 1. **清理 go.mod 标记**：执行 `go mod tidy` 去掉间接依赖上过期的 `// indirect` 标记。
 2. **防御性钳制**：`config.Load` 对 `max_tokens < 0`、`top_n < 0` 做钳制（当前手改配置为负数时 `TruncateToBudget` 会 panic——hook 路径虽有 recover 兜底，CLI 路径没有）。
 3. **写盘原子化**：INDEX.md / state / registry 改为临时文件 + rename，避免崩溃半截文件。
-4. **ok.log 治理**：当前只增不减且会写入 embedding 错误响应体（≤512B），建议只记状态码并加大小滚动。
+4. **ok.log 治理**（✅ 已落地）：大小滚动已实现——超 8MB 在句柄释放窗口轮替归档 `logs/`，保留 7 天（logx.RotateIfOversize/CleanArchives，见 §8）；embedding 错误响应体裁剪部分若仍存余量可后续收尾。
 5. **Doctor 校验 enforce glob**：用 doublestar 预编译用户配置的 glob，格式错误提前暴露（当前 malformed glob 静默不生效）。
 6. **CRLF 归一**：仓库在 Windows 下全量 CRLF，`gofmt -l` 全报未格式化；建议加 `.gitattributes`（`* text=auto eol=lf`）统一为 LF。
 7. **v2 候选方向**（当前为非目标，勿提前实现）：hooks 自动沉淀经验、其他 AI 工具适配、知识库远程同步。（v2.14.0 已实现原候选"本地 embedding"：内置 llama.cpp sidecar 形态，见 5.5/17.4；原"模型漂移检测"与"ok index 强制重算"也由 meta 身份管理落地——身份不符显式跳过，`ok index` 自动清向量全量重建。）

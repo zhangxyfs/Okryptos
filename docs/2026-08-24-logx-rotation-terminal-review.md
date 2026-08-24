@@ -194,3 +194,22 @@ Spec 源：`docs/2026-08-23-manage-search-terminal-requirements.md`（只覆盖�
 ## 小结（R3）
 
 第三轮全量审查：**0 High / 7 Medium / 16 Low**。前两轮的 4+5 条 High 全部确认修复且未回退，系统性问题（鉴权链、锁纪律、写双轨）已清剿完毕；剩余 Medium 全部是"修复的同款形状漏网分支"（A-01/B-01/E-01/F-02）与"静默停摆残余路径"（D-01/F-01），单条修复成本均为一行到一函数级。最值得先做的一条：**A-01（三处宿主文件 RMW 补锁）**——同根一次收口，回归测试模板现成。
+
+---
+
+## R3 修复记录（fix/review-r3 分支）
+
+7 条 Medium + 2 条文档漂移已全部修复（每条均为判别性测试先红后绿，全量 build/vet/test 通过）：
+
+| 发现 | 修复 | 提交 |
+|---|---|---|
+| A-01 | kimi/dsh/reasonix 宿主文件 RMW 全部补 WithFileLock；settings_lock_test 扩三用例；顺带修 A-04（writeReasonixState 改 fsx.WriteFile） | 48e66a4 |
+| D-01 | SetMeta 失败改走 failEmbed 回滚 written 向量行 | 同日提交 |
+| E-01 | ok propose --file 复用 Add 的 StripFrontmatter 剥离+警告 | 同日提交 |
+| F-02 | rxext tool.after 补 file_path 双字段（与 hook 层同口径） | 98495eb |
+| F-01 | pendingJump 重试移到重渲守卫之后，被拦即清挂起 | 同日提交 |
+| B-01 | setupx.EnsureSkills 自愈（过期 exe 重写、缺失/外来不动）随 selfHealHooks 同窗口；SkillsInstalled 内容比对替换 GUI 纯存在性 stat；agentx.CLIExe 导出统一 exe 基准 | 同日提交 |
+| E-02 | backup 导入 parts[1] 补 ValidProjectName + 必须在包内注册表登记 | 同日提交 |
+| 文档漂移 | ARCHITECTURE.md §3（30 包清单+依赖主干）、§4（补 14 个缺失包条目、修 gui 文件清单）、§8（logs/ 归档与 daemon.log）、§11（快照声明）、§16-4（ok.log 治理标记已落地） | 同日提交 |
+
+未修（Low，16 项）：留待后续；其中 E-03（归档 mtime 即焚）、E-04（四份 ok.log 追加助手收拢）建议下一批处理。
