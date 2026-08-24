@@ -180,3 +180,20 @@ func TestSyncDetectsSameMtimeDifferentSize(t *testing.T) {
 		t.Fatalf("同 mtime 不同 size 的重写被判未变化: title=%q", title)
 	}
 }
+
+// meta 末写失败必须回滚本轮已提交向量（R3 D-01）：否则库停留在
+// "meta 空 + vectors 有行"，下一轮 Sync 被模型身份闸判 embedBlocked，
+// 向量写入永久静默停摆。注入：DROP meta 表（身份闸读 meta 失败静默跳过，
+// 不影响前序路径，末尾 SetMeta 必失败）。
+func TestSyncMetaFailureRollsBackVectors(t *testing.T) {
+	db, kdir := setupDB(t)
+	if _, err := db.sql.Exec(`DROP TABLE meta`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Sync(kdir, &failAfterEmbedder{failFrom: 99, identity: "m-test"}); err == nil {
+		t.Fatal("meta 写失败应返回错误")
+	}
+	if n := vectorCount(t, db); n != 0 {
+		t.Fatalf("meta 写失败应回滚本轮向量: vectors=%d", n)
+	}
+}

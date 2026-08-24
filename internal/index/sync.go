@@ -309,11 +309,13 @@ func (db *DB) Sync(dir string, client embed.Client, opts ...SyncOptions) error {
 		}
 	}
 	if !embedBlocked && client != nil && vecDim > 0 && client.ModelIdentity() != "" {
+		// meta 写失败与批失败同款处理（R3 D-01）：回滚本轮向量——否则库停留在
+		// "meta 空 + vectors 有行"，下一轮被身份闸判 embedBlocked 永久停摆。
 		if err := db.SetMeta("embedding_model", client.ModelIdentity()); err != nil {
-			return err
+			return failEmbed(err)
 		}
 		if err := db.SetMeta("embedding_dim", strconv.Itoa(vecDim)); err != nil {
-			return err
+			return failEmbed(err)
 		}
 	}
 	// 顺带 prune 60 天前的条目事件（统计性数据，失败不阻断 Sync）
