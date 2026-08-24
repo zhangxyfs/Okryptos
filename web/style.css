@@ -209,6 +209,13 @@ body.tree-resizing { cursor:col-resize; user-select:none; }
 .t-out { background:var(--pre-bg); color:var(--pre-fg); border-radius:6px;
          padding:10px 12px; font:12px/1.6 Consolas,monospace; }
 .t-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* search 命中行的 RRF 分：点线下划提示可悬浮；浮窗 .score-tip 由 JS 定位到 body
+   （.t-line overflow:hidden 会裁剪 CSS ::after，故不用纯 CSS 方案） */
+.t-score { cursor:help; border-bottom:1px dotted var(--muted); }
+.score-tip { position:fixed; z-index:70; width:280px; white-space:normal;
+             font:12px/1.6 -apple-system,"Segoe UI",sans-serif;
+             background:var(--card); color:var(--fg); border:1px solid var(--border); border-radius:8px;
+             padding:8px 10px; box-shadow:0 8px 24px rgba(0,0,0,.18); }
 @keyframes pulse { 50% { opacity:.45; } }
 .term-chips { display:flex; flex-wrap:wrap; gap:6px; padding:8px 12px 0; flex:none; }
 .tchip { border:1px solid var(--border); background:var(--card); border-radius:999px;
@@ -379,6 +386,7 @@ body.tree-resizing { cursor:col-resize; user-select:none; }
 .rxmodes .rx-desc { color:var(--muted); margin:2px 0 6px; }
 .rxmodes .rx-opt { display:block; color:var(--fg); margin:2px 0; cursor:pointer; }
 .rxmodes .rx-opt input { accent-color:var(--primary); }
+.rxmodes .rx-foot { margin-top:6px; }   /* 保存按钮（两段式：勾选草稿+保存落盘） */
 .detail-toggle { background:none; border:none; color:var(--muted); font-size:12px; cursor:pointer; padding:0;
                  display:block; text-align:left; margin-top:2px; }  /* 块级：codex 卡两个 toggle（信任门说明+明细）各占一行 */
 .detail-toggle:hover { color:var(--primary); }

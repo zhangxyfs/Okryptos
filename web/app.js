@@ -127,6 +127,7 @@ const I18N = {
     opEdit:"编辑", opApprove:"批准", opArchive:"归档", opUnarchive:"取消归档", opDelete:"删除",
     cfmDelete:"确定删除条目「{t}」？",
     cfmArchive:"归档条目「{t}」？归档后退出 INDEX 与强制注入，仍可被检索命中。",
+    cfmDiscard:"当前条目有未保存的修改，确定丢弃吗？",
     emNew:"新建条目", emEdit:"编辑条目", emExists:"条目已存在", emNoProject:"尚无已注册项目，请先 ok init",
     editingSub:"（详情区内联编辑 · 保存前不落盘）",
     fTitle:"标题", fTags:"tags（逗号分隔）", fMand:"mandatory（每会话必注入）",
@@ -163,6 +164,7 @@ const I18N = {
     tc_capture:"查看或设置沉淀模式", tc_approve:"批准草稿条目", tc_wiki:"项目 wiki 状态",
     tc_add:"新建条目", tc_propose:"提议草稿", tc_archive:"归档条目",
     tc_on:"开启 hooks", tc_off:"关闭 hooks",
+    rrfTip:"RRF 排名融合分：score = Σ 1/(60+名次)，各检索通道按名次累加，仅用于排序，不是相似度；单通道第 1 名 = 1/61 ≈ 0.0164，上限（双通道同中第 1）≈ 0.0328。",
     /* 需求 4：界面设置弹窗 + 栏目布局 */
     uiSettings:"界面设置", uiDesc:"这里只收纳纯 UI 设置（不碰后端配置）。",
     layoutSec:"栏目布局（管理页）",
@@ -260,6 +262,7 @@ const I18N = {
     opEdit:"Edit", opApprove:"Approve", opArchive:"Archive", opUnarchive:"Unarchive", opDelete:"Delete",
     cfmDelete:"Delete entry \"{t}\"?",
     cfmArchive:"Archive entry \"{t}\"? It leaves INDEX and mandatory injection, but stays searchable.",
+    cfmDiscard:"Discard unsaved changes to this entry?",
     emNew:"New entry", emEdit:"Edit entry", emExists:"Entry already exists", emNoProject:"No registered project yet; run ok init first",
     editingSub:"(inline in detail pane · not written until Save)",
     fTitle:"Title", fTags:"tags (comma-separated)", fMand:"mandatory (injected every session)",
@@ -296,6 +299,7 @@ const I18N = {
     tc_capture:"View or set capture mode", tc_approve:"Approve a draft entry", tc_wiki:"Project wiki status",
     tc_add:"Add an entry", tc_propose:"Propose a draft", tc_archive:"Archive entries",
     tc_on:"Enable hooks", tc_off:"Disable hooks",
+    rrfTip:"RRF rank-fusion score: score = Σ 1/(60+rank), summed per retrieval channel; for ordering only, not similarity. Single-channel rank #1 = 1/61 ≈ 0.0164; max (rank #1 in both channels) ≈ 0.0328.",
     /* Requirement 4: UI settings modal + panel layout */
     uiSettings:"UI settings", uiDesc:"Pure UI preferences only (no backend config).",
     layoutSec:"Panel layout (Manage)",
@@ -403,21 +407,32 @@ const AGENT_META = {
     descEn:"Local JS plugin mounted via file:// URL." },
 };
 
+/* 惰性页模板（L-30）：setup/manage/prefs/misc 四页共用"惰性缓存 + refresh + menu 守卫"形状——
+   lazyPage：已有缓存原样返回；否则先触发 refresh（异步回填）再返回占位缓存，由调用方赋值。
+   menuRender：refresh 完成回调里的原位刷新守卫——仍停留该页且 canRender 通过才整页重渲。
+   （manage 页守卫后还有"过滤框聚焦只重填树"等保焦逻辑，不走 menuRender，见 refreshManage 尾部注释） */
+function lazyPage(cache, placeholder, refresh){
+  if(cache) return cache;
+  refresh();
+  return placeholder;
+}
+function menuRender(menu, canRender){
+  if(state.menu!==menu) return;
+  if(canRender && !canRender()) return;
+  render();
+}
+
 let SETUP = null;        // {status, loadErr} 缓存；loadSetup 惰性加载，装/卸载后 refreshSetup 原位刷新
 const setupState = {};   // id → {busy, open, cxOpen, fb, fbErr}：明细展开/反馈跨整页重渲保留
 let setupDetecting = false;
 
-function loadSetup(){
-  if(SETUP) return;
-  SETUP = { status:null };
-  refreshSetup();
-}
+function loadSetup(){ SETUP = lazyPage(SETUP, { status:null }, refreshSetup); }
 function refreshSetup(){
   return api("/api/status").then(st=>{
     SETUP = { status: st || null };
   }).catch(err=>{
     SETUP = { status:null, loadErr: err.message };
-  }).then(()=>{ if(state.menu==="setup") render(); });
+  }).then(()=>menuRender("setup"));
 }
 function aState(id){
   if(!setupState[id]) setupState[id] = { busy:false, open:false, cxOpen:false, fb:"", fbErr:false };
@@ -535,29 +550,40 @@ function renderSetup(){
   return d;
 }
 
-/* Reasonix 三档（旧 GUI renderRxEnforce 语义平移）：radio 变更即保存（sidecar 每条输入
-   实时读配置，即时生效）；失败时卡片驻留错误并整页重渲，radio 回退到已保存档位。 */
+/* Reasonix 三档（旧 GUI renderRxEnforce 语义平移）：与沉淀模式同约定——勾选只写草稿
+   （s.rxDraft），点保存才落盘；失败时错误驻留卡片反馈行并整页重渲，草稿保留可重试。 */
 function renderRxModes(st, s){
   const box = el("div","rxmodes");
   box.appendChild(Object.assign(el("div","rx-title"),{textContent:t("rxTitle")}));
   box.appendChild(Object.assign(el("div","rx-desc"),{textContent:t("rxDesc")}));
-  const mode = st.rxEnforceMode || "mixed";
+  const saved = st.rxEnforceMode || "mixed";
+  if(s.rxDraft===undefined) s.rxDraft = saved;
+  const sv = el("button","btn btn-primary");
+  sv.textContent = t("save"); sv.disabled = s.rxDraft===saved;
+  sv.onclick = ()=>{
+    const v = s.rxDraft;
+    sv.disabled = true;
+    api("/api/reasonix/enforce-mode", { method:"POST", body:{ mode:v } }).then(()=>{
+      if(SETUP && SETUP.status) SETUP.status.rxEnforceMode = v;
+      s.rxDraft = undefined; s.fb = t("saved"); s.fbErr = false;
+      render();
+    }).catch(err=>{
+      s.fb = t("rxSaveFail")+err.message; s.fbErr = true;
+      render();
+    });
+  };
   [["mixed","rxMixed"],["soft","rxSoft"],["hard","rxHard"]].forEach(([v,k])=>{
     const lab = el("label","rx-opt");
     const r = el("input");
-    r.type = "radio"; r.name = "rx-enforce"; r.value = v; r.checked = mode===v;
-    r.onchange = ()=>{
-      api("/api/reasonix/enforce-mode", { method:"POST", body:{ mode:v } }).then(()=>{
-        if(SETUP && SETUP.status) SETUP.status.rxEnforceMode = v;
-      }).catch(err=>{
-        s.fb = t("rxSaveFail")+err.message; s.fbErr = true;
-        render();
-      });
-    };
+    r.type = "radio"; r.name = "rx-enforce"; r.value = v; r.checked = s.rxDraft===v;
+    r.onchange = ()=>{ s.rxDraft = v; sv.disabled = v===saved; };   // 实时判脏不重渲（同 pDirtyLive）
     lab.appendChild(r);
     lab.appendChild(document.createTextNode(" "+t(k)));
     box.appendChild(lab);
   });
+  const foot = el("div","rx-foot");
+  foot.appendChild(sv);
+  box.appendChild(foot);
   return box;
 }
 
@@ -602,13 +628,29 @@ function loadLayout(){
   }catch(_){}
   return Object.assign({}, DEFAULT_LAYOUT);
 }
+const TERM_HIST_MAX = 200;   // 历史上限：超出环形截断最旧条目（无上限会随使用膨胀、每次全量重建 DOM 越来越慢）
+const TERM_HIST_KEY = "ok-term-hist";   // 终端历史 localStorage 键（同布局/栏宽约定，UI 态前端持久化）
+/* 读回历史：丢弃 pending 残留（页面关闭时执行中的命令不会有结果回来），只留已完成条目 */
+function loadTermHist(){
+  try{
+    const a = JSON.parse(localStorage.getItem(TERM_HIST_KEY)||"[]");
+    if(Array.isArray(a))
+      return a.filter(h=>h && typeof h.cmd==="string" && !h.pending
+        && typeof h.out==="string" && typeof h.err==="string" && typeof h.code==="number"   // 非字符串 out/err 会让 outBlock 的 split 抛 TypeError → 整页白屏（M-18）
+      ).slice(-TERM_HIST_MAX);
+  }catch(_){}
+  return [];
+}
+function saveTermHist(){
+  try{ localStorage.setItem(TERM_HIST_KEY, JSON.stringify(state.termHist.filter(h=>!h.pending))); }catch(_){}
+}
 const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
                 open:{}, openTouched:false, sel:null, projSel:null, q:"", mgmtFb:null, treeShown:{},
                 catOpen:{},                                                   // 需求 5：类目目录展开态（会话级）
                 catSel:null,                                                  // 类目行单击选中态（双击=展开/收起）
                 catDefaulted:{},                                              // 需求 5：首展默认展开每项目只应用一次
                 cmd:null, cmdRaw:"", cmdErr:"", cmdHelp:false, scopeNote:"",   // 需求 2：搜索框命令态
-                termHist:[],                                                  // 需求 3：终端会话级历史
+                termHist:loadTermHist(),                                      // 需求 3：终端历史（localStorage 持久化）
                 edView:"read",   // 详情区态：read 只读 | edit 内联编辑 | cmp 优化对照
                 layout:loadLayout(), cfgOpen:false, cfgDraft:null,            // 需求 4：栏目布局 + 设置弹窗
                 logSrc:{ ok:true, daemon:true, sidecar:true }, logSem:false, logQ:"",
@@ -689,7 +731,14 @@ function prow(k, input){
 }
 function pswitch(on, flip){
   const s = el("button","switch"+(on?" on":""));
-  s.setAttribute("role","switch"); s.onclick = flip;
+  s.setAttribute("role","switch");
+  s.setAttribute("aria-checked", on?"true":"false");
+  s.onclick = ()=>{
+    flip();
+    // aria-checked 随状态同步：翻转方走整页重渲时本节点随即废弃（新节点自带正确值）；
+    // 原位 toggle class 的场景（如日志自动刷新开关）靠这里补上同步
+    s.setAttribute("aria-checked", s.classList.contains("on")?"true":"false");
+  };
   return s;
 }
 function pnum(val, min, max, commit){
@@ -784,11 +833,11 @@ function serNode(n, proj){
     const src = (n.getAttribute("src")||"").trim();
     if(/^https?:\/\//i.test(src))   // shields.io 等外链图正常放行
       return '<img src="'+esc(src)+'"'+richAttrs(n,["alt","width","height"])+'>';
-    // 相对路径图重写为 readme-asset 端点直链（daemon 从项目根分发；?token= 因 <img> 无法带鉴权头）
+    // 相对路径图：先出占位（不带 src，不发请求）——渲染落地后由 hydrateReadmeAssets
+    // 逐张申领一次性短时票据再拼 src（L-07：长期 token 不进 URL/浏览器历史）
     if(proj && src && !/^[a-z][a-z0-9+.-]*:/i.test(src) && !src.startsWith("//")){
-      const u = "/api/project/readme-asset?project="+encodeURIComponent(proj)
-              + "&path="+encodeURIComponent(src)+"&token="+encodeURIComponent(window.OK_TOKEN||"");
-      return '<img src="'+esc(u)+'"'+richAttrs(n,["alt","width","height"])+'>';
+      return '<img data-asset-proj="'+esc(proj)+'" data-asset-path="'+esc(src)+'"'
+           + richAttrs(n,["alt","width","height"])+'>';
     }
     // 无项目上下文兜底（当前调用方恒有项目）：占位徽标，避免 404 刷屏
     const label = (n.getAttribute("alt")||"").trim() || src.split("/").pop() || "image";
@@ -807,6 +856,19 @@ function serNode(n, proj){
 function sanitizeHtml(html, proj){
   const doc = new DOMParser().parseFromString(html, "text/html");
   return serKids(doc.body, proj);
+}
+// README 相对路径图水合（L-07）：逐张占位 img 申领一次性短时票据（POST 走
+// X-Ok-Token 头），票据拼进 src 兑换——一次性核销 + 60s TTL，长期 token 不进 URL。
+// 单张失败不拖垮整页（保留占位图，alt/标题仍可读）。
+async function hydrateReadmeAssets(root){
+  const imgs = root.querySelectorAll("img[data-asset-path]");
+  await Promise.all(Array.from(imgs).map(async im=>{
+    try{
+      const r = await api("/api/project/readme-asset-ticket", {method:"POST",
+        body:{project:im.getAttribute("data-asset-proj"), path:im.getAttribute("data-asset-path")}});
+      if(r && r.ticket) im.src = "/api/project/readme-asset?ticket="+encodeURIComponent(r.ticket);
+    }catch(_){}
+  }));
 }
 function renderMdRich(src, proj){
   const lines = src.split("\n"); let html="", i=0;
@@ -923,8 +985,16 @@ const TREE_W_KEY = "ok-tree-w";   // 树栏宽度 localStorage 键（拖拽分�
 let treeTip = null;     // 截断标题悬浮窗节点（body 级，同时只一个）
 let mgmtPollBusy = false;         // 管理页 4s 轮询重入保护
 let mgmtRefreshBusy = false, mgmtRefreshAgain = false;   // refreshManage 重入保护：in-flight 期间补一轮不丢更新
-let nmLastClick = null;           // 项目名双击检测 {name,t}：单击即重渲换节点，原生 dblclick 不可靠
-let catLastClick = null;          // 类目行/双身份节点双击检测 {key,t}：同上，单击即重渲换节点
+const nmClick = { last:null };            // 项目名双击检测记录（dblClick 用）：单击即重渲换节点，原生 dblclick 不可靠
+const catClick = { last:null };           // 类目行/双身份节点双击检测记录：同上
+// dblClick 双击计时检测（L-30，树节点 4 处共用）：400ms 内同键连击返回 true 并清空记录，
+// 否则记录本次点击。状态放在调用方持有的 holder（h.last）上，各节点组互不干扰
+function dblClick(h, key){
+  const now = Date.now();
+  const hit = !!(h.last && h.last.key===key && now-h.last.t<400);
+  h.last = hit ? null : { key:key, t:now };
+  return hit;
+}
 
 function fmtTime(unix){
   if(!unix) return "";
@@ -946,8 +1016,10 @@ function findEntry(project, file){
   }
   return null;
 }
+// keyOf 条目复合键（project\nfile，L-30）：DETAIL 缓存匹配与各详情读取点共用，统一拼接口径
+function keyOf(project, file){ return project+"\n"+file; }
 
-function loadManage(){ if(MGMT) return; MGMT = { list:[] }; refreshManage(); }
+function loadManage(){ MGMT = lazyPage(MGMT, { list:[] }, refreshManage); }
 // refreshManage 全量重拉项目+条目；项目按 last_update 降序（kb.db mtime，api.go listProjects
 // 口径，最近有知识写入的排前）。完成时原位刷新（过滤框聚焦中只重填树、不整页重渲，保焦点）
 function refreshManage(){
@@ -976,6 +1048,8 @@ function refreshManage(){
   }).then(()=>{
     mgmtRefreshBusy = false;
     if(mgmtRefreshAgain){ mgmtRefreshAgain = false; refreshManage(); }   // in-flight 期间又有触发 → 补一轮全量
+    /* 有意不走 menuRender（L-30）：守卫（menu/edBusy）之后还有保焦分支——
+       终端输入态跳过、过滤框聚焦时只原位重填树不整页重渲 */
     if(state.menu!=="manage" || edBusy()) return;   // 编辑/对照态中不重渲（草稿优先）
     const ae = document.activeElement;
     if(termBusy || (ae && ae.classList && ae.classList.contains("term-in"))) return;   // 终端输入/执行态不打断（需求 3）
@@ -990,7 +1064,7 @@ function refreshManage(){
 // loadDetail 拉选中条目全文（force 用于条目操作后绕过缓存重拉）；竞态按 key 匹配丢弃过期响应
 function loadDetail(force){
   if(!state.sel){ DETAIL = null; return; }
-  const key = state.sel.project+"\n"+state.sel.file;
+  const key = keyOf(state.sel.project, state.sel.file);
   if(!force && DETAIL && DETAIL.key===key && (DETAIL.data || DETAIL.err)) return;
   DETAIL = { key:key, data:null, err:"" };
   api("/api/entry?project="+encodeURIComponent(state.sel.project)+"&file="+encodeURIComponent(state.sel.file))
@@ -1147,6 +1221,15 @@ function applyMarquee(container){
     track.style.setProperty("--shift", loop+"px");
     track.style.setProperty("--dur", (loop/MARQ_SPEED)+"s");
   });
+}
+// ddNav 下拉 ↑↓ 循环导航（L-30，搜索命令下拉 / 终端命令下拉共用）：
+// 恒 preventDefault（防光标移位）；列表为空时索引不变、不重绘
+function ddNav(e, count, idx, repaint){
+  e.preventDefault();
+  if(!count) return idx;
+  idx = (idx + (e.key==="ArrowDown"?1:-1) + count) % count;
+  repaint();
+  return idx;
 }
 function ddItems(){
   const v = searchEl ? searchEl.value : "";
@@ -1307,12 +1390,8 @@ function renderTree(){
       return;
     }
     if((e.key==="ArrowDown"||e.key==="ArrowUp") && ddVisible){
-      e.preventDefault();
       const d = ddItems();
-      if(d && d.list.length){
-        ddIdx = (ddIdx + (e.key==="ArrowDown"?1:-1) + d.list.length) % d.list.length;
-        paintSearchDropdown();
-      }
+      ddIdx = ddNav(e, d && d.list.length, ddIdx, paintSearchDropdown);
       return;
     }
     if(e.key==="Tab" && ddVisible){               // Tab 同 Enter：补全选中项
@@ -1435,7 +1514,7 @@ function entryLeaf(p, e){
     +(e.mandatory?'<span class="badge-mand">★</span>':"")
     +(e.draft?'<span class="badge-draft">'+t("draft")+'</span>':"")+'</span>'
     +'<span class="t2">'+esc(e.title)+'</span>';
-  leaf.onclick = ()=>{ exitEdit(); state.catSel=null; state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
+  leaf.onclick = ()=>{ if(!exitEditGuarded()) return; state.catSel=null; state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
   return leaf;
 }
 // 类目内懒加载（懒加载下沉到类目内，需求 5）：treeShown 键 = 项目/类目[/子目录]
@@ -1458,9 +1537,7 @@ function renderCatGroup(kids, p, key, entries){
   crow.querySelector(".pj-toggle").onclick = ev=>{ ev.stopPropagation(); toggle(); };
   crow.onclick = ()=>{
     state.catSel = ck;                                     // 单击 = 选中（高亮）
-    const now = Date.now();                                // 双击 = 展开/收起（计时检测，同 nmLastClick：单击即重渲换节点，原生 dblclick 不可靠）
-    if(catLastClick && catLastClick.key===ck && now-catLastClick.t<400){ catLastClick = null; toggle(); return; }
-    catLastClick = { key:ck, t:now };
+    if(dblClick(catClick, ck)){ toggle(); return; }        // 双击 = 展开/收起
     render();
   };
   kids.appendChild(crow);
@@ -1514,10 +1591,9 @@ function renderDualLeaf(sub, p, ck, e, icon, kids){
   leaf.querySelector(".caret").onclick = toggle;
   leaf.querySelector(".folder").onclick = toggle;
   leaf.onclick = ()=>{
-    exitEdit(); state.catSel=null; state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail();
-    const now = Date.now();   // 双击 = 展开/收起（计时检测，同 nmLastClick：单击即重渲换节点，原生 dblclick 不可靠）
-    if(catLastClick && catLastClick.key===ck && now-catLastClick.t<400){ catLastClick = null; toggle(); return; }
-    catLastClick = { key:ck, t:now };
+    if(!exitEditGuarded()) return;
+    state.catSel=null; state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail();
+    if(dblClick(catClick, ck)){ toggle(); return; }   // 双击 = 展开/收起
     render();
   };
   sub.appendChild(leaf);
@@ -1542,9 +1618,7 @@ function renderRefGroup(sub, p, entries){
     crow.querySelector(".pj-toggle").onclick = ev=>{ ev.stopPropagation(); toggle(); };
     crow.onclick = ()=>{
       state.catSel = ck;
-      const now = Date.now();   // 双击 = 展开/收起（计时检测，同 nmLastClick）
-      if(catLastClick && catLastClick.key===ck && now-catLastClick.t<400){ catLastClick = null; toggle(); return; }
-      catLastClick = { key:ck, t:now };
+      if(dblClick(catClick, ck)){ toggle(); return; }   // 双击 = 展开/收起
       render();
     };
     sub.appendChild(crow);
@@ -1578,7 +1652,7 @@ function fillTree(scroll){
     const tg = el("span","pj-toggle");
     tg.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>';
     const toggleOpen = ()=>{                          // 展开/收起：箭头区单击、项目名双击共用
-      exitEdit();
+      if(!exitEditGuarded()) return;
       state.openTouched = true;
       if(open){ state.open[p.name] = false; }              // 再点收起 → 全收起
       else { state.open = {}; state.open[p.name] = true; } // 展开即互斥收起其他
@@ -1588,12 +1662,10 @@ function fillTree(scroll){
     const nm = el("span","pj-name");
     nm.innerHTML = '<span class="nm">'+esc(p.name)+'</span><span class="cnt">'+(p.err?"!":list.length)+'</span>';
     nm.onclick = ()=>{
-      exitEdit();
+      if(!exitEditGuarded()) return;
       state.sel = null; DETAIL = null; state.catSel = null;
       state.projSel = p.name; loadReadme(p.name);          // 点项目名 → 右侧显示项目 README（反馈3）
-      const now = Date.now();                              // 双击项目名 = 展开/收起（计时检测，见 nmLastClick 注释）
-      if(nmLastClick && nmLastClick.name===p.name && now-nmLastClick.t<400){ nmLastClick = null; toggleOpen(); return; }
-      nmLastClick = { name:p.name, t:now };
+      if(dblClick(nmClick, p.name)){ toggleOpen(); return; }   // 双击项目名 = 展开/收起
       render();
     };
     pj.appendChild(tg); pj.appendChild(nm);
@@ -1682,7 +1754,7 @@ function treeWidth(){
    输入框命令下拉：聚焦即显示全部白名单命令，首 token 前缀过滤，Tab/Enter 补全（下拉打开时
    Enter 优先补全不发送），发送后自动关闭露出历史，输入变化/↑↓/重新聚焦再弹。 */
 const TERM_WHITELIST = ["list","search","doctor","capture","approve","wiki","add","propose","archive","on","off"];
-const TERM_HIST_MAX = 200;   // 会话级历史上限：超出环形截断最旧条目（无上限会随会话膨胀、每次全量重建 DOM 越来越慢）
+/* TERM_HIST_MAX / TERM_HIST_KEY / loadTermHist / saveTermHist 已前移至 state 区（state 初始化即调用） */
 /* chips 只放命令名（说明挪进输入时的命令下拉里） */
 const TERM_CHIPS = ["list","search","doctor","capture","approve","wiki"];
 /* 终端命令提示下拉：name 命令名 / usage 仅参数部分（无参为空）/ desc 一句话功能说明（i18n 键） */
@@ -1755,6 +1827,7 @@ function renderTerminal(extraCls){
   head.appendChild(Object.assign(el("span","sub"),{textContent:t("termSub")}));
   tp.appendChild(head);
   termHistEl = el("div","term-hist");
+  termHistEl.onscroll = hideScoreTip;   // 锚点滚动即关浮窗，避免滞留脱节（L-27）
   tp.appendChild(termHistEl);
   paintTermHist();
   const chips = el("div","term-chips");
@@ -1785,13 +1858,9 @@ function renderTerminal(extraCls){
       return;
     }
     if(e.key==="ArrowDown"||e.key==="ArrowUp"){     // ↑↓ 随时唤出/移动高亮
-      e.preventDefault();
+      /* 有意与搜索下拉不同（L-30）：无 ddVisible 守卫——收起/静音态也唤出，并先解除静音 */
       termDdMuted = false;
-      const list = termDdItems();
-      if(list.length){
-        termDdIdx = (termDdIdx + (e.key==="ArrowDown"?1:-1) + list.length) % list.length;
-        paintTermDropdown();
-      }
+      termDdIdx = ddNav(e, termDdItems().length, termDdIdx, paintTermDropdown);
       return;
     }
     if(e.key==="Tab" && ddVisible){                  // Tab 补全当前高亮命令，阻止焦点移走
@@ -1821,18 +1890,53 @@ function renderTerminal(extraCls){
   tp.appendChild(termDdEl);
   return tp;
 }
-/* 输出块：按行拆分，每行单行截断 + title 悬浮看全文 */
+/* RRF 分悬浮释义：JS 定位浮窗挂 body（.t-line overflow:hidden 会裁剪行内 CSS 浮层）；
+   触发=hover/focus/click（键盘与触屏可达），锚点滚动/重绘即关（不跟随重定位） */
+let scoreTipEl = null;
+function showScoreTip(anchor){
+  hideScoreTip();
+  scoreTipEl = el("div","score-tip");
+  scoreTipEl.textContent = t("rrfTip");
+  document.body.appendChild(scoreTipEl);
+  const r = anchor.getBoundingClientRect();
+  let x = Math.min(r.left, window.innerWidth - scoreTipEl.offsetWidth - 8);
+  let y = r.top - scoreTipEl.offsetHeight - 6;
+  if(y < 4) y = r.bottom + 6;          // 上方放不下就落到行下方
+  scoreTipEl.style.left = Math.max(4, x) + "px";
+  scoreTipEl.style.top = y + "px";
+}
+function hideScoreTip(){ if(scoreTipEl){ scoreTipEl.remove(); scoreTipEl = null; } }
+/* 输出块：按行拆分，每行单行截断 + title 悬浮看全文；
+   ok search 命中行（"%.4f\t标题 (文件)"，cli.go:397）的分数段包 .t-score，
+   悬浮弹出 RRF 分释义，其余部分保留 title 看全文 */
 function outBlock(text){
   const box = el("div","t-out");
   (text||"").split("\n").forEach(l=>{
     const ln = el("div","t-line");
-    ln.textContent = l; ln.title = l;
+    const m = /^0\.\d{4}\t/.exec(l);
+    if(m){
+      const sc = el("span","t-score");
+      sc.textContent = m[0];
+      sc.tabIndex = 0;                       // 键盘/触屏可达：Tab 聚焦或点按出浮窗
+      sc.onmouseenter = ()=>showScoreTip(sc);
+      sc.onmouseleave = hideScoreTip;
+      sc.onfocus = ()=>showScoreTip(sc);
+      sc.onblur = hideScoreTip;
+      sc.onclick = ()=>showScoreTip(sc);     // 触屏 tap 兜底（部分浏览器 tap 不触发 mouseenter）
+      const rest = el("span");
+      rest.textContent = l.slice(m[0].length);
+      rest.title = l;
+      ln.appendChild(sc); ln.appendChild(rest);
+    } else {
+      ln.textContent = l; ln.title = l;
+    }
     box.appendChild(ln);
   });
   return box;
 }
 function paintTermHist(){
   if(!termHistEl) return;
+  hideScoreTip();                    // 锚点节点即将被重建，浮窗一并关掉
   termHistEl.innerHTML = "";
   state.termHist.forEach(h=>{
     const item = el("div");
@@ -1873,6 +1977,7 @@ function sendTerm(){
     const h = state.termHist[state.termHist.length-1];
     h.pending = false; h.code = code; h.out = out; h.err = err;
     termBusy = false;
+    saveTermHist();                                    // 结果落地即持久化（重开 GUI 可恢复）
     paintTermHist();
     if(termInputEl){ termDdBlurred = false; termInputEl.focus(); }  // 程序性 refocus 不触发下拉重弹
   };
@@ -2069,6 +2174,7 @@ function renderProjectReadme(d, project){
   const bd = el("div","d-body md");
   bd.innerHTML = renderMdRich(r.content||"", project);
   d.appendChild(bd);
+  hydrateReadmeAssets(bd);   // 相对路径图：申领一次性票据后回填 src（L-07）
 }
 
 function renderDetail(){
@@ -2116,7 +2222,7 @@ function renderDetail(){
       d.appendChild(Object.assign(el("div","d-hint"),{textContent:t("evoSegHint")}));
   }
   const bd = el("div","d-body md");
-  const det = DETAIL && DETAIL.key===(proj+"\n"+e.file) ? DETAIL : null;
+  const det = DETAIL && DETAIL.key===keyOf(proj, e.file) ? DETAIL : null;
   if(det && det.err) bd.innerHTML = '<p class="fb2 err">'+esc(det.err)+'</p>';
   else if(det && det.data) bd.innerHTML = renderMd(det.data.body||"");
   else bd.innerHTML = "<p>"+esc(t("mgLoading"))+"</p>";
@@ -2164,12 +2270,26 @@ function delEntry(proj, e){
    取消/保存/✨优化在右上操作行。表单值 oninput 直写 edDraft（不重渲不丢焦点），
    保存才落盘——新建 POST /api/entry（保存后选中新条目）、编辑 PUT /api/entry
    （file 为身份不可改名；created/draft/archived 由后端继承）。
-   取消无脏检查确认：原型未画确认弹窗，取消即弃稿（与原型切条目即弃稿同语义）。 */
+   取消按钮无确认直接弃稿；侧栏/树上条目误触走 exitEditGuarded 脏检查确认（M-20）。 */
 function edBusy(){ return state.edView!=="read" && !!edDraft; }
 // 退出编辑/对照态：取消进行中的优化请求，草稿/基线/对照数据一并丢弃
 function exitEdit(){
   if(optAbort){ optAbort.abort(); optAbort=null; }
   edDraft=null; edBase=null; edCmp=null; edErr=""; state.edView="read";
+}
+// 编辑态脏检查：表单值 oninput 已直写 edDraft，与基线 edBase 对比即脏态（同 renderEntryEdit isDirty）
+function edDirty(){
+  return !!edDraft && !!edBase && (edDraft.title!==edBase.title || edDraft.type!==edBase.type
+    || edDraft.tags!==edBase.tags || edDraft.mandatory!==edBase.mandatory
+    || edDraft.summary!==edBase.summary || edDraft.body!==edBase.body
+    || edDraft.project!==edBase.project);
+}
+/* 侧栏/树误触守卫：编辑态有未保存修改时先确认再弃稿（原生 confirm，同归档/删除确认范式）；
+   返回 false 表示用户取消，调用方中止本次跳转 */
+function exitEditGuarded(){
+  if(edBusy() && edDirty() && !confirm(t("cfmDiscard"))) return false;
+  exitEdit();
+  return true;
 }
 function newDraft(project, file, d){
   d = d || {};
@@ -2181,7 +2301,7 @@ function newDraft(project, file, d){
 }
 // 编辑入口（只读态「编辑」按钮）：详情全文已在缓存（DETAIL）则直接用，否则拉取后进编辑态
 function startEdit(project, file){
-  const det = DETAIL && DETAIL.key===(project+"\n"+file) && DETAIL.data ? DETAIL.data : null;
+  const det = DETAIL && DETAIL.key===keyOf(project, file) && DETAIL.data ? DETAIL.data : null;
   if(det){ newDraft(project, file, det); render(); return; }
   api("/api/entry?project="+encodeURIComponent(project)+"&file="+encodeURIComponent(file))
     .then(d=>{ newDraft(project, file, d); render(); })
@@ -2483,7 +2603,7 @@ function flashPrefs(key){
   prefsFb[key] = true; render();
   setTimeout(()=>{ prefsFb[key] = false; clearFb("prefs:"+key); }, 1500);   // 同 pSave：只摘除反馈节点不整页重渲
 }
-function loadPrefs(){ if(PREFS) return; PREFS = { errs:{} }; refreshPrefs(); }
+function loadPrefs(){ PREFS = lazyPage(PREFS, { errs:{} }, refreshPrefs); }
 // 聚合拉取（多请求并行，非新聚合端点）；冷却/沉淀/门控/规则四件为全局配置，不带 project
 function refreshPrefs(){
   api("/api/status").then(st=>{
@@ -2506,7 +2626,7 @@ function refreshPrefs(){
     });
   }).catch(err=>{
     PREFS = { errs:{}, loadErr: err.message };
-  }).then(()=>{ if(state.menu==="prefs" && !embModal && !llmModal && !gateModal) render(); });
+  }).then(()=>menuRender("prefs", ()=>!embModal && !llmModal && !gateModal));
 }
 // 服务端值 → 工作副本（规则转文本形：code_globs 数组 ↔ 逗号分隔串）
 function syncRulesDraft(){
@@ -3322,7 +3442,9 @@ function paintLogs(){
     if(state.logSem && !l.semantic) return;
     if(q && l.text.toLowerCase().indexOf(q)<0) return;
     count++;
-    html += '<span class="ls ls-'+l.src+'">'+l.src+'</span>'
+    // src 净化后再拼 class：class 上下文 esc 不够（空格可注入额外类名），白名单只留安全字符（L-29）
+    const srcCls = String(l.src).replace(/[^a-z0-9_-]/gi, "");
+    html += '<span class="ls ls-'+srcCls+'">'+esc(String(l.src))+'</span>'
           + '<span class="sem'+(l.semantic?"":" off")+'">'+(l.semantic?"◆":"◇")+'</span> '
           + esc(l.text)+"\n";
   });
@@ -3390,16 +3512,14 @@ let miscDoc = null;     // 文档弹窗：{title, entries:[{log}]}（更新日�
 let delTarget = null;   // 删除确认弹窗目标项目名
 
 function loadMisc(){
-  if(MISC) return;
-  MISC = { projects:[], status:null };
-  refreshMisc();
+  MISC = lazyPage(MISC, { projects:[], status:null }, refreshMisc);
 }
 function refreshMisc(){
   Promise.all([api("/api/projects"), api("/api/status")]).then(([ps, st])=>{
     MISC = { projects: ps || [], status: st || null };
   }).catch(err=>{
     MISC = { projects: [], status: null, loadErr: err.message };
-  }).then(()=>{ if(state.menu==="misc" && !miscDoc && !delTarget) render(); });
+  }).then(()=>menuRender("misc", ()=>!miscDoc && !delTarget));
 }
 
 function miscFbSpan(fb){
