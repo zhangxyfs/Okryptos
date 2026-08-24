@@ -1533,12 +1533,12 @@ function renderCatGroup(kids, p, key, entries){
   const crow = el("button","tn-cat"+(cOpen?" open":"")+(state.catSel===ck?" sel":""));
   crow.innerHTML = '<span class="pj-toggle"><span class="caret">▶</span><span class="folder">'+ICON.folder+'</span></span>'
     +'<span class="cnm">'+esc(t(CATEGORY_I18N[key]))+'</span><span class="cnt">'+entries.length+'</span>';
-  const toggle = ()=>{ state.catOpen[ck]=!cOpen; render(); };
+  const toggle = ()=>{ state.catOpen[ck]=!cOpen; redrawTree(); };   // 纯树状态：只重画树，不连坐右侧详情
   crow.querySelector(".pj-toggle").onclick = ev=>{ ev.stopPropagation(); toggle(); };
   crow.onclick = ()=>{
     state.catSel = ck;                                     // 单击 = 选中（高亮）
     if(dblClick(catClick, ck)){ toggle(); return; }        // 双击 = 展开/收起
-    render();
+    redrawTree();
   };
   kids.appendChild(crow);
   if(!cOpen) return;
@@ -1587,9 +1587,10 @@ function renderDualLeaf(sub, p, ck, e, icon, kids){
   const leaf = el("button","leaf spec dual"+(sel?" sel":"")+(cOpen?" open":""));
   leaf.innerHTML = '<span class="caret">▶</span><span class="folder">'+icon+'</span>'
     +'<span class="t2">'+esc(e.title)+'</span><span class="cnt">'+kids.length+'</span>';
-  const toggle = ev=>{ if(ev) ev.stopPropagation(); state.catOpen[ck]=!cOpen; render(); };
-  leaf.querySelector(".caret").onclick = toggle;
-  leaf.querySelector(".folder").onclick = toggle;
+  const toggle = ev=>{ if(ev) ev.stopPropagation(); state.catOpen[ck]=!cOpen; render(); };   // 双击路径：选中已变，须整页重渲
+  const toggleTree = ev=>{ ev.stopPropagation(); state.catOpen[ck]=!cOpen; redrawTree(); };   // 箭头/图标：纯树状态只重画树
+  leaf.querySelector(".caret").onclick = toggleTree;
+  leaf.querySelector(".folder").onclick = toggleTree;
   leaf.onclick = ()=>{
     if(!exitEditGuarded()) return;
     state.catSel=null; state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail();
@@ -1614,12 +1615,12 @@ function renderRefGroup(sub, p, entries){
     const crow = el("button","tn-cat"+(cOpen?" open":"")+(state.catSel===ck?" sel":""));
     crow.innerHTML = '<span class="pj-toggle"><span class="caret">▶</span><span class="folder">'+ICON.folder+'</span></span>'
       +'<span class="cnm">'+esc(t("catOther"))+'</span><span class="cnt">'+plain.length+'</span>';
-    const toggle = ()=>{ state.catOpen[ck]=!cOpen; render(); };
+    const toggle = ()=>{ state.catOpen[ck]=!cOpen; redrawTree(); };   // 纯树状态：只重画树
     crow.querySelector(".pj-toggle").onclick = ev=>{ ev.stopPropagation(); toggle(); };
     crow.onclick = ()=>{
       state.catSel = ck;
       if(dblClick(catClick, ck)){ toggle(); return; }   // 双击 = 展开/收起
-      render();
+      redrawTree();
     };
     sub.appendChild(crow);
     if(cOpen){
@@ -1629,6 +1630,11 @@ function renderRefGroup(sub, p, entries){
     }
   }
 }
+// 树局部重渲（点目录连坐刷新右侧预览的修复）：展开/收起/类目高亮等纯树状态变化只重建树，
+// 不走全局 render——否则右侧详情被连坐重建，README 预览会 renderMdRich 重排 +
+// hydrateReadmeAssets 重新申领票据回填 img src，图片肉眼可见地闪烁。
+// 选中条目/项目（sel/projSel 变化）仍走全局 render()。
+function redrawTree(){ const sc = document.querySelector(".tree-scroll"); if(sc) fillTree(sc); }
 function fillTree(scroll){
   hideTreeTip();
   scroll.innerHTML = "";
@@ -1652,11 +1658,12 @@ function fillTree(scroll){
     const tg = el("span","pj-toggle");
     tg.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>';
     const toggleOpen = ()=>{                          // 展开/收起：箭头区单击、项目名双击共用
+      const wasEditing = edBusy();
       if(!exitEditGuarded()) return;
       state.openTouched = true;
       if(open){ state.open[p.name] = false; }              // 再点收起 → 全收起
       else { state.open = {}; state.open[p.name] = true; } // 展开即互斥收起其他
-      render();
+      if(wasEditing) render(); else redrawTree();          // 弃稿须重建详情；纯树操作只重画树
     };
     tg.onclick = ev=>{ ev.stopPropagation(); toggleOpen(); };
     const nm = el("span","pj-name");
@@ -1665,7 +1672,7 @@ function fillTree(scroll){
       if(!exitEditGuarded()) return;
       state.sel = null; DETAIL = null; state.catSel = null;
       state.projSel = p.name; loadReadme(p.name);          // 点项目名 → 右侧显示项目 README（反馈3）
-      if(dblClick(nmClick, p.name)){ toggleOpen(); return; }   // 双击项目名 = 展开/收起
+      if(dblClick(nmClick, p.name)){ toggleOpen(); render(); return; }   // 双击项目名 = 展开/收起（projSel 已变，须整页）
       render();
     };
     pj.appendChild(tg); pj.appendChild(nm);
