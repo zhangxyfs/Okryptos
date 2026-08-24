@@ -3,8 +3,10 @@
 
 版本号从 installer/openknowledge.iss（单一事实源）提取；正文默认取
 docs/changelogs/<版本>.md（可用 --body 覆盖）。正文规范（"安装器与发布" wiki）：
-标题=纯版本号、正文首行不要 H1、不提当前版本号、固定四节（新功能/改进/修复/说明）——
-changelog 文件的行文若不符，用 --body 传一份发布口径的正文。
+标题=纯版本号、正文不出现 H1、不提当前版本号、固定四节（新功能/改进/修复/说明）；
+正文面向用户——不提"做了什么评审/审查/整改"，不提参考/借鉴外部项目一类
+对本项目不友好的表述（bug 修复本身照写）。changelog 文件首行 H1 是 GUI
+弹窗标题，发布时脚本自动剥掉；检出评审类措辞会打印告警（不阻断）。
 产物取 installer/output/ 下三件套（exe + tar.gz + deb，需先用 build.py /
 build-linux.sh 构建）。凭据经 `git credential fill` 取自 Windows 凭据管理器。
 幂等：release 已存在则复用续传产物。
@@ -64,6 +66,24 @@ def snippet(b):
     return b[:300].decode("utf-8", "replace")
 
 
+def sanitize_body(body):
+    """发布口径清洗：剥掉首行 H1（changelog 文件里它是 GUI 弹窗标题，GitHub/Gitea
+    release 正文不该有）；检出评审类/不友好措辞打印告警（不阻断，供人工核对）。"""
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
+        if not line.strip():
+            continue
+        if line.startswith("# "):  # 首个非空行是 H1 → 剥掉
+            del lines[i]
+        break
+    body = "\n".join(lines).strip() + "\n"
+    for kw in ("评审", "审查", "整改", "借鉴", "review", "Review"):
+        if kw in body:
+            print(f"警告: release 正文含 {kw!r}——发布口径不提评审/借鉴类表述，请人工核对")
+            break
+    return body
+
+
 def publish(host, api_base, upload_kind, tag, body, assets, dry_run):
     repo = "zhangxyfs/OpenKnowledge"
     if dry_run:
@@ -117,7 +137,7 @@ def main():
     body_path = Path(args.body) if args.body else ROOT / "docs" / "changelogs" / f"{version}.md"
     if not body_path.exists():
         sys.exit(f"缺 release 正文: {body_path}（可用 --body 指定）")
-    body = body_path.read_text(encoding="utf-8")
+    body = sanitize_body(body_path.read_text(encoding="utf-8"))
     out = ROOT / "installer" / "output"
     assets = [
         out / f"OpenKnowledgeSetup-{version}.exe",

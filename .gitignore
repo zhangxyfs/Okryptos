@@ -10,3 +10,4 @@ cmd/ok/*.syso
 .worktrees/
 .mimosa/
 /docs/2026-08-19-vikingmem-paper.md
+__pycache__/
