@@ -172,6 +172,26 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 			return nil, fmt.Errorf("%w: 非法项目名 %q", ErrBadPackage, p.Name)
 		}
 	}
+	// 条目/配置/wiki 的项目段同款形状校验 + 必须在包内注册表登记（R3 E-02）：
+	// 保留设备名在 MkdirAll 即挂（"重新导入可续传"对该包永久失效），未登记名
+	// 会写出孤儿目录并重建索引。Export 按 registry 驱动打包，合法回环包不受影响。
+	inReg := map[string]bool{}
+	for _, p := range zreg.Projects {
+		inReg[p.Name] = true
+	}
+	for _, group := range []struct {
+		label string
+		items []item
+	}{{"条目", entries}, {"配置", configs}, {"wiki", wikis}} {
+		for _, it := range group.items {
+			if !registry.ValidProjectName(it.project) {
+				return nil, fmt.Errorf("%w: %s路径非法项目名 %q", ErrBadPackage, group.label, it.project)
+			}
+			if !inReg[it.project] {
+				return nil, fmt.Errorf("%w: %s所属项目 %q 未在包内 registry.toml 登记", ErrBadPackage, group.label, it.project)
+			}
+		}
+	}
 	if len(entries) == 0 && len(configs) == 0 {
 		return nil, fmt.Errorf("%w: 包内无有效条目", ErrBadPackage)
 	}
