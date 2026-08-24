@@ -77,9 +77,10 @@ func TestWithFileLockKeepsForeignLock(t *testing.T) {
 	}
 }
 
-// 静态他方锁在锁龄到 lockStaleAge 后被抢占：拿锁总耗时应落在
-// [lockStaleAge, lockTimeout) 区间——既不立即抢（给正常持有者窗口），也不等满超时。
-func TestWithFileLockWaitsThenPreempts(t *testing.T) {
+// 锁龄未达 lockStaleAge 的他方锁不得抢占：慢盘/杀软扫描下存活持有者的临界区
+// 可达数秒，与崩溃残留仅凭锁龄无法区分，误抢会让两方并行进入临界区（M-15）。
+// 应等满 lockTimeout 后 fail-open 执行，且不碰他方锁文件。
+func TestWithFileLockDoesNotPreemptYoungLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	lp := path + ".lock"
 	if err := os.WriteFile(lp, []byte("busy-holder"), 0o644); err != nil {
@@ -93,9 +94,39 @@ func TestWithFileLockWaitsThenPreempts(t *testing.T) {
 	if !ran {
 		t.Fatal("fn 未执行")
 	}
-	elapsed := time.Since(start)
-	if elapsed < lockStaleAge || elapsed >= lockTimeout {
-		t.Fatalf("抢占耗时 %v，应在 [%v, %v) 区间", elapsed, lockStaleAge, lockTimeout)
+	if elapsed := time.Since(start); elapsed < lockTimeout {
+		t.Fatalf("耗时 %v < %v，疑似抢占了未陈旧的锁", elapsed, lockTimeout)
+	}
+	if data, err := os.ReadFile(lp); err != nil || string(data) != "busy-holder" {
+		t.Fatalf("他方锁文件被改动: data=%q err=%v", data, err)
+	}
+}
+
+// 等待途中锁龄越过 lockStaleAge（到达时锁龄 13s、等 2s 后到 15s）仍会被抢占：
+// 崩溃恢复不依赖"到达时锁已陈旧"，等锁循环每轮先查抢占再查超时。
+func TestWithFileLockPreemptsLockAgingPastStale(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	lp := path + ".lock"
+	if err := os.WriteFile(lp, []byte("dying-holder"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(2*time.Second - lockStaleAge)
+	if err := os.Chtimes(lp, old, old); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	ran := false
+	if err := WithFileLock(path, func() error { ran = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if !ran {
+		t.Fatal("fn 未执行")
+	}
+	if elapsed := time.Since(start); elapsed >= lockTimeout {
+		t.Fatalf("锁龄越线后抢占耗时 %v，疑似走了等锁超时路径", elapsed)
+	}
+	if _, err := os.Stat(lp); !os.IsNotExist(err) {
+		t.Fatalf("抢占后锁文件未释放: %v", err)
 	}
 }
 

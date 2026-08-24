@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -249,5 +250,31 @@ func TestHookClaudeFormatViaHTTP(t *testing.T) {
 	}
 	if block.Decision != "block" || !strings.Contains(block.Reason, "请补变更日志") {
 		t.Fatalf("stop 应阻断并带原因: %+v", block)
+	}
+}
+
+// failBody 读取即失败的请求体（模拟连接重置/对端中断）。
+type failBody struct{}
+
+func (failBody) Read([]byte) (int, error) { return 0, errors.New("read boom") }
+func (failBody) Close() error             { return nil }
+
+// TestHookHandlerBodyReadError：body 读失败不再伪装空 body 走业务函数还 200（L-08），
+// 返回 400，业务函数不得执行。
+func TestHookHandlerBodyReadError(t *testing.T) {
+	called := false
+	h := hookHandler(func(body []byte, _ string) HookResponse {
+		called = true
+		return HookResponse{Code: 0}
+	})
+	req := httptest.NewRequest("POST", "/api/hook/prompt", nil)
+	req.Body = failBody{}
+	rec := httptest.NewRecorder()
+	h(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("body read error: status = %d, want 400", rec.Code)
+	}
+	if called {
+		t.Fatal("business fn must not run on body read error")
 	}
 }

@@ -972,3 +972,155 @@ func TestCodexRemoveHooksCleansTrust(t *testing.T) {
 		t.Error("[features] 特性开关不应随卸载关闭")
 	}
 }
+
+// TestCodexRemoveHooksCorruptKeepsWrappers 回归 L-01：hooks.json 损坏（解析失败）时
+// RemoveHooks 不得先删包装文件——否则 hooks.json 里指向它们的命令变成死命令。
+func TestCodexRemoveHooksCorruptKeepsWrappers(t *testing.T) {
+	home := isolateCodex(t)
+	hp := filepath.Join(home, "hooks.json")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hp, []byte("{broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		if err := ensureCodexWrappers(codexTestExe()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := codexAgent{}
+	removed, err := a.RemoveHooks()
+	if err == nil {
+		t.Fatal("损坏 hooks.json 应报错")
+	}
+	if removed {
+		t.Error("失败时不应报告 removed")
+	}
+	if data, _ := os.ReadFile(hp); string(data) != "{broken" {
+		t.Error("损坏文件被覆盖")
+	}
+	if runtime.GOOS == "windows" {
+		codexWantWrappers(t, home, codexTestExe()) // 包装文件必须保留
+	}
+}
+
+// TestCodexRemoveHooksOrphanWrappers 回归 L-01 顺序调整的另一半：hooks.json 无 ok
+// 条目（用户手动删过）但包装残留时，RemoveHooks 仍应清掉孤立包装（无死命令风险）。
+func TestCodexRemoveHooksOrphanWrappers(t *testing.T) {
+	home := isolateCodex(t)
+	hp := filepath.Join(home, "hooks.json")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hp, []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := codexAgent{}
+	removed, err := a.RemoveHooks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		if removed {
+			t.Error("无 ok 条目且无包装时不应报告 removed")
+		}
+		if err := ensureCodexWrappers(codexTestExe()); err != nil {
+			t.Fatal(err)
+		}
+		removed, err = a.RemoveHooks()
+		if err != nil || !removed {
+			t.Fatalf("孤立包装应被清理: RemoveHooks = (%v, %v)", removed, err)
+		}
+		for _, okHook := range []string{"prompt", "post-tool", "stop"} {
+			if _, err := os.Stat(filepath.Join(home, "ok-hook-"+okHook+".cmd")); !os.IsNotExist(err) {
+				t.Errorf("孤立包装 ok-hook-%s.cmd 未删除", okHook)
+			}
+		}
+	} else if removed {
+		t.Error("无 ok 条目且无包装时不应报告 removed")
+	}
+}
+
+// codexPrependThirdPartyGroup 把第三方组插到 UserPromptSubmit 的 ok 组之前
+// （模拟 L-03 场景：ok 组索引 0 → 1）。
+func codexPrependThirdPartyGroup(t *testing.T) {
+	t.Helper()
+	cfg, err := loadCodexHooks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := codexEventsOf(cfg)
+	groups, _ := events["UserPromptSubmit"].([]any)
+	third := map[string]any{"matcher": "*", "hooks": []any{map[string]any{
+		"type": "command", "command": "third-party", "timeout": float64(30)}}}
+	events["UserPromptSubmit"] = append([]any{third}, groups...)
+	if err := writeCodexHooks(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCodexEnsureHooksCleansStaleTrust 回归 L-03：ok 组索引被第三方组挤动后，
+// EnsureHooks 补写新索引信任节的同时必须清掉旧索引的残留节（残留会让 Codex 把
+// 该索引上的第三方组误判 Modified、静默跳过全部 hooks）。
+func TestCodexEnsureHooksCleansStaleTrust(t *testing.T) {
+	home := isolateCodex(t)
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := codexAgent{}
+	exe := currentExe(t)
+	if err := a.InstallHooks(exe); err != nil {
+		t.Fatal(err)
+	}
+	codexPrependThirdPartyGroup(t)
+	if err := a.EnsureHooks(exe); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(codexConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	staleKey := fmt.Sprintf("%s:user_prompt_submit:0:0", codexHooksPath())
+	if strings.Contains(text, "[hooks.state.'"+staleKey+"']") {
+		t.Errorf("陈旧索引信任节 %s 未清理:\n%s", staleKey, text)
+	}
+	newKey := fmt.Sprintf("%s:user_prompt_submit:1:0", codexHooksPath())
+	if !strings.Contains(text, "[hooks.state.'"+newKey+"']") {
+		t.Errorf("新索引信任节 %s 未补写:\n%s", newKey, text)
+	}
+	cfg, err := loadCodexHooks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !codexTrustConsistent(text, codexTrustEntries(codexEventsOf(cfg), exe)) {
+		t.Errorf("自愈后信任记录与 hooks.json 内容不一致:\n%s", text)
+	}
+}
+
+// TestCodexRemoveHooksCleansStaleTrust 回归 L-03：索引被挤动后直接卸载——RemoveHooks
+// 除当前索引外还须按 hash 识别并清掉旧索引的残留节（第三方节不碰）。
+func TestCodexRemoveHooksCleansStaleTrust(t *testing.T) {
+	home := isolateCodex(t)
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := codexAgent{}
+	if err := a.InstallHooks(currentExe(t)); err != nil {
+		t.Fatal(err)
+	}
+	codexPrependThirdPartyGroup(t)
+	if _, err := a.RemoveHooks(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(codexConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, label := range []string{"user_prompt_submit", "post_tool_use", "stop"} {
+		if strings.Contains(string(data), ":"+label+":") {
+			t.Errorf("信任节 %s（含陈旧索引）未清干净:\n%s", label, string(data))
+		}
+	}
+}

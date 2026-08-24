@@ -58,7 +58,11 @@ func TestSerializeRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e2, err := Parse(e.Serialize())
+	data, err := e.Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2, err := Parse(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +156,11 @@ func TestParseArchivedAndCreated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := string(e2.Serialize())
+	ser, err := e2.Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(ser)
 	if strings.Contains(out, "archived") || strings.Contains(out, "created") {
 		t.Fatalf("omitempty 失效: %q", out)
 	}
@@ -160,7 +168,10 @@ func TestParseArchivedAndCreated(t *testing.T) {
 
 func TestDraftRoundtrip(t *testing.T) {
 	e := &Entry{Title: "草稿条目", Type: "note", Summary: "s", Draft: true, Body: "正文"}
-	data := e.Serialize()
+	data, err := e.Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(string(data), "draft: true") {
 		t.Fatalf("serialized output should contain draft: true, got %q", data)
 	}
@@ -178,5 +189,32 @@ func TestDraftRoundtrip(t *testing.T) {
 	}
 	if e3.Draft {
 		t.Fatal("draft should default to false")
+	}
+}
+
+func TestStripFrontmatter(t *testing.T) {
+	// 标准 front matter → 剥离
+	body, ok := StripFrontmatter([]byte("---\ntitle: x\ntype: note\n---\n\n正文\n"))
+	if !ok || string(body) != "\n正文\n" {
+		t.Fatalf("strip: ok=%v body=%q", ok, body)
+	}
+	// BOM + CRLF 同样识别
+	body, ok = StripFrontmatter([]byte("\ufeff---\r\ntitle: x\r\n---\r\n正文\r\n"))
+	if !ok || string(body) != "正文\n" {
+		t.Fatalf("bom/crlf: ok=%v body=%q", ok, body)
+	}
+	// 无 front matter → 原样返回
+	raw := []byte("纯正文\n")
+	if b, ok := StripFrontmatter(raw); ok || string(b) != string(raw) {
+		t.Fatalf("no-frontmatter: ok=%v body=%q", ok, b)
+	}
+	// 只有起始 --- 无结束分隔符 → 不剥离
+	raw = []byte("---\ntitle: x\n正文\n")
+	if b, ok := StripFrontmatter(raw); ok || string(b) != string(raw) {
+		t.Fatalf("unterminated: ok=%v body=%q", ok, b)
+	}
+	// 结束分隔符在文件末尾（无换行）也识别
+	if _, ok := StripFrontmatter([]byte("---\ntitle: x\n---")); !ok {
+		t.Fatal("trailing --- should be recognized")
 	}
 }

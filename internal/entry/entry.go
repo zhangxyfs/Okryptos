@@ -61,10 +61,36 @@ func Parse(content []byte) (*Entry, error) {
 	return e, nil
 }
 
-func (e *Entry) Serialize() []byte {
+// StripFrontmatter 剥离内容开头的 "---" 分隔 front matter 块（与 Parse 同口径：
+// 容忍 BOM 与 CRLF），返回剥离后的正文；无 front matter 时原样返回且 ok=false。
+// 供 ok add --file 等外部正文入口使用，避免把源文件的 front matter 当正文导致
+// Serialize 再包一层 --- 形成嵌套。
+func StripFrontmatter(content []byte) (body []byte, ok bool) {
+	s := strings.TrimPrefix(string(content), "\ufeff")
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	if !strings.HasPrefix(s, "---\n") {
+		return content, false
+	}
+	rest := s[len("---\n"):]
+	end := strings.Index(rest, "\n---\n")
+	delim := "\n---\n"
+	if end < 0 && strings.HasSuffix(rest, "\n---") {
+		end = len(rest) - len("\n---")
+		delim = "\n---"
+	}
+	if end < 0 {
+		return content, false
+	}
+	return []byte(rest[end+len(delim):]), true
+}
+
+// Serialize 序列化为 "---\n<yaml>\n---\n\n<body>\n" 格式。
+// Entry 全字段均为 string/bool/[]string，yaml.Marshal 实际不可失败，
+// 但库代码不 panic，错误仍按常规返回。
+func (e *Entry) Serialize() ([]byte, error) {
 	fm, err := yaml.Marshal(e)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("序列化 frontmatter: %w", err)
 	}
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
@@ -72,7 +98,7 @@ func (e *Entry) Serialize() []byte {
 	buf.WriteString("---\n\n")
 	buf.WriteString(e.Body)
 	buf.WriteString("\n")
-	return buf.Bytes()
+	return buf.Bytes(), nil
 }
 
 // Load 读取目录下全部 .md 条目，按文件名排序。

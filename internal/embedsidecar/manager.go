@@ -79,25 +79,61 @@ type Manager struct {
 }
 
 // Ensure 保证 model 对应 sidecar 在线（幂等）；返回可用 State。
+// 锁纪律：mu 只覆盖状态检查与 spawn（快进快出）；就绪等待在锁外——daemon 退出时
+// Stop 须能立即拿锁杀进程，若锁横跨最长 HealthTimeout 的就绪等待，shutdown 会被
+// 卡到超时（M-11）。就绪等待只读本地 cmd/st/waitCh，并发 Stop 杀进程后经 waitCh
+// 以"提前退出"返回，无共享状态竞态。
 func (m *Manager) Ensure(model embed.BuiltinModel) (*State, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if st := LoadState(); st != nil && st.ModelID == model.ID && st.Healthy() {
 		m.failCount = 0
+		m.mu.Unlock()
 		return st, nil
 	}
 	m.stopLocked()
-	server, err := RuntimeServerPath(m.RuntimeDir)
+	cmd, st, waitCh, err := m.spawnLocked(model)
+	m.mu.Unlock()
 	if err != nil {
 		return nil, err
+	}
+	deadline := time.Now().Add(m.HealthTimeout)
+	for {
+		if st.Healthy() {
+			if err := writeState(st); err != nil {
+				return nil, err
+			}
+			m.mu.Lock()
+			m.failCount = 0
+			m.mu.Unlock()
+			return st, nil
+		}
+		select {
+		case err := <-waitCh:
+			return nil, fmt.Errorf("llama-server 提前退出: %v（日志 %s）", err, logPath())
+		default:
+		}
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			return nil, fmt.Errorf("llama-server 就绪超时（%s）", m.HealthTimeout)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// spawnLocked 校验并拉起 llama-server（调用方须持 mu）；返回进程、初始 State 与
+// 看护结果通道，就绪探测由调用方在锁外进行（见 Ensure 锁纪律注释）。
+func (m *Manager) spawnLocked(model embed.BuiltinModel) (*exec.Cmd, *State, chan error, error) {
+	server, err := RuntimeServerPath(m.RuntimeDir)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	modelPath := model.InstalledPath(m.ModelsDir)
 	if _, err := os.Stat(modelPath); err != nil {
-		return nil, fmt.Errorf("模型文件缺失: %s", modelPath)
+		return nil, nil, nil, fmt.Errorf("模型文件缺失: %s", modelPath)
 	}
 	port, err := freePort()
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	args := []string{
 		"-m", modelPath,
@@ -122,7 +158,7 @@ func (m *Manager) Ensure(model embed.BuiltinModel) (*State, error) {
 		if logF != nil {
 			_ = logF.Close()
 		}
-		return nil, err
+		return nil, nil, nil, err
 	}
 	if logW != nil {
 		fmt.Fprintf(logW, "=== llama-server 启动 model=%s port=%d pid=%d ===\n", model.ID, port, cmd.Process.Pid)
@@ -140,26 +176,7 @@ func (m *Manager) Ensure(model embed.BuiltinModel) (*State, error) {
 		}
 		waitCh <- err
 	}()
-	deadline := time.Now().Add(m.HealthTimeout)
-	for {
-		if st.Healthy() {
-			if err := writeState(st); err != nil {
-				return nil, err
-			}
-			m.failCount = 0
-			return st, nil
-		}
-		select {
-		case err := <-waitCh:
-			return nil, fmt.Errorf("llama-server 提前退出: %v（日志 %s）", err, logPath())
-		default:
-		}
-		if time.Now().After(deadline) {
-			_ = cmd.Process.Kill()
-			return nil, fmt.Errorf("llama-server 就绪超时（%s）", m.HealthTimeout)
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
+	return cmd, st, waitCh, nil
 }
 
 // Stop 杀 sidecar 并删状态文件（幂等）。
@@ -170,6 +187,9 @@ func (m *Manager) Stop() {
 }
 
 func (m *Manager) stopLocked() {
+	// 崩溃计数随实例生灭归零（M-10）：判死 Stop 后计数若停在阈值上，新 sidecar
+	// 首次探测的瞬时失败会立即凑满"连续两轮"被杀，两轮判定退化为一轮。
+	m.unhealthyStreak = 0
 	if m.cmd != nil && m.cmd.Process != nil {
 		// 只 Kill 不 Wait：回收由 Ensure 的看护 goroutine 独占（它同时负责写退出
 		// 日志、关闭日志文件），此处再 Wait 会与之竞态，误报 "no child processes"。
@@ -236,6 +256,11 @@ func (m *Manager) Reconcile(desired *embed.BuiltinModel, now time.Time) {
 	}
 }
 
+// freePort 先占后放取空闲端口。Close 与子进程 bind 之间存在 TOCTOU 窗口，端口
+// 可能被其他进程抢占 → llama-server bind 失败提前退出。不加锁不重试：Ensure 失败
+// 后状态文件不落盘，下轮 Reconcile（want 标记在失败时保留，embedx 调用失败也会重写
+// want，failCount<3 门控内）自然重拉，spawnLocked 每次重新取端口——抢占是瞬时的，
+// 重试即自愈（L-19）。
 func freePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

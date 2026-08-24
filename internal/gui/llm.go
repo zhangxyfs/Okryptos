@@ -66,7 +66,7 @@ func validateLLMAdv(temperature string, maxTokens int) (string, error) {
 }
 
 func loadGlobalConfig() (config.Config, error) {
-	return config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+	return config.LoadMerged("", globalConfigPath())
 }
 
 // apiLLMGet 返回全局 llm 配置：active + profiles（api_key 掩码，不回明文）。
@@ -315,15 +315,8 @@ func gatherGrounding(st *store.Store, project, selfFile, title, summary, body st
 	var sb strings.Builder
 
 	// ① 正文路径引用 → 项目真实代码片段（合计 ≤3000 token，最多 5 处）
-	reg, err := registry.Load(registry.DefaultPath())
-	if err == nil {
-		var roots []string
-		for _, p := range reg.Projects {
-			if p.Name == project {
-				roots = p.Paths
-				break
-			}
-		}
+	_, roots, found, err := findProject(project)
+	if err == nil && found {
 		seen := map[string]bool{}
 		used := 0
 		var codeSb strings.Builder
@@ -381,7 +374,7 @@ func gatherGrounding(st *store.Store, project, selfFile, title, summary, body st
 	// ② 知识库混合检索 top3（排除自身，关键词通道，各截 500 token）
 	if db, err := index.Open(st.KbPath()); err == nil {
 		defer db.Close()
-		cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+		cfg, err := config.LoadMerged(st.ConfigPath(), globalConfigPath())
 		if err == nil {
 			q := title + " " + summary
 			if hits, err := db.Query(retrieve.Terms(q), nil, cfg.Retrieve); err == nil {

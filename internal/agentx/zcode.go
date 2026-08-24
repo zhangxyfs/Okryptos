@@ -1,7 +1,6 @@
 package agentx
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,11 +24,7 @@ func zcodeConfigPath() string { return filepath.Join(ZcodeHome(), "cli", "config
 // zcodeHookEvents 是 ok 接入的 ZCode hook 事件（对应 ok 的三条 hook 链路）。
 // 输出协议用 Claude 风格 JSON（args 末尾的 "claude"）：ZCode 只把以 { 开头的
 // 合法 JSON stdout 解析为协议结果，纯文本 stdout 不进模型上下文。
-var zcodeHookEvents = []struct {
-	event   string // ZCode 事件名
-	matcher string // 空 = 不过滤
-	okHook  string // ok hook 子命令
-}{
+var zcodeHookEvents = []hookEvent{
 	{"UserPromptSubmit", "", "prompt"},
 	{"PostToolUse", "Write|Edit", "post-tool"},
 	{"Stop", "", "stop"},
@@ -84,18 +79,7 @@ func zcodeOKGroup(exe, matcher, okHook string) map[string]any {
 // loadZcodeConfig 读 config.json；文件不存在返回空对象，解析失败报错（不覆盖损坏文件）。
 // 用 map[string]any 合并写会重排 key 顺序——未知字段内容保留，代价可接受。
 func loadZcodeConfig() (map[string]any, error) {
-	data, err := os.ReadFile(zcodeConfigPath())
-	if os.IsNotExist(err) {
-		return map[string]any{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	cfg := map[string]any{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("zcode config.json 解析失败: %w", err)
-	}
-	return cfg, nil
+	return loadSettingsJSON(zcodeConfigPath(), "zcode config.json")
 }
 
 // zcodeEventsOf 取 hooks.events（只读视图），不做任何创建。
@@ -130,62 +114,9 @@ func zcodeEventsEdit(cfg map[string]any) map[string]any {
 	return events
 }
 
-// stripOKZcodeHooks 移除 events 里所有 ok 自有 hook（组内 hooks 被删空时整组移除，
-// 事件数组空了删事件键），返回是否有改动。
-func stripOKZcodeHooks(events map[string]any) bool {
-	changed := false
-	for name, v := range events {
-		groups, _ := v.([]any)
-		if groups == nil {
-			continue
-		}
-		kept := groups[:0]
-		for _, g := range groups {
-			gm, _ := g.(map[string]any)
-			hooks, _ := gm["hooks"].([]any)
-			if gm == nil || hooks == nil {
-				kept = append(kept, g)
-				continue
-			}
-			var keptHooks []any
-			for _, h := range hooks {
-				if hm, _ := h.(map[string]any); hm != nil && isOKZcodeHook(hm) {
-					changed = true
-					continue
-				}
-				keptHooks = append(keptHooks, h)
-			}
-			if len(keptHooks) == 0 {
-				changed = true // 整组都是 ok 的，连组移除
-				continue
-			}
-			gm["hooks"] = keptHooks
-			kept = append(kept, g)
-		}
-		if len(kept) == 0 {
-			delete(events, name)
-		} else {
-			events[name] = kept
-		}
-	}
-	return changed
-}
-
 // hasOKZcodeHook 报告 events 里是否存在任何 ok 自有 hook。
 func hasOKZcodeHook(events map[string]any) bool {
-	for _, v := range events {
-		groups, _ := v.([]any)
-		for _, g := range groups {
-			gm, _ := g.(map[string]any)
-			hooks, _ := gm["hooks"].([]any)
-			for _, h := range hooks {
-				if hm, _ := h.(map[string]any); hm != nil && isOKZcodeHook(hm) {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return containsOKHook(events, isOKZcodeHook)
 }
 
 // zcodeHooksCurrent 报告三事件的 ok hook 是否均为当前期望形态
@@ -229,50 +160,52 @@ func zcodeHooksCurrent(events map[string]any, exe string) bool {
 
 // writeZcodeConfig 备份后写回 config.json（MarshalIndent，未知字段保留）。
 func writeZcodeConfig(cfg map[string]any) error {
-	path := zcodeConfigPath()
-	if data, err := os.ReadFile(path); err == nil {
-		_ = os.WriteFile(path+".bak-openknowledge", data, 0o644)
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return fsx.WriteFile(path, append(data, '\n'), 0o644)
+	return writeSettingsJSON(zcodeConfigPath(), cfg)
 }
 
 func (zcodeAgent) InstallHooks(exe string) error {
-	cfg, err := loadZcodeConfig()
-	if err != nil {
-		return err
-	}
-	events := zcodeEventsEdit(cfg)
-	stripOKZcodeHooks(events)
-	for _, e := range zcodeHookEvents {
-		groups, _ := events[e.event].([]any)
-		events[e.event] = append(groups, zcodeOKGroup(exe, e.matcher, e.okHook))
-	}
-	return writeZcodeConfig(cfg)
+	// 读-改-写全程包在 fsx.WithFileLock 内：selfHealHooks 每个 prompt 都跑，与
+	// GUI /api/setup/hooks 并发时裸跑会 load→改→rename 互相覆盖、丢第三方 hooks。
+	return fsx.WithFileLock(zcodeConfigPath(), func() error {
+		cfg, err := loadZcodeConfig()
+		if err != nil {
+			return err
+		}
+		events := zcodeEventsEdit(cfg)
+		stripOKHooks(events, isOKZcodeHook)
+		for _, e := range zcodeHookEvents {
+			groups, _ := events[e.event].([]any)
+			events[e.event] = append(groups, zcodeOKGroup(exe, e.matcher, e.okHook))
+		}
+		return writeZcodeConfig(cfg)
+	})
 }
 
 func (zcodeAgent) RemoveHooks() (bool, error) {
 	if _, err := os.Stat(zcodeConfigPath()); os.IsNotExist(err) {
 		return false, nil
 	}
-	cfg, err := loadZcodeConfig()
+	removed := false
+	// 读-改-写包在 fsx.WithFileLock 内（同 InstallHooks）。
+	err := fsx.WithFileLock(zcodeConfigPath(), func() error {
+		cfg, err := loadZcodeConfig()
+		if err != nil {
+			return err
+		}
+		events := zcodeEventsOf(cfg)
+		if events == nil || !stripOKHooks(events, isOKZcodeHook) {
+			return nil
+		}
+		if err := writeZcodeConfig(cfg); err != nil {
+			return fmt.Errorf("移除 zcode hooks: %w", err)
+		}
+		removed = true
+		return nil
+	})
 	if err != nil {
 		return false, err
 	}
-	events := zcodeEventsOf(cfg)
-	if events == nil || !stripOKZcodeHooks(events) {
-		return false, nil
-	}
-	if err := writeZcodeConfig(cfg); err != nil {
-		return false, fmt.Errorf("移除 zcode hooks: %w", err)
-	}
-	return true, nil
+	return removed, nil
 }
 
 // EnsureHooks 自愈：config 存在、曾安装过 ok hooks 且内容过期（exe 迁移、超时
@@ -284,28 +217,31 @@ func (zcodeAgent) EnsureHooks(exe string) error {
 	if _, err := os.Stat(zcodeConfigPath()); err != nil {
 		return nil
 	}
-	cfg, err := loadZcodeConfig()
-	if err != nil {
-		return err
-	}
-	events := zcodeEventsOf(cfg)
-	if events == nil || !hasOKZcodeHook(events) || zcodeHooksCurrent(events, exe) {
-		return nil
-	}
-	hooks, _ := cfg["hooks"].(map[string]any)
-	prevEnabled, hadEnabled := hooks["enabled"]
-	events = zcodeEventsEdit(cfg)
-	if hadEnabled {
-		hooks["enabled"] = prevEnabled
-	} else {
-		delete(hooks, "enabled")
-	}
-	stripOKZcodeHooks(events)
-	for _, e := range zcodeHookEvents {
-		groups, _ := events[e.event].([]any)
-		events[e.event] = append(groups, zcodeOKGroup(exe, e.matcher, e.okHook))
-	}
-	return writeZcodeConfig(cfg)
+	// 读-改-写包在 fsx.WithFileLock 内（同 InstallHooks）。
+	return fsx.WithFileLock(zcodeConfigPath(), func() error {
+		cfg, err := loadZcodeConfig()
+		if err != nil {
+			return err
+		}
+		events := zcodeEventsOf(cfg)
+		if events == nil || !hasOKZcodeHook(events) || zcodeHooksCurrent(events, exe) {
+			return nil
+		}
+		hooks, _ := cfg["hooks"].(map[string]any)
+		prevEnabled, hadEnabled := hooks["enabled"]
+		events = zcodeEventsEdit(cfg)
+		if hadEnabled {
+			hooks["enabled"] = prevEnabled
+		} else {
+			delete(hooks, "enabled")
+		}
+		stripOKHooks(events, isOKZcodeHook)
+		for _, e := range zcodeHookEvents {
+			groups, _ := events[e.event].([]any)
+			events[e.event] = append(groups, zcodeOKGroup(exe, e.matcher, e.okHook))
+		}
+		return writeZcodeConfig(cfg)
+	})
 }
 
 func (zcodeAgent) HooksInstalled() bool {

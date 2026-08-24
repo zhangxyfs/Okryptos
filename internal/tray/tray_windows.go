@@ -5,6 +5,7 @@ package tray
 import (
 	"context"
 	"runtime"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -115,8 +116,11 @@ type Tray struct {
 	openGUI  func() uintptr
 	onQuit   func()
 	hwnd     uintptr // 消息窗口
-	guiHwnd  uintptr // 最近打开的 GUI 窗口
 	threadID uint32
+
+	mu      sync.Mutex
+	guiHwnd uintptr // 最近打开的 GUI 窗口（openGUI 异步回写，见 openOrFocus）
+	opening bool    // 一次浏览器拉起进行中：连击防抖，避免重复拉起
 }
 
 var current *Tray
@@ -257,13 +261,31 @@ func (t *Tray) showMenu() {
 	}
 }
 
-// openOrFocus 双击：既有 GUI 窗口有效则聚焦，否则重开并记录新 hwnd。
+// openOrFocus 双击：既有 GUI 窗口有效则聚焦，否则拉起浏览器。
+// openGUI 内含最长约 20s 的窗口轮询（gui.OpenBrowser），必须异步——在消息线程
+// 同步执行会卡死整个托盘消息循环，daemon 退出时 2s 的 trayDone 等待超时跳过
+// cleanup（NIM_DELETE），留下幽灵图标（M-05）。此异步化不影响 `ok gui` 路径
+// （其仍同步调用 OpenBrowser，见 browser_windows.go 注释）。
 func (t *Tray) openOrFocus() {
-	if decideReuseGUI(t.guiHwnd, gui.IsWindow) {
-		gui.FocusWindow(t.guiHwnd)
+	t.mu.Lock()
+	hwnd := t.guiHwnd
+	t.mu.Unlock()
+	if decideReuseGUI(hwnd, gui.IsWindow) {
+		gui.FocusWindow(hwnd)
 		return
 	}
-	if t.openGUI != nil {
-		t.guiHwnd = t.openGUI()
+	t.mu.Lock()
+	if t.openGUI == nil || t.opening {
+		t.mu.Unlock()
+		return
 	}
+	t.opening = true
+	t.mu.Unlock()
+	go func() {
+		h := t.openGUI()
+		t.mu.Lock()
+		t.guiHwnd = h
+		t.opening = false
+		t.mu.Unlock()
+	}()
 }

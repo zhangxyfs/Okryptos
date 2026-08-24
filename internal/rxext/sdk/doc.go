@@ -5,5 +5,10 @@
 // 本目录同名文件（包名 extension 保持上游原名），然后跑 go build ./... 与
 // go test ./internal/rxext/... 验证。禁止在本目录就地修改逻辑——改动请回上游。
 //
+// 已知本地偏离（同步上游时需保留或回移上游）：
+//   - wire.go：conn.notifyMu/notifyClosed 消除读循环 close(notifyQueue) 与
+//     notify() 先查后发之间的 send-on-closed-channel 竞态（评审 L-17，
+//     上游当前不可达——ok 未注册 Provider，属防御修复）。
+//
 // 快照日期：2026-08-07（上游 schema hash sha256:22338e66…，协议 major v1）
 package extension

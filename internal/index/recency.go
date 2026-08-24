@@ -56,12 +56,9 @@ func applyRecency(hits map[string]*Hit, now int64, cfg config.RetrieveRecency) [
 		return nil
 	}
 	byScore := func(hs []*Hit) {
-		sort.Slice(hs, func(i, j int) bool {
-			if hs[i].Score != hs[j].Score {
-				return hs[i].Score > hs[j].Score
-			}
-			return hs[i].Title < hs[j].Title
-		})
+		// 统一比较器含文件名决胜：同名同分条目（wiki 多分支差异条目同名是常态）
+		// 在随机序输入 + 不稳定排序下相对顺序仍确定，RecencyShifted 观测不漂移
+		sort.Slice(hs, func(i, j int) bool { return hitLess(hs[i], hs[j]) })
 	}
 	pre := make([]*Hit, 0, len(hits))
 	for _, h := range hits {

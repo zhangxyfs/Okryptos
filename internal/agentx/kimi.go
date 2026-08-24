@@ -62,7 +62,11 @@ func HookTimeoutSec() int {
 
 // okHookCommand 匹配指向 ok hook 的 command 行（如 "ok hook prompt"、
 // "\"D:/x/ok.exe\" hook stop"——exe 加引号后值内含转义引号，需一并兼容）。
-var okHookCommand = regexp.MustCompile(`(?i)^\s*command\s*=\s*"(?:[^"]|\\")*\bok(?:\.exe)?(?:\\")?\s+hook\s`)
+// 完整形态收紧（L-06）：ok/ok.exe（可带引号路径前缀）+ " hook " + 三个 ok 子命令
+// 之一 + 值结束——用户自装同名 ok 工具的其它命令行（"ok deploy"、"ok hook run"、
+// "ok hook prompt --verbose"）不再命中误删。残余不可区分形态：用户工具恰好也有
+// `hook prompt|post-tool|stop` 子命令且命令行形态逐字相同。
+var okHookCommand = regexp.MustCompile(`(?i)^\s*command\s*=\s*"(?:[^"]|\\")*\bok(?:\.exe)?(?:\\")?\s+hook\s+(?:prompt|post-tool|stop)(?:\\")?"\s*$`)
 
 // StripLegacyOKHooks 移除配置中所有指向 ok hook 的无标记 [[hooks]] 表
 // （历史遗留的手动粘贴块），其它工具的 hooks 原样保留。
@@ -233,7 +237,16 @@ func (kimiAgent) Detect() bool {
 
 func (kimiAgent) HooksInstalled() bool {
 	data, err := os.ReadFile(kimiConfigPath())
-	return err == nil && strings.Contains(string(data), MarkerBegin)
+	if err != nil || !strings.Contains(string(data), MarkerBegin) {
+		return false
+	}
+	// 旧 exe 路径（迁移/改名）视为过期——以解析后的当前可执行文件为基准，
+	// 与 claude/zcode 同款全量比对（含超时），doctor 误报"已接入"则自愈永不触发。
+	exe, err := currentCLIExe()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), HooksBlockFor(exe, HookTimeoutSec()))
 }
 
 func (kimiAgent) InstallHooks(exe string) error {

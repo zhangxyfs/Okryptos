@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -107,11 +108,15 @@ func loopbackOrigin(v string) bool {
 }
 
 // hookHandler 把"读 body + format query → 业务函数 → HookResponse JSON"的模板收敛到一处。
+// body 读失败（连接重置等）不能伪装成空 body 继续——客户端会以为 hook 正常执行（L-08），
+// 记日志并 400。
 func hookHandler(fn func([]byte, string) HookResponse) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		if err != nil {
-			body = nil
+			log.Printf("hook %s 读取请求体失败: %v", r.URL.Path, err)
+			http.Error(w, `{"error":"读取请求体失败"}`, http.StatusBadRequest)
+			return
 		}
 		writeJSON(w, fn(body, r.URL.Query().Get("format")))
 	}

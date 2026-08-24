@@ -268,11 +268,18 @@ func TestKimiAgentInstallDetectRemove(t *testing.T) {
 	if a.HooksInstalled() {
 		t.Fatal("HooksInstalled should be false before install")
 	}
-	if err := a.InstallHooks(`D:\x\ok.exe`); err != nil {
+	if err := a.InstallHooks(currentExe(t)); err != nil {
 		t.Fatal(err)
 	}
 	if !a.HooksInstalled() {
 		t.Fatal("HooksInstalled should be true after install")
+	}
+	// exe 迁移/改名后 hook 指向旧路径：应判为未安装，doctor/自愈据此触发重装
+	if err := a.InstallHooks(`D:\old\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	if a.HooksInstalled() {
+		t.Fatal("HooksInstalled should be false when hooks point at a stale exe path")
 	}
 	removed, err := a.RemoveHooks()
 	if err != nil || !removed {
@@ -287,5 +294,67 @@ func TestKimiAgentDetectFalse(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", filepath.Join(t.TempDir(), "nonexistent"))
 	if (kimiAgent{}).Detect() {
 		t.Fatal("Detect should be false when dir missing")
+	}
+}
+
+// TestOKHookCommandRegex 回归 L-06：okHookCommand 只匹配 ok 生成的完整命令形态
+// （ok/ok.exe + " hook " + 三个 ok 子命令之一 + 值结束），用户自装同名 ok 工具的
+// 其它命令行不命中。
+func TestOKHookCommandRegex(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want bool
+	}{
+		// ok 生成/历史遗留形态——必须命中（识别以去重/清理）。
+		{"quoted exe prompt", `command = "\"D:/x/ok.exe\" hook prompt"`, true},
+		{"quoted exe post-tool", `command = "\"D:/x/ok.exe\" hook post-tool"`, true},
+		{"quoted exe stop", `command = "\"D:/x/ok.exe\" hook stop"`, true},
+		{"bare ok legacy", `command = "ok hook prompt"`, true},
+		{"leading spaces", `  command = "ok hook stop"`, true},
+		// 用户自装同名 ok 工具的其它命令行——不得命中误删。
+		{"user ok deploy", `command = "ok deploy"`, false},
+		{"user ok hook run", `command = "ok hook run"`, false},
+		{"user ok hook with args", `command = "ok hook prompt --verbose"`, false},
+		{"user ok bare hook", `command = "ok hook"`, false},
+		{"myok 词边界", `command = "myok hook prompt"`, false},
+		{"third-party", `command = "echo hi"`, false},
+		{"非 command 行", `event = "ok hook prompt"`, false},
+	}
+	for _, c := range cases {
+		if got := okHookCommand.MatchString(c.line); got != c.want {
+			t.Errorf("%s: okHookCommand.MatchString(%q) = %v, want %v", c.name, c.line, got, c.want)
+		}
+	}
+}
+
+// TestStripLegacyOKHooksKeepsUserOKTool 回归 L-06：StripLegacyOKHooks 清 ok 遗留块时，
+// 用户自装同名 ok 工具的 [[hooks]] 表（非 ok 子命令形态）必须原样保留。
+func TestStripLegacyOKHooksKeepsUserOKTool(t *testing.T) {
+	content := `default_model = "kimi"
+
+[[hooks]]
+event = "UserPromptSubmit"
+command = "ok hook prompt"
+timeout = 10
+
+[[hooks]]
+event = "UserPromptSubmit"
+command = "ok deploy --prod"
+timeout = 5
+
+[[hooks]]
+event = "Stop"
+command = "echo done"
+`
+	got := StripLegacyOKHooks(content)
+	if strings.Contains(got, "ok hook prompt") {
+		t.Errorf("ok 遗留块未剥离:\n%s", got)
+	}
+	if !strings.Contains(got, `command = "ok deploy --prod"`) {
+		t.Errorf("用户自装 ok 工具的 hooks 表被误删:\n%s", got)
+	}
+	if !strings.Contains(got, `command = "echo done"`) {
+		t.Errorf("第三方 hooks 表被误删:\n%s", got)
 	}
 }

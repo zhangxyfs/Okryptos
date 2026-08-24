@@ -61,8 +61,16 @@ func (piAgent) HooksInstalled() bool {
 		return false
 	}
 	content := string(data)
-	return strings.Contains(content, piExtensionMarker) &&
-		strings.Contains(content, "// fingerprint: "+piTemplateFingerprint())
+	if !strings.Contains(content, piExtensionMarker) ||
+		!strings.Contains(content, "// fingerprint: "+piTemplateFingerprint()) {
+		return false
+	}
+	// 旧 exe 路径视为过期（与 dshAgent 同款，以解析后的当前可执行文件为基准）
+	exe, err := currentCLIExe()
+	if err != nil {
+		return false
+	}
+	return content == renderPiExtension(exe)
 }
 
 func (piAgent) InstallHooks(exe string) error {

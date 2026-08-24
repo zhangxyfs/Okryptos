@@ -156,6 +156,61 @@ func TestReasonixCorruptStateNotOverwritten(t *testing.T) {
 	}
 }
 
+// TestReasonixInterceptsConsistency 回归 H-03：manifest 必须声明 sidecar 实际
+// 订阅的全部事件；已安装 manifest 缺 compaction.complete 时 HooksInstalled 判
+// 为未安装（触发 EnsureHooks 自愈重写）。
+func TestReasonixInterceptsConsistency(t *testing.T) {
+	setupReasonixHome(t)
+	a := reasonixAgent{}
+	if err := a.InstallHooks(currentExe(t)); err != nil {
+		t.Fatal(err)
+	}
+	if !a.HooksInstalled() {
+		t.Fatal("安装后 HooksInstalled 应为 true")
+	}
+	mp := filepath.Join(ReasonixHome(), "plugins", "openknowledge", "reasonix-plugin.json")
+	data, err := os.ReadFile(mp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mf map[string]any
+	if err := json.Unmarshal(data, &mf); err != nil {
+		t.Fatal(err)
+	}
+	rt, _ := mf["runtime"].(map[string]any)
+	if !reasonixInterceptsCover(rt["intercepts"]) {
+		t.Fatalf("manifest intercepts 缺项: %v", rt["intercepts"])
+	}
+	// 模拟旧版 manifest：intercepts 只有 input.receive/tool.after
+	rt["intercepts"] = []any{"input.receive", "tool.after"}
+	stale, _ := json.MarshalIndent(mf, "", "  ")
+	if err := os.WriteFile(mp, append(stale, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if a.HooksInstalled() {
+		t.Error("manifest 缺 compaction.complete 时 HooksInstalled 应为 false")
+	}
+	// 自愈应重写 manifest 补齐 intercepts
+	if err := a.EnsureHooks(currentExe(t)); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(mp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mf2 map[string]any
+	if err := json.Unmarshal(data, &mf2); err != nil {
+		t.Fatal(err)
+	}
+	rt2, _ := mf2["runtime"].(map[string]any)
+	if !reasonixInterceptsCover(rt2["intercepts"]) {
+		t.Errorf("自愈后 intercepts 仍缺项: %v", rt2["intercepts"])
+	}
+	if !a.HooksInstalled() {
+		t.Error("自愈后 HooksInstalled 应为 true")
+	}
+}
+
 func TestReasonixPreservesForeignPlugins(t *testing.T) {
 	home := setupReasonixHome(t)
 	a := reasonixAgent{}

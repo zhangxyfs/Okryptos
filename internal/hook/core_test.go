@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"openknowledge/internal/index"
 	"openknowledge/internal/project"
@@ -808,5 +809,99 @@ func TestInjectEntryBudgetTruncatesLongSummary(t *testing.T) {
 	}
 	if strings.Contains(out2[j:], "…(已截断)") {
 		t.Errorf("缺省不限制时不应截断指针行，got: %q", out2[j:])
+	}
+}
+
+// TestCheckStopTurnNoCount L-21：countTurn=false 只评估不推进回合计数（Reasonix
+// 合成回合语义）；countTurn=true（CheckStop 等价语义）照常推进。
+func TestCheckStopTurnNoCount(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeCaptureConfig(t, kbRoot, "auto", 1)
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	TrackTouched(pc, "s-nc", "write_file", filepath.Join(projDir, "a.go"))
+	// 合成回合：评估照常（enforce/提醒逻辑仍跑），但 StopCount 不推进；
+	// 0-0 < interval=1 → 不提醒
+	for i := 0; i < 3; i++ {
+		reason, blockedRule := CheckStopTurn(pc, "s-nc", false)
+		if reason != "" || blockedRule != "" {
+			t.Fatalf("第 %d 次不计数评估不应命中提醒，got (%q, %q)", i, reason, blockedRule)
+		}
+	}
+	if got := state.Load(pc.Store.StateDir(), "s-nc").StopCount; got != 0 {
+		t.Fatalf("countTurn=false 不应推进 StopCount，got %d", got)
+	}
+	// 真实用户回合：计数推进，间隔到期 → 提醒
+	reason, _ := CheckStopTurn(pc, "s-nc", true)
+	if !strings.Contains(reason, "ok propose") {
+		t.Fatalf("计数回合间隔到期应提醒，got %q", reason)
+	}
+	if got := state.Load(pc.Store.StateDir(), "s-nc").StopCount; got != 1 {
+		t.Fatalf("countTurn=true 应推进 StopCount 到 1，got %d", got)
+	}
+}
+
+// TestCheckStopTurnNoCountStillEnforces L-21 配套：countTurn=false 时 enforce
+// 硬规则评估不缩水（合成回合上硬阻断保障仍在）。
+func TestCheckStopTurnNoCountStillEnforces(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	cfg := `
+[[enforce]]
+type = "changelog_required"
+code_globs = ["**/*.go"]
+changelog_glob = "docs/changelogs/**"
+message = "请补变更日志"
+`
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	TrackTouched(pc, "s-nc-enf", "write_file", filepath.Join(projDir, "main.go"))
+	reason, blockedRule := CheckStopTurn(pc, "s-nc-enf", false)
+	if reason == "" || blockedRule != "changelog_required" {
+		t.Fatalf("countTurn=false 仍应评估 enforce，got (%q, %q)", reason, blockedRule)
+	}
+	if got := state.Load(pc.Store.StateDir(), "s-nc-enf").StopCount; got != 0 {
+		t.Fatalf("enforce 评估不应顺带推进 StopCount，got %d", got)
+	}
+}
+
+// TestSelfHealHooksThrottled L-05：进程内节流——距上次自愈不足
+// SelfHealMinInterval 时跳过（lastSelfHeal 不变）；超期才重新执行。
+func TestSelfHealHooksThrottled(t *testing.T) {
+	selfHealMu.Lock()
+	saved := lastSelfHeal
+	selfHealMu.Unlock()
+	defer func() {
+		selfHealMu.Lock()
+		lastSelfHeal = saved
+		selfHealMu.Unlock()
+	}()
+
+	mark := time.Now()
+	selfHealMu.Lock()
+	lastSelfHeal = mark
+	selfHealMu.Unlock()
+	selfHealHooksThrottled()
+	selfHealMu.Lock()
+	if !lastSelfHeal.Equal(mark) {
+		t.Fatal("间隔未满不应重新执行 selfHealHooks（lastSelfHeal 应保持不变）")
+	}
+	selfHealMu.Unlock()
+
+	// 超期（置零时间）→ 执行并刷新时间戳（agent home 已被 TestMain 隔离，无副作用）
+	selfHealMu.Lock()
+	lastSelfHeal = time.Time{}
+	selfHealMu.Unlock()
+	selfHealHooksThrottled()
+	selfHealMu.Lock()
+	defer selfHealMu.Unlock()
+	if lastSelfHeal.IsZero() {
+		t.Fatal("超期后应执行自愈并刷新 lastSelfHeal")
 	}
 }

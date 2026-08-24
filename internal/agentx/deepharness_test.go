@@ -277,3 +277,45 @@ func TestDSHEnsureHooks(t *testing.T) {
 		t.Fatal("显式移除后 EnsureHooks 不应复活插件")
 	}
 }
+
+// TestDSHYAMLSingleQuoted 回归 L-04：YAML 单引号标量内单引号必须双写（''）——
+// 路径含 ' 时不转义会截断标量、file URL 断裂、插件挂载失效。
+func TestDSHYAMLSingleQuoted(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"plain", "'plain'"},
+		{"o'brien", "'o''brien'"},
+		{"''", "''''''"},
+	}
+	for _, c := range cases {
+		if got := dshYAMLSingleQuoted(c.in); got != c.want {
+			t.Errorf("dshYAMLSingleQuoted(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestDSHPatchBlockQuoteRoundTrip 回归 L-04：家目录路径含单引号时，patch 行的
+// name 标量按 YAML 规则还原（'' → '）后必须逐字等于 file URL。
+func TestDSHPatchBlockQuoteRoundTrip(t *testing.T) {
+	t.Setenv("OK_DSH_HOME", filepath.Join(t.TempDir(), "o'brien"))
+	t.Setenv("OK_HOME", t.TempDir())
+	block := dshPatchBlock()
+	want := dshPluginFileURL()
+	const prefix = "name: '"
+	i := strings.Index(block, prefix)
+	if i < 0 || !strings.HasSuffix(block, "'\n") {
+		t.Fatalf("patch 行 name 标量形态异常: %q", block)
+	}
+	raw := block[i+len(prefix) : len(block)-2]
+	// 标量内部不得存在未转义的孤立单引号（YAML 单引号串内 ' 必成对出现）。
+	for j := 0; j < len(raw); j++ {
+		if raw[j] == '\'' && (j+1 >= len(raw) || raw[j+1] != '\'') {
+			t.Fatalf("name 标量含未转义单引号（截断 file URL）: %q", raw)
+		}
+		if raw[j] == '\'' {
+			j++
+		}
+	}
+	if got := strings.ReplaceAll(raw, "''", "'"); got != want {
+		t.Errorf("YAML 还原后 name = %q, want %q", got, want)
+	}
+}

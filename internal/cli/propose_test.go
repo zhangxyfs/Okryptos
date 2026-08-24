@@ -233,3 +233,44 @@ func TestCaptureInterval(t *testing.T) {
 		t.Fatalf("capture should print interval 10: %q", out.String())
 	}
 }
+
+// M-13 回归：cwd 恰有同名文件时 approve 仍作用于库内草稿，且不改写 cwd 副本。
+func TestApproveIgnoresSameNameFileInCwd(t *testing.T) {
+	_, kb := setupProject(t)
+	var out, errBuf bytes.Buffer
+	if code := Propose([]string{"--title", "候选规则", "--type", "note", "--body", "库内正文"}, &out, &errBuf); code != 0 {
+		t.Fatalf("propose code=%d err=%q", code, errBuf.String())
+	}
+	// cwd（项目目录）放一份同名草稿副本（如导出编辑的副本），内容与库内不同
+	shadow := "---\ntitle: 副本\ntype: note\ndraft: true\nsummary: s\n---\n\ncwd 副本正文\n"
+	cwdFile := "候选规则.md"
+	if err := os.WriteFile(cwdFile, []byte(shadow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := Approve([]string{cwdFile}, &out, &errBuf); code != 0 {
+		t.Fatalf("approve code=%d err=%q", code, errBuf.String())
+	}
+	// 库内草稿已转正，正文未被副本污染
+	data, err := os.ReadFile(filepath.Join(kb, "knowledge", cwdFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := entry.Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Draft {
+		t.Fatal("库内草稿应被转正")
+	}
+	if e.Body != "库内正文" || e.Title != "候选规则" {
+		t.Fatalf("库内条目内容被 cwd 副本污染: %+v", e)
+	}
+	// cwd 副本保持原样，未写穿库外
+	cwdData, err := os.ReadFile(cwdFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(cwdData) != shadow {
+		t.Fatalf("cwd 副本被改写: %q", cwdData)
+	}
+}

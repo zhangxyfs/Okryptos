@@ -142,6 +142,15 @@ type conn struct {
 	closeErr     error
 	handlerSlots chan struct{}
 	notifyQueue  chan []byte
+
+	// notifyMu/notifyClosed guard notifyQueue close-vs-send (openknowledge local
+	// deviation from the upstream snapshot, review item L-17): the read loop
+	// closes notifyQueue on exit while notify() does a non-atomic check-then-send
+	// on c.closed, so an in-flight send could panic with "send on closed
+	// channel". senders hold RLock across the flag check and the (non-blocking)
+	// send; the read loop takes the write lock to flip the flag and close.
+	notifyMu     sync.RWMutex
+	notifyClosed bool
 }
 
 func newConn(r io.Reader, w io.Writer, logger *log.Logger) *conn {
@@ -202,7 +211,12 @@ func (c *conn) serve(ctx context.Context) error {
 	}
 
 	cancel()
+	// Close the notification queue under the write lock so a concurrent
+	// notify() cannot be mid-send (local deviation, see conn.notifyMu).
+	c.notifyMu.Lock()
+	c.notifyClosed = true
 	close(c.notifyQueue)
+	c.notifyMu.Unlock()
 	c.wg.Wait()
 	// A connection that was failed or shut down deliberately makes the
 	// resulting read error a consequence, not the cause: report the recorded
@@ -553,6 +567,14 @@ func (c *conn) notify(method string, params any) error {
 	case <-c.closed:
 		return c.closedError()
 	default:
+	}
+	// Local deviation (L-17): the queue may be closed by the read loop between
+	// the closed check above and the send; hold the read lock across both the
+	// flag check and the non-blocking send so a close cannot interleave.
+	c.notifyMu.RLock()
+	defer c.notifyMu.RUnlock()
+	if c.notifyClosed {
+		return c.closedError()
 	}
 	select {
 	case c.notifyQueue <- buf.Bytes():

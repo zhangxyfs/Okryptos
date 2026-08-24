@@ -384,3 +384,35 @@ func TestQoderIdeHooksInstalled(t *testing.T) {
 		t.Error("换 exe 后 lingmaHooksCurrent 应为 false")
 	}
 }
+
+// TestQoderIdeRemoveHooksCorruptKeepsWrappers 回归 L-01：settings.json 损坏（解析失败）
+// 时 RemoveHooks 不得先删包装文件——否则 settings.json 里指向它们的命令变成死命令。
+func TestQoderIdeRemoveHooksCorruptKeepsWrappers(t *testing.T) {
+	home := isolateQoderIde(t)
+	sp := filepath.Join(home, "settings.json")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sp, []byte("{broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		if err := ensureLingmaWrappers(qoderIdeTestExe()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := qoderIdeAgent{}
+	removed, err := a.RemoveHooks()
+	if err == nil {
+		t.Fatal("损坏 settings.json 应报错")
+	}
+	if removed {
+		t.Error("失败时不应报告 removed")
+	}
+	if data, _ := os.ReadFile(sp); string(data) != "{broken" {
+		t.Error("损坏文件被覆盖")
+	}
+	if runtime.GOOS == "windows" {
+		qoderIdeWantWrappers(t, home, qoderIdeTestExe()) // 包装文件必须保留
+	}
+}

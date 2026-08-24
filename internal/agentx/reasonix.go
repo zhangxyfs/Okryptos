@@ -55,6 +55,11 @@ func (reasonixAgent) Detect() bool {
 	return err == nil && info.IsDir()
 }
 
+// reasonixIntercepts 是 manifest 必须声明的拦截事件全集：SDK 契约宿主拒绝
+// 超出 manifest 的订阅，而 rxext sidecar 实际订阅 input.receive/tool.after/
+// compaction.complete 三项，二者必须一致（H-03）。
+var reasonixIntercepts = []any{"input.receive", "tool.after", "compaction.complete"}
+
 // reasonixManifest 生成 manifest v1：runtime.command 直指 ok.exe（协议允许
 // 插件根外绝对路径，exec form）；required=false——sidecar 崩溃宿主降级不阻断。
 func reasonixManifest(exe string) map[string]any {
@@ -70,7 +75,7 @@ func reasonixManifest(exe string) map[string]any {
 			"required":      false,
 			"priority":      0,
 			"timeoutMillis": HookTimeoutSec() * 1000,
-			"intercepts":    []any{"input.receive", "tool.after"},
+			"intercepts":    reasonixIntercepts,
 			"capabilities":  []any{"interceptors"},
 		},
 	}
@@ -174,7 +179,9 @@ func writeReasonixManifest(exe string) error {
 }
 
 // reasonixCurrent 报告插件登记与 manifest 是否均为当前期望形态
-// （条目 enabled、root 正确；manifest command=exe、args/timeoutMillis 正确）。
+// （条目 enabled、root 正确；manifest command=exe、args/timeoutMillis 正确，
+// 且 intercepts 覆盖 reasonixIntercepts 全集——旧版 manifest 缺
+// compaction.complete 时判为过期，触发自愈重写）。
 func reasonixCurrent(st map[string]any, exe string) bool {
 	i := findOKReasonixEntry(reasonixStatePlugins(st))
 	if i < 0 {
@@ -202,8 +209,28 @@ func reasonixCurrent(st map[string]any, exe string) bool {
 	cmd, _ := rt["command"].(string)
 	timeout, _ := rt["timeoutMillis"].(float64)
 	args, _ := rt["args"].([]any)
-	return cmd == exe && timeout == float64(HookTimeoutSec()*1000) &&
-		len(args) == 1 && args[0] == "extension-serve"
+	if cmd != exe || timeout != float64(HookTimeoutSec()*1000) ||
+		len(args) != 1 || args[0] != "extension-serve" {
+		return false
+	}
+	return reasonixInterceptsCover(rt["intercepts"])
+}
+
+// reasonixInterceptsCover 校验已安装 manifest 的 intercepts 覆盖期望全集。
+func reasonixInterceptsCover(v any) bool {
+	got, _ := v.([]any)
+	set := make(map[string]bool, len(got))
+	for _, it := range got {
+		if s, ok := it.(string); ok {
+			set[s] = true
+		}
+	}
+	for _, want := range reasonixIntercepts {
+		if !set[want.(string)] {
+			return false
+		}
+	}
+	return true
 }
 
 func (reasonixAgent) InstallHooks(exe string) error {

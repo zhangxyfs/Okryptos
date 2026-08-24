@@ -9,13 +9,15 @@ import (
 )
 
 // failAfterEmbedder 前 failFrom-1 次批量调用成功、之后返回错误，
-// 模拟 embedding 服务在同步中途故障。
+// 模拟 embedding 服务在同步中途故障。identity 非空时模拟真实 client
+// 的模型身份（触发 Sync 的模型身份闸）。
 type failAfterEmbedder struct {
 	calls    int
 	failFrom int
+	identity string
 }
 
-func (f *failAfterEmbedder) ModelIdentity() string { return "" }
+func (f *failAfterEmbedder) ModelIdentity() string { return f.identity }
 
 func (f *failAfterEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
 	return fakeEmbedder{}.EmbedQuery(ctx, text)
@@ -69,8 +71,9 @@ func TestSyncEmbeddingFailureKeepsEntries(t *testing.T) {
 	}
 }
 
-// 跨批部分失败：40 条分两批（32+8），第二批失败时第一批向量保留、
-// entries 全部入库；重试只补缺失的 8 条。
+// 跨批部分失败：40 条分两批（32+8），第二批失败时第一批已提交向量被回滚
+// （见 TestSyncEmbeddingMidFailureDoesNotStall：不回滚会让下轮被判
+// embedBlocked 永久停摆）、entries 全部入库；重试补齐全部 40 条。
 func TestSyncEmbeddingPartialBatchFailure(t *testing.T) {
 	root := t.TempDir()
 	kdir := filepath.Join(root, "knowledge")
@@ -91,14 +94,55 @@ func TestSyncEmbeddingPartialBatchFailure(t *testing.T) {
 	if n, _ := db.Count(); n != 40 {
 		t.Fatalf("entries 应全部入库: count=%d", n)
 	}
-	if n := vectorCount(t, db); n != 32 {
-		t.Fatalf("第一批 32 条向量应已提交: vectors=%d", n)
+	if n := vectorCount(t, db); n != 0 {
+		t.Fatalf("失败轮已提交的第一批向量应被回滚: vectors=%d", n)
 	}
 	if err := db.Sync(kdir, fakeEmbedder{}); err != nil {
 		t.Fatal(err)
 	}
 	if n := vectorCount(t, db); n != 40 {
 		t.Fatalf("重试后向量应补齐: vectors=%d", n)
+	}
+}
+
+// M-07 回归：真实 client（模型身份非空）首次建库分批中途失败——若不清掉
+// 本轮已写向量，会留下"meta 未写 + vectors 有部分行"的状态，下一轮同步
+// 命中模型身份闸的"meta 空 + HasVectors"分支被判 embedBlocked，向量写入
+// 永久静默停摆（须手动 ok index 重建）。失败路径回滚本轮向量后，下轮应
+// 干净重试至全量，meta 正常写入。
+func TestSyncEmbeddingMidFailureDoesNotStall(t *testing.T) {
+	root := t.TempDir()
+	kdir := filepath.Join(root, "knowledge")
+	for i := 0; i < 40; i++ {
+		writeEntryFile(t, kdir, fmt.Sprintf("e%02d.md", i),
+			fmt.Sprintf("---\ntitle: 条目%02d\ntype: note\ntags: [t]\nsummary: s%02d\n---\n\n正文 %02d。\n", i, i, i))
+	}
+	db, err := Open(filepath.Join(root, "kb.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	bad := &failAfterEmbedder{failFrom: 2, identity: "m1"}
+	if err := db.Sync(kdir, bad); err == nil {
+		t.Fatal("第二批 embedding 失败应返回错误")
+	}
+	if n := vectorCount(t, db); n != 0 {
+		t.Fatalf("失败轮应回滚本轮向量（否则下轮被判 embedBlocked 停摆）: vectors=%d", n)
+	}
+	// 下一轮：同一身份的可用 client 同步，不应被身份闸阻断
+	if err := db.Sync(kdir, &batchFake{identity: "m1"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := vectorCount(t, db); n != 40 {
+		t.Fatalf("重试后向量应补齐（停摆则恒为 0）: vectors=%d", n)
+	}
+	m, _, err := db.EmbeddingMeta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m != "m1" {
+		t.Fatalf("重试成功后 meta 应写入模型身份: model=%q", m)
 	}
 }
 

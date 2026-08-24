@@ -211,6 +211,12 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 	rep := &Report{}
 	seen := map[string]bool{}
 	for _, it := range entries {
+		// 条目文件名与项目名同款校验：con.md 这类 Windows 保留名会在落盘
+		// rename 阶段失败、把导入挂在半途——提前跳过计入 Skipped 而非中断
+		if !registry.ValidProjectName(it.file) {
+			rep.Skipped++
+			continue
+		}
 		if _, err := entry.Parse(it.data); err != nil {
 			rep.Skipped++
 			continue
@@ -262,6 +268,7 @@ func Import(r io.ReaderAt, size int64) (*Report, error) {
 		var opts index.SyncOptions
 		if cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml")); err == nil {
 			opts.MaxLines = cfg.Index.MaxLines
+			opts.FeedbackWindowDays = cfg.Retrieve.Feedback.WindowDays
 		}
 		syncErr := db.Sync(st.KnowledgeDir(), nil, opts)
 		db.Close()

@@ -34,3 +34,24 @@ func TestHomeOKHomeOverrideStillWins(t *testing.T) {
 		t.Fatalf("Home() = %q, want OK_HOME %q", got, okHome)
 	}
 }
+
+// L-25：双重失败兜底须为进程内一致的绝对路径——裸相对 ".openknowledge"
+// 会让数据根随 cwd 漂移，且两次调用可能解析到不同目录。
+func TestHomeFallbackStableAndAbsolute(t *testing.T) {
+	first := fallbackHome()
+	if !filepath.IsAbs(first) {
+		t.Fatalf("fallback 应为绝对路径，got %q", first)
+	}
+	other := t.TempDir()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(other); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	if got := fallbackHome(); got != first {
+		t.Fatalf("fallback 随 cwd 漂移: %q → %q", first, got)
+	}
+}

@@ -74,7 +74,20 @@ func Uninstall() (*UninstallResult, error) {
 // 子小节如 [embedding.xxx] / [[embedding.profiles]] 一并视为该小节内容删除），
 // 其余内容原样保留；文件因此不再含任何有效内容时删除文件本身。
 // 返回是否真的删除了小节。
+// 读-改-写全程在 fsx.WithFileLock 内（与 updateGlobalConfig 同纪律）：卸载与
+// GUI Save* 并发时若裸读改写会互相覆盖丢 profile。
 func RemoveSection(path, section string) (bool, error) {
+	removed := false
+	err := fsx.WithFileLock(path, func() error {
+		var err error
+		removed, err = removeSectionLocked(path, section)
+		return err
+	})
+	return removed, err
+}
+
+// removeSectionLocked 是 RemoveSection 的锁内实现，调用方须已持有 path 的文件锁。
+func removeSectionLocked(path, section string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return false, nil

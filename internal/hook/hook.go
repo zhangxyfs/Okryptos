@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"openknowledge/internal/agentx"
@@ -161,6 +162,29 @@ func logErr(format string, args ...any) {
 	fmt.Fprintf(f, time.Now().Format("2006-01-02 15:04:05 ")+format+"\n", args...)
 }
 
+// SelfHealMinInterval 是 selfHealHooks 的进程内最小执行间隔：自愈要遍历全部
+// detected agent 做检测/重写 I/O，每条输入都跑会在常驻进程（okd 转发 hook、
+// Reasonix sidecar）里放大 prompt 热路径延迟（M-12/L-05）。rxext 包同口径复用。
+const SelfHealMinInterval = 5 * time.Minute
+
+// selfHeal 节流状态（进程内）：CLI 单发进程每次调用都是首次、恒执行；
+// 常驻进程（okd / sidecar）按 SelfHealMinInterval 降频。
+var (
+	selfHealMu   sync.Mutex
+	lastSelfHeal time.Time
+)
+
+// selfHealHooksThrottled 按 SelfHealMinInterval 节流后执行 selfHealHooks。
+func selfHealHooksThrottled() {
+	selfHealMu.Lock()
+	defer selfHealMu.Unlock()
+	if time.Since(lastSelfHeal) < SelfHealMinInterval {
+		return
+	}
+	lastSelfHeal = time.Now()
+	selfHealHooks()
+}
+
 // selfHealHooks 逐 agent 自检 hooks 集成（如 kimi 清掉标记块时自动修复）。fail-open。
 // daemon（okd）进程内 os.Executable 是 okd.exe——hook 请求经 daemon 转发后在 okd
 // 内执行本函数，不经 CliTargetFor 换算会把各 agent hooks 改写成指向 okd（gui-split
@@ -192,7 +216,7 @@ func HandlePrompt(r io.Reader, w io.Writer, format string) int {
 	if registry.HooksDisabled() {
 		return 0
 	}
-	selfHealHooks()
+	selfHealHooksThrottled()
 	ev, err := ParseEvent(r)
 	if err != nil {
 		logErr("prompt parse: %v", err)
@@ -286,6 +310,7 @@ func HandleCompact(r io.Reader) int {
 	}
 	pc, err := project.FromCwd(ev.Cwd)
 	if err != nil {
+		logErr("compact project (cwd=%q): %v", ev.Cwd, err)
 		return 0
 	}
 	ResetBaseInjection(pc, ev.SessionID)
@@ -332,10 +357,12 @@ func HandleStop(r io.Reader, stderr, stdout io.Writer, format string) int {
 	}
 	ev, err := ParseEvent(r)
 	if err != nil {
+		logErr("stop parse: %v", err)
 		return 0
 	}
 	pc, err := project.FromCwd(ev.Cwd)
 	if err != nil {
+		logErr("stop project (cwd=%q): %v", ev.Cwd, err)
 		return 0
 	}
 	reason, blockedRule := CheckStop(pc, ev.SessionID)

@@ -11,11 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/daemonx"
 	"openknowledge/internal/hook"
 	"openknowledge/internal/project"
+	"openknowledge/internal/registry"
 	extension "openknowledge/internal/rxext/sdk"
 	"openknowledge/internal/setupx"
 	"openknowledge/internal/state"
@@ -39,10 +41,15 @@ func Serve(ctx context.Context) error {
 // handler 持有 initialize 握手确定的单会话上下文（一个 Reasonix 会话一个 sidecar 进程）。
 // mu 串行化拦截器回调：SDK 并发派发（wire.go maxConcurrentHandlers=32），
 // state 的读-改-写（TrackTouched/CheckStop）无锁会丢更新。
+// healMu/lastHeal 是 selfHealHooks 的进程内节流，独立于 mu：自愈是全 agent
+// 检测/重写 I/O，不触碰会话状态，进会话锁会把串行化的 I/O 压进 input.receive
+// 热路径（逼近 manifest timeoutMillis，M-12）。
 type handler struct {
 	mu        sync.Mutex
 	sessionID string
 	cwd       string
+	healMu    sync.Mutex
+	lastHeal  time.Time
 }
 
 func (h *handler) Initialize(_ context.Context, p extension.InitializeParams) (*extension.InitializeResult, error) {
@@ -59,21 +66,28 @@ func (h *handler) Initialize(_ context.Context, p extension.InitializeParams) (*
 // （提醒在前、注入在后）。fail-open：panic/错误一律 Continue。
 func (h *handler) onInput(_ context.Context, _ string, payload json.RawMessage) (res *extension.InterceptResult, err error) {
 	defer continueOnPanic(&res, &err)
+	res = extension.Continue()
+	h.maybeSelfHeal() // 会话锁外 + 进程内节流（M-12）
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	res = extension.Continue()
-	selfHealHooks()
 	var in struct {
 		Text string `json:"text"`
 	}
-	if err := json.Unmarshal(payload, &in); err != nil || strings.TrimSpace(in.Text) == "" {
+	if uerr := json.Unmarshal(payload, &in); uerr != nil {
+		// 宿主载荷变化会让注入静默失联（L-18）：记 ok.log，与 hook 包同类分支一致
+		logErr("rxext input.receive: bad payload: %v", uerr)
+		return res, nil
+	}
+	if strings.TrimSpace(in.Text) == "" {
 		return res, nil
 	}
 	pc, err := project.FromCwd(h.cwd)
 	if err != nil {
 		return res, nil
 	}
-	reason, blockedRule := hook.CheckStop(pc, h.sessionID)
+	// 宿主合成回合（goal 自动续跑等）不是真实用户回合：照常评估 enforce/提醒，
+	// 但不推进 auto 自省的回合计数（L-21，提醒口径不被输入次数稀释）
+	reason, blockedRule := hook.CheckStopTurn(pc, h.sessionID, !isSyntheticTurn(in.Text))
 	mode := enforceMode()
 	isBlock := blockedRule != ""
 	if reason != "" {
@@ -139,6 +153,55 @@ func buildInputReplacement(original string, parts []string) (*extension.Intercep
 	b.WriteString("</ok-context>\n\n")
 	b.WriteString(original)
 	return extension.Replace(map[string]string{"text": b.String()})
+}
+
+// maybeSelfHeal 按 hook.SelfHealMinInterval 进程内节流执行 selfHealHooks
+// （与 hook 包 HandlePrompt 同口径）。healMu 持锁跨过 I/O：并发回调下同一时刻
+// 最多一个自愈在跑；会话锁 mu 不参与，input.receive 不被自愈 I/O 串行化。
+func (h *handler) maybeSelfHeal() {
+	h.healMu.Lock()
+	defer h.healMu.Unlock()
+	if time.Since(h.lastHeal) < hook.SelfHealMinInterval {
+		return
+	}
+	h.lastHeal = time.Now()
+	selfHealHooks()
+}
+
+// reasonixSyntheticTurnMarkers 镜像 Reasonix 宿主经 input.receive 下发的合成回合
+// 指令文本（上游 internal/control/goal.go goalContinueTurn、formatIncompleteTodos
+// 与 readiness 催促）：这些回合由宿主自动注入、无用户动作，不应推进 auto 自省
+// "每 turn_interval 回合"的时钟（L-21）。宿主 intercept 回合允许携带模型生成的
+// nextAction 文本（无法识别，仍会计数）——残余漂移有界；宿主文案变更漏判的代价
+// 同样仅是合成回合计入计数，不错杀真实用户输入。
+var reasonixSyntheticTurnMarkers = []string{
+	"Continue pursuing the active goal",
+	"Goal signaled complete but issues remain:",
+	"The agent signaled goal completion and all tasks are marked done.",
+	"No tool calls in recent turns.",
+}
+
+// isSyntheticTurn 按宿主合成回合指令文本识别 input.receive 里的非用户回合。
+// 合成文本前可能拼有 <active-goal> 等宿主注入块，故用 Contains 而非前缀匹配。
+func isSyntheticTurn(text string) bool {
+	for _, m := range reasonixSyntheticTurnMarkers {
+		if strings.Contains(text, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// logErr 追加诊断到 ok.log（与 hook 包 logErr 同一文件同一格式；日志本身失败
+// 不再上报）。sidecar 的 stderr 由宿主脱敏留尾，协议类故障（如宿主载荷漂移）
+// 需进 ok.log 才能在 GUI 日志页诊断。
+func logErr(format string, args ...any) {
+	f, err := os.OpenFile(filepath.Join(registry.Home(), "ok.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, time.Now().Format("2006-01-02 15:04:05 ")+format+"\n", args...)
 }
 
 // selfHealHooks 逐 agent 自检 hooks/插件集成（如 ok.exe 迁移后重写登记）。fail-open。

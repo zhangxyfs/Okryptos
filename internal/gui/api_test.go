@@ -462,7 +462,11 @@ func TestEntriesSortOrder(t *testing.T) {
 		t.Helper()
 		e := &entry.Entry{Title: file, Type: "note", Draft: draft, Summary: "s", Body: "b"}
 		path := filepath.Join(knowledge, file)
-		if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+		data, err := e.Serialize()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
 			t.Fatal(err)
 		}
 		mtime := now.Add(-age)
@@ -901,7 +905,11 @@ func writeDraft(t *testing.T, okHome, title, body string) string {
 	}
 	file := entry.Slug(title) + ".md"
 	path := filepath.Join(okHome, "projects", "demo", "knowledge", file)
-	if err := os.WriteFile(path, e.Serialize(), 0o644); err != nil {
+	data, err := e.Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return file
@@ -2181,6 +2189,17 @@ func TestTerminalExecList(t *testing.T) {
 	}
 }
 
+func TestTerminalTimeoutFor(t *testing.T) {
+	if d := terminalTimeoutFor("wiki"); d != terminalLongExecTimeout {
+		t.Fatalf("wiki 长任务应走长超时，got %v", d)
+	}
+	for _, cmd := range []string{"list", "search", "add", "propose", "approve", "archive", "capture", "doctor", "on", "off"} {
+		if d := terminalTimeoutFor(cmd); d != terminalExecTimeout {
+			t.Fatalf("%s 应走默认超时，got %v", cmd, d)
+		}
+	}
+}
+
 func TestTerminalExecTimeout(t *testing.T) {
 	fakeTerminalCLI(t)
 	old := terminalExecTimeout
@@ -2207,5 +2226,35 @@ func TestTerminalExecTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Fatalf("超时 kill 未生效，耗时 %v", elapsed)
+	}
+}
+
+// TestApproveArchiveReadError（L-09）：条目文件读取出现非"不存在"的 IO 错误时
+// （用同名目录触发 read 失败），不得伪装成"条目不存在" 400，应 500；
+// 真正不存在仍保持 400 口径。
+func TestApproveArchiveReadError(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	knowledge := filepath.Join(okHome, "projects", "demo", "knowledge")
+	if err := os.MkdirAll(filepath.Join(knowledge, "blocked.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	for _, ep := range []string{"/api/approve", "/api/entry/archive"} {
+		code, data := do(t, "POST", srv.URL+ep, testToken,
+			map[string]any{"project": "demo", "file": "blocked.md"})
+		if code != 500 {
+			t.Fatalf("%s dir-as-file: status = %d, want 500 (body %s)", ep, code, data)
+		}
+		if strings.Contains(string(data), "条目不存在") {
+			t.Fatalf("%s must not disguise IO error as 条目不存在: %s", ep, data)
+		}
+		code, data = do(t, "POST", srv.URL+ep, testToken,
+			map[string]any{"project": "demo", "file": "ghost.md"})
+		if code != 400 || !strings.Contains(string(data), "条目不存在") {
+			t.Fatalf("%s missing file: status = %d, want 400 条目不存在 (body %s)", ep, code, data)
+		}
 	}
 }

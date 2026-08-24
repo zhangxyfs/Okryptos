@@ -44,23 +44,34 @@ func SemanticFloor(coses []float64, floor, minGap float64) float64 {
 	if len(coses) < 3 {
 		return floor
 	}
-	sorted := append([]float64(nil), coses...)
-	sort.Float64s(sorted)
-	max := sorted[len(sorted)-1]
+	max, median, relGap := cosStats(coses)
 	if max <= 0 {
 		return floor
 	}
-	median := sorted[len(sorted)/2]
-	if minGap > 0 {
-		relGap := (max - median) / max
-		if relGap < minGap {
-			return math.Inf(1)
-		}
+	if minGap > 0 && relGap < minGap {
+		return math.Inf(1)
 	}
 	if sem := median + (max-median)*0.5; sem > floor {
 		return sem
 	}
 	return floor
+}
+
+// cosStats 返回余弦分布的 max/median/相对 gap（(max-median)/max），SemanticFloor
+// 与 SemanticRejected 诊断共用同一份计算，防两处公式漂移。空样本或 max<=0 时
+// relGap 为 0（避免除零）。
+func cosStats(coses []float64) (max, median, relGap float64) {
+	if len(coses) == 0 {
+		return 0, 0, 0
+	}
+	sorted := append([]float64(nil), coses...)
+	sort.Float64s(sorted)
+	max = sorted[len(sorted)-1]
+	median = sorted[len(sorted)/2]
+	if max > 0 {
+		relGap = (max - median) / max
+	}
+	return max, median, relGap
 }
 
 // QueryInfo 描述一次 Query 的诊断信息（供 hook 日志 / ok search 提示 / GUI 日志页
@@ -129,6 +140,20 @@ func (db *DB) Query(terms []string, queryVec []float32, cfg config.Retrieve) ([]
 // （bge 类尤甚），强负余弦叠加会把总分压到 0 以下——关键词准入不可被语义通道
 // 单方面否决（准入按通道独立），下限保住注入资格，语义分仅继续影响排序。
 const scoreFloor = 1e-6
+
+// hitLess 命中排序的统一比较器：分数降序、标题升序、文件名升序。输入多来自
+// map 遍历（随机序）且 sort.Slice 不稳定，同名同分条目（多分支 wiki 差异条目
+// 同名是常态）必须按文件名决胜，否则两次排序相对顺序不定、观测（如
+// RecencyShifted）漂移。recency.go / feedback.go 与本文件的排序共用此比较器。
+func hitLess(a, b *Hit) bool {
+	if a.Score != b.Score {
+		return a.Score > b.Score
+	}
+	if a.Title != b.Title {
+		return a.Title < b.Title
+	}
+	return a.Filename < b.Filename
+}
 
 func (db *DB) QueryEx(terms []string, queryVec []float32, cfg config.Retrieve) ([]Hit, QueryInfo, error) {
 	hits, info, err := db.queryAll(terms, queryVec, cfg, nil)
@@ -225,28 +250,24 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve, 
 		_ = rows.Close()
 	}
 
-	// 语义通道：向量全量读入内存算余弦（万条毫秒级），先收集分布再按
-	// SemanticFloor（模型无关相对门槛）准入。已有关键词准入的条目只加总分
-	// （排序用），不受语义门槛影响。
+	// 语义通道：两阶段查询——第一阶段只读 filename+向量算余弦分布并按
+	// SemanticFloor（模型无关相对门槛）判定准入，准入后才按 filename 回查
+	// 正文（万级条目不再每次注入数十 MB body IO）。已有关键词准入的条目只加
+	// 总分（排序用），不受语义门槛影响。
 	if len(queryVec) > 0 {
 		rows, err := db.sql.Query(
-			`SELECT e.filename, e.title, e.type, e.summary, e.body, e.tags, e.mtime, v.blob
+			`SELECT v.filename, v.blob
 			FROM vectors v JOIN entries e ON e.filename = v.filename
 			WHERE e.mandatory = 0 AND e.draft = 0`)
 		if err != nil {
 			return nil, QueryInfo{}, err
 		}
-		type cand struct {
-			h   Hit
-			cos float64
-		}
-		var cands []cand
+		coss := map[string]float64{}
 		coses := make([]float64, 0, 64)
 		for rows.Next() {
-			var filename, title, typ, summary, body, tagsStr string
-			var mtime int64
+			var filename string
 			var blob []byte
-			if err := rows.Scan(&filename, &title, &typ, &summary, &body, &tagsStr, &mtime, &blob); err != nil {
+			if err := rows.Scan(&filename, &blob); err != nil {
 				_ = rows.Close()
 				return nil, QueryInfo{}, err
 			}
@@ -254,10 +275,7 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve, 
 			if cos > 0 {
 				coses = append(coses, cos)
 			}
-			cands = append(cands, cand{Hit{
-				Filename: filename, Title: title, Type: typ, Summary: summary, Body: body,
-				Tags: splitTags(tagsStr), Mtime: mtime,
-			}, cos})
+			coss[filename] = cos
 		}
 		if err := rows.Err(); err != nil {
 			_ = rows.Close()
@@ -265,37 +283,50 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve, 
 		}
 		_ = rows.Close()
 		semFloor := SemanticFloor(coses, floor, cfg.MinGap)
-		semAdmitted := false
-		for _, c := range cands {
-			if h, ok := hits[c.h.Filename]; ok {
-				h.Score += cfg.Beta * c.cos
+		// 已有关键词准入的条目就地加分；新准入的待第二阶段回查正文
+		var admitted []string
+		for filename, cos := range coss {
+			semOK := cos > 0 && (semFloor == 0 || cos >= semFloor)
+			if h, ok := hits[filename]; ok {
+				h.Score += cfg.Beta * cos
 				if h.Score <= 0 {
 					h.Score = scoreFloor
 				}
-				if c.cos > 0 && (semFloor == 0 || c.cos >= semFloor) {
-					cosScores[c.h.Filename] = c.cos
+				if semOK {
+					cosScores[filename] = cos
 				}
-			} else if c.cos > 0 && (semFloor == 0 || c.cos >= semFloor) {
-				c.h.Score = cfg.Beta * c.cos
-				hits[c.h.Filename] = &c.h
-				cosScores[c.h.Filename] = c.cos
-				semAdmitted = true
+			} else if semOK {
+				admitted = append(admitted, filename)
 			}
+		}
+		// 第二阶段：按 filename 回查准入条目的完整行（排序仅为确定性，量小）
+		sort.Strings(admitted)
+		semAdmitted := false
+		for _, filename := range admitted {
+			var h Hit
+			var tagsStr string
+			err := db.sql.QueryRow(
+				`SELECT title, type, summary, body, tags, mtime FROM entries WHERE filename = ?`,
+				filename).Scan(&h.Title, &h.Type, &h.Summary, &h.Body, &tagsStr, &h.Mtime)
+			if err != nil {
+				return nil, QueryInfo{}, err
+			}
+			h.Filename = filename
+			h.Tags = splitTags(tagsStr)
+			h.Score = cfg.Beta * coss[filename]
+			hits[filename] = &h
+			cosScores[filename] = coss[filename]
+			semAdmitted = true
 		}
 		// 语义诊断：样本足够却无任何语义准入（无显著头部）——供日志/提示/GUI 展示
 		if len(coses) >= 3 && !semAdmitted {
-			sorted := append([]float64(nil), coses...)
-			sort.Float64s(sorted)
-			max := sorted[len(sorted)-1]
-			median := sorted[len(sorted)/2]
+			max, median, relGap := cosStats(coses)
 			info = QueryInfo{
 				SemanticRejected: true,
 				Coses:            len(coses),
 				MaxCos:           max,
 				MedianCos:        median,
-			}
-			if max > 0 {
-				info.RelGap = (max - median) / max
+				RelGap:           relGap,
 			}
 		}
 	}
@@ -316,16 +347,7 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve, 
 			out = append(out, *h)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Score != out[j].Score {
-			return out[i].Score > out[j].Score
-		}
-		if out[i].Title != out[j].Title {
-			return out[i].Title < out[j].Title
-		}
-		// 同名条目（多分支 wiki 差异条目同名是常态）再按文件名决胜，保证确定性
-		return out[i].Filename < out[j].Filename
-	})
+	sort.Slice(out, func(i, j int) bool { return hitLess(&out[i], &out[j]) })
 	// 冷却排除在排序后、返回前（QueryExBranch 内 top_n 截断随之位于排除之后）；
 	// 被排除但本可准入（Score>0 进入 out）的条目记入 CooledSkipped 供观测。
 	if len(exclude) > 0 {
@@ -399,86 +421,4 @@ func (db *DB) Mandatory() ([]Hit, error) {
 		out = append(out, h)
 	}
 	return out, rows.Err()
-}
-
-// WikiEntry 是 Wiki 目录的一行。
-type WikiEntry struct {
-	Title    string
-	Filename string
-	Summary  string
-	Branch   string
-}
-
-// WikiEntries 返回打 wiki 标签的已转正未归档条目（按 title 排序）。
-// 与 rebuildIndex 主列表口径一致：归档条目不进 INDEX（含 Wiki 目录节）。
-// SQL 的 LIKE 只是粗筛，精确判定在 Go 侧（hasWikiTag），防 sewiki/nowiki 误判。
-func (db *DB) WikiEntries() ([]WikiEntry, error) {
-	rows, err := db.sql.Query(`SELECT title, filename, summary, tags FROM entries WHERE draft = 0 AND archived = 0 AND tags LIKE '%wiki%' ORDER BY title`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []WikiEntry
-	for rows.Next() {
-		var e WikiEntry
-		var tagsStr string
-		if err := rows.Scan(&e.Title, &e.Filename, &e.Summary, &tagsStr); err != nil {
-			return nil, err
-		}
-		if !hasWikiTag(tagsStr) {
-			continue
-		}
-		e.Branch = BranchOf(splitTags(tagsStr))
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-
-// HasBranchWiki 报告指定分支是否存在已转正的差异条目（wiki 标签且 branch 精确匹配）。
-// 空分支（非 git/未知）直接 false：无分支 wiki 条目不是任何分支的差异条目。
-func (db *DB) HasBranchWiki(branch string) (bool, error) {
-	if branch == "" {
-		return false, nil
-	}
-	entries, err := db.WikiEntries()
-	if err != nil {
-		return false, err
-	}
-	for _, e := range entries {
-		if e.Branch == branch {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// WikiCount 返回 wiki 条目数（ok wiki mark 展示用）。与 WikiEntries 同口径
-//（已转正、未归档、wiki 精确标签）——直接复用计数，防两处 SQL 各自漂移。
-func (db *DB) WikiCount() (int, error) {
-	entries, err := db.WikiEntries()
-	if err != nil {
-		return 0, err
-	}
-	return len(entries), nil
-}
-
-// HasWikiMatch 报告检索词是否有 wiki 条目（draft=0 且 tags 含 wiki）覆盖。
-// 仅看 FTS 关键词、不看向量——兜底启发式，供 ok search 输出提示；terms 为空返回 true。
-func (db *DB) HasWikiMatch(terms []string) (bool, error) {
-	match := buildMatch(terms)
-	if match == "" {
-		return true, nil
-	}
-	var exists bool
-	// tags 是 ", " 拼接串，wiki 判定须按整 tag 精确匹配（防 sewiki/nowiki 误判）
-	err := db.sql.QueryRow(
-		`SELECT EXISTS(
-			SELECT 1 FROM entries_fts JOIN entries e ON e.filename = entries_fts.filename
-			WHERE entries_fts MATCH ? AND e.draft = 0 AND
-				(e.tags = 'wiki' OR e.tags LIKE 'wiki, %' OR e.tags LIKE '%, wiki' OR e.tags LIKE '%, wiki, %')
-		)`, match).Scan(&exists)
-	if err != nil {
-		return false, err
-	}
-	return exists, nil
 }

@@ -3,12 +3,17 @@ package registry
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestNormalizePath(t *testing.T) {
 	got := NormalizePath(`D:\develop\OpenKnowledge\`)
 	want := "d:/develop/openknowledge"
+	if runtime.GOOS != "windows" {
+		// 小写折叠仅 Windows：Linux 大小写敏感 FS 上仅大小写不同的目录不得互相遮蔽
+		want = "D:/develop/OpenKnowledge"
+	}
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -19,7 +24,12 @@ func TestFindByCwdLongestPrefix(t *testing.T) {
 		{Name: "root", Paths: []string{`D:\develop`}},
 		{Name: "ok", Paths: []string{`D:\develop\OpenKnowledge`}},
 	}}
-	p := r.FindByCwd(`d:\DEVELOP\OpenKnowledge\docs`)
+	// 大小写不敏感匹配仅 Windows 语义；Linux 下大小写不同的路径不命中
+	cwd := `d:\DEVELOP\OpenKnowledge\docs`
+	if runtime.GOOS != "windows" {
+		cwd = `D:\develop\OpenKnowledge\docs`
+	}
+	p := r.FindByCwd(cwd)
 	if p == nil || p.Name != "ok" {
 		t.Fatalf("expected ok, got %+v", p)
 	}
@@ -83,6 +93,51 @@ func TestAddProjectCaseConflict(t *testing.T) {
 	}
 	if len(r.Projects) != 1 {
 		t.Fatalf("冲突项目不应入册: %+v", r.Projects)
+	}
+}
+
+// 同路径重复注册拒绝：同目录换名再注册会让 FindByCwd 仍命中先注册者，
+// ok add 静默写串到旧项目知识库。
+func TestAddProjectDuplicatePath(t *testing.T) {
+	r := &Registry{}
+	if err := r.AddProject("alpha", "D:/src/foo"); err != nil {
+		t.Fatal(err)
+	}
+	// 分隔符与尾部斜杠差异不影响冲突判定（两平台一致）
+	if err := r.AddProject("beta", `D:\src\foo\`); err == nil {
+		t.Fatal("expected duplicate path error")
+	}
+	if len(r.Projects) != 1 {
+		t.Fatalf("冲突项目不应入册: %+v", r.Projects)
+	}
+	// FindByCwd 语义不变：仍命中先注册者
+	if p := r.FindByCwd("D:/src/foo/sub"); p == nil || p.Name != "alpha" {
+		t.Fatalf("expected alpha, got %+v", p)
+	}
+}
+
+// 仅大小写不同的路径：Windows 上是同一目录（冲突拒绝），Linux 上是不同目录
+// （允许注册，互不遮蔽）。
+func TestAddProjectCaseOnlyPathByPlatform(t *testing.T) {
+	r := &Registry{}
+	if err := r.AddProject("upper", "/src/Foo"); err != nil {
+		t.Fatal(err)
+	}
+	err := r.AddProject("lower", "/src/foo")
+	if runtime.GOOS == "windows" {
+		if err == nil {
+			t.Fatal("Windows: expected case-fold path conflict error")
+		}
+	} else {
+		if err != nil {
+			t.Fatalf("Linux: 大小写不同目录不应互相遮蔽: %v", err)
+		}
+		if p := r.FindByCwd("/src/foo"); p == nil || p.Name != "lower" {
+			t.Fatalf("expected lower, got %+v", p)
+		}
+		if p := r.FindByCwd("/src/Foo"); p == nil || p.Name != "upper" {
+			t.Fatalf("expected upper, got %+v", p)
+		}
 	}
 }
 

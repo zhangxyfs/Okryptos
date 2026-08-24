@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"openknowledge/internal/fsx"
@@ -33,6 +32,13 @@ func codexHooksPath() string { return filepath.Join(CodexHome(), "hooks.json") }
 
 func codexConfigPath() string { return filepath.Join(CodexHome(), "config.toml") }
 
+// codexHookEvent Codex hook 事件参数：共享事件表（hookEvent）+ 信任门专用字段。
+type codexHookEvent struct {
+	hookEvent
+	label   string // snake 事件名（信任哈希 identity 与 hooks.state 节 key 用）
+	filters bool   // matcher 是否入信任哈希（Codex 仅过滤型事件入：PreToolUse/PostToolUse）
+}
+
 // codexHookEvents 是 ok 接入的 Codex hook 事件（对应 ok 的三条 hook 链路）。
 // 命令形态按平台分叉（见 codexCommand）：Windows 用 .cmd 包装文件裸路径，其他平台
 // 与 claude 适配器相同（shell 字符串：正斜杠 exe + 双引号）；输出协议 Claude JSON
@@ -40,16 +46,19 @@ func codexConfigPath() string { return filepath.Join(CodexHome(), "config.toml")
 // （hookSpecificOutput.additionalContext 注入、Stop decision:block 阻断），
 // hook.go 输出层零改动。PostToolUse 只追 apply_patch（Codex 专用写盘工具，
 // 无 Write/Edit），不追 Bash——与 claude 不追 Bash 对齐。
-var codexHookEvents = []struct {
-	event   string // Codex 事件名（逐字沿用 Claude Code 命名）
-	label   string // snake 事件名（信任哈希 identity 与 hooks.state 节 key 用）
-	matcher string // 组级 matcher
-	okHook  string // ok hook 子命令
-	filters bool   // matcher 是否入信任哈希（Codex 仅过滤型事件入：PreToolUse/PostToolUse）
-}{
-	{"UserPromptSubmit", "user_prompt_submit", "*", "prompt", false},
-	{"PostToolUse", "post_tool_use", "apply_patch", "post-tool", true},
-	{"Stop", "stop", "*", "stop", false},
+var codexHookEvents = []codexHookEvent{
+	{hookEvent{"UserPromptSubmit", "*", "prompt"}, "user_prompt_submit", false},
+	{hookEvent{"PostToolUse", "apply_patch", "post-tool"}, "post_tool_use", true},
+	{hookEvent{"Stop", "*", "stop"}, "stop", false},
+}
+
+// codexEventSpecs 投影出共享引擎用的事件表（hookEvent 部分）。
+func codexEventSpecs() []hookEvent {
+	specs := make([]hookEvent, len(codexHookEvents))
+	for i, e := range codexHookEvents {
+		specs[i] = e.hookEvent
+	}
+	return specs
 }
 
 // codexCommand 生成 hook 命令串，按平台分叉：
@@ -65,59 +74,21 @@ var codexHookEvents = []struct {
 // 引号 bug 截断——上游修复前不额外处理。
 func codexCommand(exe, okHook string) string {
 	if runtime.GOOS == "windows" {
-		return codexWrapperPath(okHook)
+		return hookWrapperPath(CodexHome(), okHook)
 	}
-	return strconv.Quote(filepath.ToSlash(exe)) + " hook " + okHook + " claude"
-}
-
-// codexWrapperPath 返回 Windows 包装文件路径：<CodexHome>/ok-hook-<okHook>.cmd
-// （filepath.Join 在 Windows 出反斜杠形态——hooks.json command 裸串即它）。
-func codexWrapperPath(okHook string) string {
-	return filepath.Join(CodexHome(), "ok-hook-"+okHook+".cmd")
-}
-
-// codexWrapperContent 返回包装文件内容：单行 @"<exe>" hook <okHook> claude（CRLF
-// 结尾）。exe 路径在 .cmd 文件内部带引号无妨——#38168 外层引号 bug 只作用于
-// hooks.json 的命令行。
-func codexWrapperContent(exe, okHook string) string {
-	return "@\"" + exe + "\" hook " + okHook + " claude\r\n"
+	return quotedShellCommand(exe, okHook)
 }
 
 // ensureCodexWrappers 确保三个包装文件存在且内容为当前 exe（缺失/过期重写，
 // 已当前则不写盘）。仅 Windows 调用。
 func ensureCodexWrappers(exe string) error {
-	for _, e := range codexHookEvents {
-		path := codexWrapperPath(e.okHook)
-		want := codexWrapperContent(exe, e.okHook)
-		if data, err := os.ReadFile(path); err == nil && string(data) == want {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return fmt.Errorf("写入 codex hook 包装: %w", err)
-		}
-		if err := fsx.WriteFile(path, []byte(want), 0o644); err != nil {
-			return fmt.Errorf("写入 codex hook 包装: %w", err)
-		}
-	}
-	return nil
+	return ensureHookWrappers(CodexHome(), "写入 codex hook 包装", codexEventSpecs(), exe)
 }
 
 // removeCodexWrappers 删除三个包装文件，返回是否有删除。仅删内容确为 ok 生成的
 // （含 " hook <okHook> claude"）——防误删用户同名文件。仅 Windows 调用。
 func removeCodexWrappers() bool {
-	removed := false
-	for _, e := range codexHookEvents {
-		path := codexWrapperPath(e.okHook)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		if strings.Contains(string(data), " hook "+e.okHook+" claude") &&
-			os.Remove(path) == nil {
-			removed = true
-		}
-	}
-	return removed
+	return removeHookWrappers(CodexHome(), codexEventSpecs())
 }
 
 // isOKCodexHook 判定一条 hook 条目是否 ok 生成：type=command 且命令串形态匹配——
@@ -127,31 +98,7 @@ func removeCodexWrappers() bool {
 // 不识别则重装/自愈剥离不掉旧组，与 .cmd 新组堆积重复）；其他平台只认旧 quoted 后缀。
 // 不看 exe basename——改名/迁移/测试二进制都不影响识别。
 func isOKCodexHook(h map[string]any) bool {
-	typ, _ := h["type"].(string)
-	cmd, _ := h["command"].(string)
-	if typ != "command" || cmd == "" {
-		return false
-	}
-	cmd = strings.TrimSpace(cmd)
-	for _, e := range codexHookEvents {
-		if runtime.GOOS == "windows" {
-			for _, sep := range []string{"/", "\\"} {
-				if hasSuffixFold(cmd, sep+"ok-hook-"+e.okHook+".cmd") {
-					return true
-				}
-			}
-			// 不 continue——.cmd 判定落空后继续旧 quoted 后缀判定（迁移清理用）。
-		}
-		if strings.HasSuffix(cmd, " hook "+e.okHook+" claude") {
-			return true
-		}
-	}
-	return false
-}
-
-// hasSuffixFold 报告 s 是否以 suffix 结尾（大小写不敏感，Equalfold 语意）。
-func hasSuffixFold(s, suffix string) bool {
-	return len(s) >= len(suffix) && strings.EqualFold(s[len(s)-len(suffix):], suffix)
+	return isOKShellCommand(h, codexEventSpecs(), true)
 }
 
 // codexAgent Codex 适配器：hook 集成 = 合并写用户层 ~/.codex/hooks.json 并确保
@@ -175,165 +122,37 @@ func (codexAgent) Detect() bool {
 	return err == nil && info.IsDir()
 }
 
-// codexOKGroup 生成一个事件的 ok hook 组：type=command shell 串，
-// timeout 秒级 = 全局 HookTimeoutSec()。
-func codexOKGroup(exe, matcher, okHook string) map[string]any {
-	hook := map[string]any{
-		"type":    "command",
-		"command": codexCommand(exe, okHook),
-		"timeout": HookTimeoutSec(),
-	}
-	return map[string]any{"matcher": matcher, "hooks": []any{hook}}
-}
-
 // loadCodexHooks 读 hooks.json；文件不存在返回空对象，解析失败报错
 // （不覆盖损坏文件）。map 合并写会重排 key 顺序——未知字段内容保留，代价可接受。
 func loadCodexHooks() (map[string]any, error) {
-	data, err := os.ReadFile(codexHooksPath())
-	if os.IsNotExist(err) {
-		return map[string]any{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	cfg := map[string]any{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("codex hooks.json 解析失败: %w", err)
-	}
-	return cfg, nil
+	return loadSettingsJSON(codexHooksPath(), "codex hooks.json")
 }
 
 // codexEventsOf 取 hooks 事件表（只读视图），不做任何创建。
 func codexEventsOf(cfg map[string]any) map[string]any {
-	events, _ := cfg["hooks"].(map[string]any)
-	return events
+	return hookEventsOf(cfg)
 }
 
 // codexEventsEdit 取 hooks 事件表供写入：缺失时创建。
 func codexEventsEdit(cfg map[string]any) map[string]any {
-	events, _ := cfg["hooks"].(map[string]any)
-	if events == nil {
-		events = map[string]any{}
-		cfg["hooks"] = events
-	}
-	return events
-}
-
-// stripOKCodexHooks 移除事件表里所有 ok 自有 hook（组内 hooks 被删空时整组移除，
-// 事件数组空了删事件键），返回是否有改动。第三方条目原样保留。
-func stripOKCodexHooks(events map[string]any) bool {
-	changed := false
-	for name, v := range events {
-		groups, _ := v.([]any)
-		if groups == nil {
-			continue
-		}
-		kept := groups[:0]
-		for _, g := range groups {
-			gm, _ := g.(map[string]any)
-			hooks, _ := gm["hooks"].([]any)
-			if gm == nil || hooks == nil {
-				kept = append(kept, g)
-				continue
-			}
-			var keptHooks []any
-			for _, h := range hooks {
-				if hm, _ := h.(map[string]any); hm != nil && isOKCodexHook(hm) {
-					changed = true
-					continue
-				}
-				keptHooks = append(keptHooks, h)
-			}
-			if len(keptHooks) == 0 {
-				changed = true // 整组都是 ok 的，连组移除
-				continue
-			}
-			gm["hooks"] = keptHooks
-			kept = append(kept, g)
-		}
-		if len(kept) == 0 {
-			delete(events, name)
-		} else {
-			events[name] = kept
-		}
-	}
-	return changed
+	return hookEventsEdit(cfg)
 }
 
 // hasOKCodexHook 报告事件表里是否存在任何 ok 自有 hook。
 func hasOKCodexHook(events map[string]any) bool {
-	for _, v := range events {
-		groups, _ := v.([]any)
-		for _, g := range groups {
-			gm, _ := g.(map[string]any)
-			hooks, _ := gm["hooks"].([]any)
-			for _, h := range hooks {
-				if hm, _ := h.(map[string]any); hm != nil && isOKCodexHook(hm) {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return containsOKHook(events, isOKCodexHook)
 }
 
 // codexHooksCurrent 报告三事件的 ok hook 是否均为当前期望形态
 // （command=当前命令、matcher 与 timeout 正确）；Windows 另要求包装文件内容为
 // 当前 exe（exe 迁移后包装过期 = 集成失效，需自愈重写）。
 func codexHooksCurrent(events map[string]any, exe string) bool {
-	wantTimeout := float64(HookTimeoutSec())
-	for _, e := range codexHookEvents {
-		if runtime.GOOS == "windows" {
-			data, err := os.ReadFile(codexWrapperPath(e.okHook))
-			if err != nil || string(data) != codexWrapperContent(exe, e.okHook) {
-				return false
-			}
-		}
-		groups, _ := events[e.event].([]any)
-		found := false
-		for _, g := range groups {
-			gm, _ := g.(map[string]any)
-			if gm == nil {
-				continue
-			}
-			matcher, _ := gm["matcher"].(string)
-			if matcher != e.matcher {
-				continue
-			}
-			hooks, _ := gm["hooks"].([]any)
-			for _, h := range hooks {
-				hm, _ := h.(map[string]any)
-				if hm == nil || !isOKCodexHook(hm) {
-					continue
-				}
-				cmd, _ := hm["command"].(string)
-				timeout, _ := hm["timeout"].(float64)
-				if cmd == codexCommand(exe, e.okHook) && timeout == wantTimeout {
-					found = true
-				}
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
+	return shellHooksCurrent(events, codexEventSpecs(), exe, isOKCodexHook, codexCommand, CodexHome())
 }
 
 // writeCodexHooks 备份后写回 hooks.json（MarshalIndent，未知字段保留）。
 func writeCodexHooks(cfg map[string]any) error {
-	path := codexHooksPath()
-	if data, err := os.ReadFile(path); err == nil {
-		_ = os.WriteFile(path+".bak-openknowledge", data, 0o644)
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return fsx.WriteFile(path, append(data, '\n'), 0o644)
+	return writeSettingsJSON(codexHooksPath(), cfg)
 }
 
 // isSectionHeader 判定 trim 后的行是否指定段头：以 header 开头，且其后剩余为空
@@ -474,9 +293,12 @@ func ensureCodexHooksConfig(entries [][2]string) error {
 		return fmt.Errorf("写入 codex hooks 配置: %w", err)
 	}
 	text := string(data)
+	// 先清陈旧索引的 ok 信任节（第三方组挤动 ok 组索引的历史残留，L-03——残留节会
+	// 让 Codex 把该索引上的组误判 Modified、静默跳过全部 hooks），再做常规 upsert。
+	text, c0 := codexTrustRemoveEdits(text, codexStaleTrustKeys(text, entries))
 	text, c1 := codexEnableHooksFlag(text)
 	text, c2 := codexTrustEdits(text, entries)
-	if !c1 && !c2 {
+	if !c0 && !c1 && !c2 {
 		return nil
 	}
 	return writeCodexConfig(data, text, "写入 codex hooks 配置")
@@ -564,8 +386,8 @@ func codexTrustKeys(events map[string]any) []string {
 }
 
 // codexTrustEntries 按 hooks.json 当前内容计算 ok 三条信任记录：节 key → trusted_hash。
-// command/timeout 以 codexOKGroup 实际写入值为准（codexCommand(exe, okHook) 与
-// HookTimeoutSec()）；某事件无 ok 组（未安装）时该事件跳过。
+// command/timeout 以安装实际写入值为准（codexCommand(exe, okHook) 与
+// HookTimeoutSec()，同 shellOKGroup）；某事件无 ok 组（未安装）时该事件跳过。
 func codexTrustEntries(events map[string]any, exe string) [][2]string {
 	var entries [][2]string
 	for _, e := range codexHookEvents {
@@ -695,6 +517,57 @@ func codexTrustConsistent(text string, entries [][2]string) bool {
 	return true
 }
 
+// codexStaleTrustKeys 扫描 text 中本机 hooks.json 的全部 hooks.state 节，返回陈旧节
+// key：trusted_hash 与 ok 当前信任哈希一致（哈希输入不含组索引——同一 ok 组在任何
+// 索引下哈希相同，据此识别 ok 写过的节），但 key 不在 entries 的当前 key 集合中。
+// 场景（L-03）：第三方组插到 ok 组之前，ok 组索引顺移后旧索引的节残留——Codex 按
+// 组索引查信任，残留节会让该索引上的第三方组误判 Modified、静默跳过全部 hooks。
+// hash 不一致的节（第三方自己的信任记录）不碰。
+func codexStaleTrustKeys(text string, entries [][2]string) []string {
+	if len(entries) == 0 {
+		return nil
+	}
+	current := make(map[string]bool, len(entries))
+	hashes := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		current[e[0]] = true
+		hashes[e[1]] = true
+	}
+	prefix := "[hooks.state.'" + codexHooksPath() + ":"
+	var stale []string
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, prefix) {
+			continue
+		}
+		key := strings.TrimPrefix(trimmed, "[hooks.state.'")
+		if j := strings.Index(key, "']"); j >= 0 { // 容忍节头尾注释
+			key = key[:j]
+		}
+		if current[key] {
+			continue
+		}
+		// 节内（到下一节头）取 trusted_hash 行比对。
+		for j := i + 1; j < len(lines); j++ {
+			t := strings.TrimSpace(lines[j])
+			if strings.HasPrefix(t, "[") {
+				break
+			}
+			if strings.HasPrefix(t, "#") {
+				continue
+			}
+			if val, ok := tomlKeyValue(t, "trusted_hash"); ok {
+				if hashes[strings.Trim(val, `"`)] {
+					stale = append(stale, key)
+				}
+				break
+			}
+		}
+	}
+	return stale
+}
+
 // codexTrustRemoveEdits 整节移除 keys 对应的 hooks.state 节（节头到下一节头/文末），
 // 第三方节与其余内容逐字节保留。无匹配节返回 (原文, false)。
 func codexTrustRemoveEdits(text string, keys []string) (string, bool) {
@@ -744,60 +617,86 @@ func removeCodexTrust(keys []string) error {
 }
 
 func (codexAgent) InstallHooks(exe string) error {
-	cfg, err := loadCodexHooks()
-	if err != nil {
-		return err
-	}
 	if runtime.GOOS == "windows" {
 		// 先写 3 个包装文件（当前 exe）——hooks.json command 指向它们。
 		if err := ensureCodexWrappers(exe); err != nil {
 			return err
 		}
 	}
-	events := codexEventsEdit(cfg)
-	stripOKCodexHooks(events)
-	for _, e := range codexHookEvents {
-		groups, _ := events[e.event].([]any)
-		events[e.event] = append(groups, codexOKGroup(exe, e.matcher, e.okHook))
-	}
-	if err := writeCodexHooks(cfg); err != nil {
-		return err
-	}
-	// 同步落 config.toml 两项集成保障（单次读写）：codex_hooks 特性开关（0.118 起
-	// 默认关闭，不开则装好也静默不派发）+ hooks.state 信任记录（hooks.json 内容
-	// 变化 → 信任哈希过期 → Codex 静默跳过全部 hooks）。
-	return ensureCodexHooksConfig(codexTrustEntries(events, exe))
+	// 读-改-写全程包在 fsx.WithFileLock 内（含 config.toml 同步——它只从这里
+	// 与 EnsureHooks 写入，同一把锁内完成）：selfHealHooks 每个 prompt 都跑，
+	// 与 GUI /api/setup/hooks 并发时裸跑会互相覆盖、丢第三方 hooks。
+	return fsx.WithFileLock(codexHooksPath(), func() error {
+		cfg, err := loadCodexHooks()
+		if err != nil {
+			return err
+		}
+		events := codexEventsEdit(cfg)
+		stripOKHooks(events, isOKCodexHook)
+		appendShellOKGroups(events, codexEventSpecs(), exe, codexCommand)
+		if err := writeCodexHooks(cfg); err != nil {
+			return err
+		}
+		// 同步落 config.toml 两项集成保障（单次读写）：codex_hooks 特性开关（0.118 起
+		// 默认关闭，不开则装好也静默不派发）+ hooks.state 信任记录（hooks.json 内容
+		// 变化 → 信任哈希过期 → Codex 静默跳过全部 hooks）。
+		return ensureCodexHooksConfig(codexTrustEntries(events, exe))
+	})
 }
 
 // RemoveHooks 移除 hooks.json 里的 ok 条目并连带清理 config.toml 里 ok 的
 // hooks.state 信任节（第三方节保留）；Windows 另删 3 个包装文件（仅删内容确为
 // ok 生成的，防误删用户同名文件）；config.toml 的 codex_hooks 特性开关单独
 // 存在无副作用（只是允许 Codex 派发 hooks），不随移除关闭。
+// 包装文件删除必须在 hooks.json 清理成功之后：先删包装再 load 失败/写回失败会留下
+// 指向已删 .cmd 的死命令（L-01）。
 func (codexAgent) RemoveHooks() (bool, error) {
-	wrappersRemoved := false
-	if runtime.GOOS == "windows" {
-		wrappersRemoved = removeCodexWrappers()
-	}
 	if _, err := os.Stat(codexHooksPath()); os.IsNotExist(err) {
-		return wrappersRemoved, nil
+		// hooks.json 不存在：无指向包装文件的命令，删包装无死命令风险。
+		if runtime.GOOS == "windows" {
+			return removeCodexWrappers(), nil
+		}
+		return false, nil
 	}
-	cfg, err := loadCodexHooks()
+	removed := false
+	wrappersRemoved := false
+	// 读-改-写包在 fsx.WithFileLock 内（同 InstallHooks）。
+	err := fsx.WithFileLock(codexHooksPath(), func() error {
+		cfg, err := loadCodexHooks()
+		if err != nil {
+			// 解析失败即停，包装文件保留——hooks.json 里指向它们的命令还在（L-01）。
+			return err
+		}
+		events := codexEventsOf(cfg)
+		if events != nil && hasOKCodexHook(events) {
+			trustKeys := codexTrustKeys(events) // 剥离前取 ok 组实际索引
+			// 连带清陈旧索引的残留信任节（第三方组挤动 ok 组索引的历史残留，L-03）；
+			// exe 解析失败时退化为只清当前索引（旧行为）。
+			if exe, exeErr := currentCLIExe(); exeErr == nil {
+				if data, readErr := os.ReadFile(codexConfigPath()); readErr == nil {
+					trustKeys = append(trustKeys, codexStaleTrustKeys(string(data), codexTrustEntries(events, exe))...)
+				}
+			}
+			stripOKHooks(events, isOKCodexHook)
+			if err := writeCodexHooks(cfg); err != nil {
+				return fmt.Errorf("移除 codex hooks: %w", err)
+			}
+			if err := removeCodexTrust(trustKeys); err != nil {
+				return err
+			}
+			removed = true
+		}
+		// ok 条目已从 hooks.json 清除（或本就没有）后再删包装——反序会在上方任一
+		// 失败路径留下指向已删文件的死命令（L-01）。
+		if runtime.GOOS == "windows" {
+			wrappersRemoved = removeCodexWrappers()
+		}
+		return nil
+	})
 	if err != nil {
 		return false, err
 	}
-	events := codexEventsOf(cfg)
-	if events == nil || !hasOKCodexHook(events) {
-		return wrappersRemoved, nil
-	}
-	trustKeys := codexTrustKeys(events) // 剥离前取 ok 组实际索引
-	stripOKCodexHooks(events)
-	if err := writeCodexHooks(cfg); err != nil {
-		return false, fmt.Errorf("移除 codex hooks: %w", err)
-	}
-	if err := removeCodexTrust(trustKeys); err != nil {
-		return false, err
-	}
-	return true, nil
+	return removed || wrappersRemoved, nil
 }
 
 // EnsureHooks 自愈：hooks.json 存在、曾安装过 ok hooks 且内容过期（exe 迁移、
@@ -810,34 +709,34 @@ func (codexAgent) EnsureHooks(exe string) error {
 	if _, err := os.Stat(codexHooksPath()); err != nil {
 		return nil
 	}
-	cfg, err := loadCodexHooks()
-	if err != nil {
-		return err
-	}
-	events := codexEventsOf(cfg)
-	if events == nil || !hasOKCodexHook(events) {
-		return nil // 从未安装（无任何 ok 条目）不复活——含用户显式移除
-	}
-	if runtime.GOOS == "windows" {
-		if err := ensureCodexWrappers(exe); err != nil {
+	// 读-改-写包在 fsx.WithFileLock 内（同 InstallHooks）。
+	return fsx.WithFileLock(codexHooksPath(), func() error {
+		cfg, err := loadCodexHooks()
+		if err != nil {
 			return err
 		}
-	}
-	if !codexHooksCurrent(events, exe) {
-		events = codexEventsEdit(cfg)
-		stripOKCodexHooks(events)
-		for _, e := range codexHookEvents {
-			groups, _ := events[e.event].([]any)
-			events[e.event] = append(groups, codexOKGroup(exe, e.matcher, e.okHook))
+		events := codexEventsOf(cfg)
+		if events == nil || !hasOKCodexHook(events) {
+			return nil // 从未安装（无任何 ok 条目）不复活——含用户显式移除
 		}
-		if err := writeCodexHooks(cfg); err != nil {
-			return err
+		if runtime.GOOS == "windows" {
+			if err := ensureCodexWrappers(exe); err != nil {
+				return err
+			}
 		}
-	}
-	// codex_hooks 特性开关被关/缺失、hooks.state 信任记录过期/缺失均视为过期形态
-	// （曾安装过才走到这）：无论 hooks.json 本轮是否重写，都按当前内容重算补写
-	// （hooks.json 内容任何变化 → 信任哈希过期 → Codex 静默跳过全部 hooks）。
-	return ensureCodexHooksConfig(codexTrustEntries(events, exe))
+		if !codexHooksCurrent(events, exe) {
+			events = codexEventsEdit(cfg)
+			stripOKHooks(events, isOKCodexHook)
+			appendShellOKGroups(events, codexEventSpecs(), exe, codexCommand)
+			if err := writeCodexHooks(cfg); err != nil {
+				return err
+			}
+		}
+		// codex_hooks 特性开关被关/缺失、hooks.state 信任记录过期/缺失均视为过期形态
+		// （曾安装过才走到这）：无论 hooks.json 本轮是否重写，都按当前内容重算补写
+		// （hooks.json 内容任何变化 → 信任哈希过期 → Codex 静默跳过全部 hooks）。
+		return ensureCodexHooksConfig(codexTrustEntries(events, exe))
+	})
 }
 
 func (codexAgent) HooksInstalled() bool {

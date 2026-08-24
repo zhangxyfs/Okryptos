@@ -1035,3 +1035,27 @@ func TestPromptIndexFoldedLine(t *testing.T) {
 		t.Fatalf("被折叠条目标题不应出现在注入里: %q", got)
 	}
 }
+
+// TestHandleStopCompactLogErrors L-02：HandleStop/HandleCompact 的解析与项目解析
+// 失败须记 ok.log（与 HandlePrompt/HandlePostTool 一致），且 fail-open 返回 0。
+func TestHandleStopCompactLogErrors(t *testing.T) {
+	setupProject(t)
+	if code := HandleStop(strings.NewReader(`不是JSON`), &bytes.Buffer{}, &bytes.Buffer{}, ""); code != 0 {
+		t.Fatalf("坏 payload 应 fail-open 返回 0，got %d", code)
+	}
+	// 未注册的 cwd → project.FromCwd 失败（%q 输出与 JSON 字符串转义兼容）
+	ev := fmt.Sprintf(`{"hook_event_name":"PreCompact","session_id":"s","cwd":%q}`, filepath.Join(registry.Home(), "no-such-proj"))
+	if code := HandleCompact(strings.NewReader(ev)); code != 0 {
+		t.Fatalf("项目解析失败应返回 0，got %d", code)
+	}
+	data, err := os.ReadFile(filepath.Join(registry.Home(), "ok.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "stop parse") {
+		t.Errorf("HandleStop 解析失败应记 ok.log，got: %q", string(data))
+	}
+	if !strings.Contains(string(data), "compact project") {
+		t.Errorf("HandleCompact 项目解析失败应记 ok.log，got: %q", string(data))
+	}
+}

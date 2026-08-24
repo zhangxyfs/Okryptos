@@ -14,6 +14,7 @@ func TestHasWikiMatch(t *testing.T) {
 	writeEntryFile(t, kdir, "arch.md", "---\ntitle: 架构总览\ntype: reference\ntags: [wiki, 架构]\nsummary: 架构\ndraft: false\nmandatory: false\n---\n守护进程与托盘架构。\n")
 	writeEntryFile(t, kdir, "git.md", "---\ntitle: Git 规范\ntype: note\ntags: [git]\nsummary: 规范\ndraft: false\nmandatory: false\n---\n使用 Conventional Commits。\n")
 	writeEntryFile(t, kdir, "draft-wiki.md", "---\ntitle: 草稿维基\ntype: reference\ntags: [wiki]\nsummary: 草稿\ndraft: true\nmandatory: false\n---\n甲子园草稿内容。\n")
+	writeEntryFile(t, kdir, "pseudo.md", "---\ntitle: 伪维基\ntype: note\ntags: [sewiki, nowiki]\nsummary: 伪\ndraft: false\nmandatory: false\n---\n幻影岛伪标签内容。\n")
 	db, err := Open(filepath.Join(root, "kb.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +35,10 @@ func TestHasWikiMatch(t *testing.T) {
 	// draft 的 wiki 条目不计入
 	if ok, err := db.HasWikiMatch(retrieve.Terms("甲子园")); err != nil || ok {
 		t.Fatalf("甲子园 draft wiki should not count: ok=%v err=%v", ok, err)
+	}
+	// sewiki/nowiki 子串不等于 wiki 标签（Go 侧 hasWikiTag 精确判定）
+	if ok, err := db.HasWikiMatch(retrieve.Terms("幻影岛")); err != nil || ok {
+		t.Fatalf("幻影岛 sewiki/nowiki should not count as wiki: ok=%v err=%v", ok, err)
 	}
 	// 空 terms → true（不提示）
 	if ok, err := db.HasWikiMatch(nil); err != nil || !ok {

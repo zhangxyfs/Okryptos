@@ -38,7 +38,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		return ""
 	}
 	defer db.Close()
-	if err := db.Sync(pc.Store.KnowledgeDir(), client, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err != nil {
+	if err := db.Sync(pc.Store.KnowledgeDir(), client, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines, FeedbackWindowDays: pc.Config.Retrieve.Feedback.WindowDays}); err != nil {
 		var corrupt *index.CorruptEntriesError
 		switch {
 		case errors.As(err, &corrupt):
@@ -50,7 +50,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		default:
 			// embedding 失败：降级重试（仅同步 INDEX），保证基础注入与关键词检索不被阻断
 			logErr("prompt sync index with embedding: %v", err)
-			if err2 := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err2 != nil {
+			if err2 := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines, FeedbackWindowDays: pc.Config.Retrieve.Feedback.WindowDays}); err2 != nil {
 				logErr("prompt sync index: %v", err2)
 				if !errors.As(err2, &corrupt) {
 					return ""
@@ -393,7 +393,8 @@ func TrackTouched(pc *project.Context, sessionID, toolName, filePath string) {
 	}
 }
 
-// CheckStop 评估 auto 自省提醒与 enforce 规则并维护回合计数。
+// CheckStop 评估 auto 自省提醒与 enforce 规则并维护回合计数（每次调用计一个
+// 回合，Stop hook 语义）。等价于 CheckStopTurn(pc, sessionID, true)。
 // 返回 (reason, blockedRule)：均空 = 放行；reason 非空 + blockedRule 空 = auto 自省
 // 提醒（软）；两者皆非空 = enforce 规则命中（硬，blockedRule 为规则 Type）。
 // MarkBlocked 所有权在调用方：本函数只评估不落防重标记——硬阻断生效前由调用方
@@ -402,6 +403,14 @@ func TrackTouched(pc *project.Context, sessionID, toolName, filePath string) {
 // 评估与回合计数在跨进程锁内一次完成：Stop hook 可能与下一轮 prompt 的 post-tool
 // 并发，无锁读-改-写会互相覆盖。
 func CheckStop(pc *project.Context, sessionID string) (reason string, blockedRule string) {
+	return CheckStopTurn(pc, sessionID, true)
+}
+
+// CheckStopTurn 同 CheckStop；countTurn=false 时只评估不推进回合计数——Reasonix 的
+// input.receive 会把宿主合成回合（goal 自动续跑等，非真实用户回合）一并下发，
+// 这些回合不应推进 auto 自省"每 turn_interval 回合"的时钟（L-21），但 enforce
+// 规则评估保持每次输入都执行（硬阻断保障不缩水）。
+func CheckStopTurn(pc *project.Context, sessionID string, countTurn bool) (reason string, blockedRule string) {
 	if registry.HooksDisabled() {
 		return "", ""
 	}
@@ -414,7 +423,9 @@ func CheckStop(pc *project.Context, sessionID string) (reason string, blockedRul
 		interval = 1
 	}
 	if err := state.Update(pc.Store.StateDir(), sessionID, func(st *state.Session) {
-		st.StopCount++
+		if countTurn {
+			st.StopCount++
+		}
 		// auto 自省模式：有文件修改且距上次提醒满 turn_interval 回合 → 软阻断一次。
 		// 周期性提醒，不进 BlockedRules；先于 enforce 评估触发。
 		if pc.Config.Capture.Mode == "auto" && len(st.Touched) > 0 &&
@@ -428,7 +439,13 @@ func CheckStop(pc *project.Context, sessionID string) (reason string, blockedRul
 			if rule.Type != "changelog_required" {
 				continue
 			}
-			if block, why := enforce.EvalChangelog(rule, st); block {
+			block, why, err := enforce.EvalChangelog(rule, st)
+			if err != nil {
+				// malformed glob：规则失效必须可见（L-20），记日志后跳过该规则
+				logErr("enforce %s: %v", rule.Type, err)
+				continue
+			}
+			if block {
 				reason, blockedRule = why, rule.Type
 				return
 			}

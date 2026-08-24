@@ -19,7 +19,8 @@ func TestPiAgentInstallDetectRemove(t *testing.T) {
 	if a.HooksInstalled() {
 		t.Fatal("HooksInstalled should be false before install")
 	}
-	if err := a.InstallHooks(`D:\x\ok.exe`); err != nil {
+	exe := currentExe(t)
+	if err := a.InstallHooks(exe); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(PiHome(), "extensions", "openknowledge.ts")
@@ -28,7 +29,7 @@ func TestPiAgentInstallDetectRemove(t *testing.T) {
 		t.Fatalf("extension not written: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "// fingerprint: ") || !strings.Contains(content, filepath.ToSlash(`D:\x\ok.exe`)) {
+	if !strings.Contains(content, "// fingerprint: ") || !strings.Contains(content, filepath.ToSlash(exe)) {
 		t.Fatalf("bad extension content: %.200s", content)
 	}
 	if strings.Contains(content, "{{EXE}}") {
@@ -36,6 +37,13 @@ func TestPiAgentInstallDetectRemove(t *testing.T) {
 	}
 	if !a.HooksInstalled() {
 		t.Fatal("HooksInstalled should be true after install")
+	}
+	// exe 迁移/改名后扩展烘焙的是旧路径：应判为未安装/过期
+	if err := a.InstallHooks(`D:\old\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	if a.HooksInstalled() {
+		t.Fatal("HooksInstalled should be false when extension bakes a stale exe path")
 	}
 	removed, err := a.RemoveHooks()
 	if err != nil || !removed {

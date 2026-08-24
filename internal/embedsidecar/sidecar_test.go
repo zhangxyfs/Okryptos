@@ -12,9 +12,13 @@ import (
 )
 
 // TestMain 模式：helper 进程伪装 llama-server（/health + 常驻）。
+// OK_HELPER_HANG=1 时永不就绪（模拟冷启动中的 llama-server）。
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("OK_HELPER") != "1" {
 		return
+	}
+	if os.Getenv("OK_HELPER_HANG") == "1" {
+		select {} // 阻塞至被 Kill
 	}
 	port := os.Getenv("OK_HELPER_PORT")
 	mux := http.NewServeMux()
@@ -178,6 +182,53 @@ func TestWantFlagRoundTrip(t *testing.T) {
 	}
 }
 
+// TestStopNotBlockedByEnsure：Ensure 的就绪等待不持 mu（M-11）——daemon 退出
+// 的 Stop 须立即拿锁杀进程，而不是被最长 HealthTimeout 的冷启动等待卡住。
+func TestStopNotBlockedByEnsure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	old := ServerCommand
+	spawned := make(chan struct{}, 1)
+	ServerCommand = func(path string, args ...string) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess")
+		cmd.Env = append(os.Environ(), "OK_HELPER=1", "OK_HELPER_HANG=1")
+		spawned <- struct{}{}
+		return cmd
+	}
+	t.Cleanup(func() { ServerCommand = old })
+	model := embed.BuiltinModel{ID: "fake", File: "fake.gguf", Size: 4, Pooling: "cls", Dim: 2}
+	modelsDir := filepath.Join(home, "models")
+	os.MkdirAll(modelsDir, 0o755)
+	os.WriteFile(model.InstalledPath(modelsDir), []byte("fake"), 0o644)
+	rtDir := filepath.Join(home, "runtime")
+	os.MkdirAll(rtDir, 0o755)
+	os.WriteFile(filepath.Join(rtDir, serverExeName), []byte("x"), 0o755)
+	mgr := &Manager{RuntimeDir: rtDir, ModelsDir: modelsDir, HealthTimeout: 30 * time.Second, IdleTimeout: time.Hour}
+
+	ensureDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.Ensure(model) // 进程永不就绪，须靠 Stop 杀掉后返回
+		ensureDone <- err
+	}()
+	<-spawned
+
+	stopDone := make(chan struct{})
+	go func() { mgr.Stop(); close(stopDone) }()
+	select {
+	case <-stopDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop 被 Ensure 的就绪等待持锁阻塞（M-11 回归）")
+	}
+	select {
+	case err := <-ensureDone:
+		if err == nil {
+			t.Fatal("进程被 Stop 杀掉后 Ensure 应返回错误")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Ensure 未随 Stop 杀进程而返回")
+	}
+}
+
 // 跨进程停杀：状态文件的 PID 对应进程已死（端口无应答）时只清状态文件、不盲杀
 //（v2.18.2 回归：PID 复用场景下曾会误杀无关进程）。
 func TestStopSkipsKillWhenUnhealthy(t *testing.T) {
@@ -190,5 +241,35 @@ func TestStopSkipsKillWhenUnhealthy(t *testing.T) {
 	m.Stop() // 不 panic、不挂起即过
 	if LoadState() != nil {
 		t.Fatal("状态文件应已清除")
+	}
+}
+
+// TestStopResetsUnhealthyStreak：M-10 回归——判死 Stop 后计数若停在阈值上，
+// 新 sidecar 首次探测瞬时失败即凑满"连续两轮"被杀。Stop 与 Ensure 冷启动
+// 路径都必须归零。
+func TestStopResetsUnhealthyStreak(t *testing.T) {
+	mgr, model := setupEnv(t)
+	RequestStart()
+	mgr.Reconcile(&model, time.Now())
+	if LoadState() == nil {
+		t.Fatal("前置：sidecar 应在线")
+	}
+	// Stop 路径：模拟判死时刻的计数，Stop 后须归零
+	mgr.unhealthyStreak = 2
+	mgr.Stop()
+	if mgr.unhealthyStreak != 0 {
+		t.Fatalf("Stop 应重置 unhealthyStreak，got %d", mgr.unhealthyStreak)
+	}
+	// Ensure 冷启动路径：state 已删，Ensure 走 stopLocked+spawnLocked
+	mgr.unhealthyStreak = 2
+	st, err := mgr.Ensure(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Healthy() {
+		t.Fatal("Ensure 后 sidecar 应健康")
+	}
+	if mgr.unhealthyStreak != 0 {
+		t.Fatalf("Ensure 冷启动应重置 unhealthyStreak，got %d", mgr.unhealthyStreak)
 	}
 }

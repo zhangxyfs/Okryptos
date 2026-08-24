@@ -239,6 +239,35 @@ func TestImportSkipsCorrupt(t *testing.T) {
 	}
 }
 
+// L-23：非法条目文件名（Windows 保留名 con.md 等）跳过计 Skipped，不得中途
+// 挂起导入——此前该文件名能通过 zip 路径校验，在落盘 rename 阶段失败中断导入。
+func TestImportSkipsInvalidEntryFileName(t *testing.T) {
+	setupHome(t)
+	good := []byte("---\ntitle: 好\ntype: note\ntags: []\nsummary: s\ndraft: false\nmandatory: false\n---\n正文\n")
+	// .md 后缀下会撞 Windows 保留设备名（con/nul/prn/com1 等，带扩展名同样保留）
+	for _, bad := range []string{"con.md", "nul.md", "prn.md", "com1.md"} {
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		w, _ := zw.Create("registry.toml")
+		w.Write([]byte("[[project]]\nname = \"alpha\"\npaths = [\"D:/src/alpha\"]\n"))
+		w2, _ := zw.Create("projects/alpha/knowledge/" + bad)
+		w2.Write(good)
+		w3, _ := zw.Create("projects/alpha/knowledge/good.md")
+		w3.Write(good)
+		zw.Close()
+		rep, err := Import(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+		if err != nil {
+			t.Fatalf("%s: 非法条目文件名不应中断导入: %v", bad, err)
+		}
+		if rep.Imported != 1 || rep.Skipped != 1 {
+			t.Fatalf("%s: report: %+v", bad, rep)
+		}
+		if _, err := os.Stat(filepath.Join(registry.Home(), "projects", "alpha", "knowledge", bad)); !os.IsNotExist(err) {
+			t.Fatalf("%s 不应落盘: %v", bad, err)
+		}
+	}
+}
+
 // zip-slip 与非法文件整包拒绝
 func TestImportRejectsBadNames(t *testing.T) {
 	setupHome(t)

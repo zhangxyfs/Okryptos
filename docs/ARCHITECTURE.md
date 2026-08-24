@@ -663,7 +663,7 @@ go build ./...         # 编译检查
 | `ok capture [propose\|auto]` | 查看/切换沉淀模式 | 无参打印当前模式与 turn_interval；带参写项目 `[capture]` 小节（幂等替换） |
 | `ok wiki status` / `ok wiki mark [commit]` / `ok wiki base [分支名]` | wiki 游标管理 | `status` 输出 JSON（has_wiki/behind/stale/threshold + branch/base_branch/branch_state：ok/inherited/no_cursor/diverged/gone/legacy_orphan，inherited = 读时继承可达游标；git 不可用 behind=-1）；`mark` 记游标（缺省 HEAD，按当前分支记录）并统计 wiki 条目数；`base` 查看/设置基准分支 |
 | `ok search <词>` | 检索预览 | 命令行输出打分排序（调试用） |
-| `ok index` | 同步索引库 | 增量同步 kb.db 并重建 INDEX.md、打印条目数（无 key 时向量跳过，退出码 1） |
+| `ok index` | 同步索引库 | 增量同步 kb.db 并重建 INDEX.md、打印条目数（无 key 时向量跳过，退出码 0） |
 | `ok list` | 列出项目与条目 | `*` 标记 mandatory |
 | `ok doctor` | 体检 | 注册表/配置/embedding 连通性/hooks 安装状态/开关状态 |
 | `ok on` / `ok off` | 全局开关 | 删除/创建 hooks-disabled 标志文件 |

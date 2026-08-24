@@ -399,3 +399,119 @@ func TestOnToolAfterConcurrent(t *testing.T) {
 		t.Fatalf("并发 8 次 onToolAfter 应记录 8 条 touched，got %d: %+v", len(st.Touched), st.Touched)
 	}
 }
+
+// TestIsSyntheticTurn L-21：宿主合成回合指令文本（可带 <active-goal> 等前缀块）
+// 识别为合成回合；普通用户输入不误判（大小写敏感，近形文本不算）。
+func TestIsSyntheticTurn(t *testing.T) {
+	cases := []struct {
+		text string
+		want bool
+	}{
+		{"<active-goal>\nfoo\n</active-goal>\n\nContinue pursuing the active goal under its task contract. Do the next useful work.", true},
+		{"Goal signaled complete but issues remain:\n  - x (open)", true},
+		{"The agent signaled goal completion and all tasks are marked done.", true},
+		{"No tool calls in recent turns.", true},
+		{"继续", false},
+		{"please Continue pursuing your hobbies", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isSyntheticTurn(tc.text); got != tc.want {
+			t.Errorf("isSyntheticTurn(%q) = %v, want %v", tc.text, got, tc.want)
+		}
+	}
+}
+
+// TestOnInputSyntheticTurnNotCounted L-21：goal 自动续跑的合成回合照常评估但
+// 不推进 StopCount（auto 自省"回合"口径不被输入次数稀释）；真实用户回合计数。
+func TestOnInputSyntheticTurnNotCounted(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeProjectConfig(t, kbRoot, "[capture]\nmode = \"auto\"\nturn_interval = 1\n")
+	h := &handler{sessionID: "s-syn", cwd: projDir}
+	touchFile(t, projDir, "s-syn", filepath.Join(projDir, "main.go"))
+	// 合成回合：不推进计数、不触发提醒（0-0 < interval）。首轮基础注入
+	// （空 INDEX 头）允许 Replace，判据是不含自省提醒。
+	res, err := h.onInput(context.Background(), "input.receive",
+		[]byte(`{"text":"Continue pursuing the active goal under its task contract. Do the next useful work."}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Decision == extension.DecisionBlock {
+		t.Fatalf("合成回合不应触发阻断，reason=%q", res.Reason)
+	}
+	if res.Decision == extension.DecisionReplace {
+		var rep0 struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(res.Replacement, &rep0); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(rep0.Text, "ok propose") {
+			t.Fatalf("合成回合不应触发自省提醒，got: %q", rep0.Text)
+		}
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Load(pc.Store.StateDir(), "s-syn").StopCount; got != 0 {
+		t.Fatalf("合成回合不应推进 StopCount，got %d", got)
+	}
+	// 真实用户回合：计数推进，间隔到期 → mixed 档软提醒合并进注入
+	res2, err := h.onInput(context.Background(), "input.receive", []byte(`{"text":"继续"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res2.Decision != extension.DecisionReplace {
+		t.Fatalf("真实回合间隔到期应 Replace 携带自省提醒，got %v", res2.Decision)
+	}
+	var rep struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(res2.Replacement, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rep.Text, "ok propose") {
+		t.Errorf("真实回合应含自省提醒，got: %q", rep.Text)
+	}
+	if got := state.Load(pc.Store.StateDir(), "s-syn").StopCount; got != 1 {
+		t.Fatalf("真实回合应推进 StopCount 到 1，got %d", got)
+	}
+}
+
+// TestMaybeSelfHealThrottles M-12：进程内节流——首次执行刷新 lastHeal，
+// 间隔未满的后续调用跳过。
+func TestMaybeSelfHealThrottles(t *testing.T) {
+	h := &handler{}
+	h.maybeSelfHeal()
+	h.healMu.Lock()
+	mark := h.lastHeal
+	h.healMu.Unlock()
+	if mark.IsZero() {
+		t.Fatal("首次 maybeSelfHeal 应执行并刷新 lastHeal")
+	}
+	h.maybeSelfHeal()
+	h.healMu.Lock()
+	defer h.healMu.Unlock()
+	if !h.lastHeal.Equal(mark) {
+		t.Fatal("间隔未满的 maybeSelfHeal 应跳过（lastHeal 不应变化）")
+	}
+}
+
+// TestOnInputBadPayloadLogs L-18：input.receive 载荷解析失败记 ok.log
+// （宿主载荷漂移可诊断），且 fail-open Continue。
+func TestOnInputBadPayloadLogs(t *testing.T) {
+	setupProject(t)
+	h := &handler{sessionID: "s-bad", cwd: "."}
+	res, err := h.onInput(context.Background(), "input.receive", []byte(`不是JSON`))
+	if err != nil || res == nil || res.Decision != extension.DecisionContinue {
+		t.Fatalf("坏 payload 应 Continue，got res=%v err=%v", res, err)
+	}
+	data, err := os.ReadFile(filepath.Join(registry.Home(), "ok.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "rxext input.receive") {
+		t.Errorf("坏 payload 应记 ok.log，got: %q", string(data))
+	}
+}

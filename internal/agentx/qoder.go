@@ -1,13 +1,10 @@
 package agentx
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
-	"strings"
 
 	"openknowledge/internal/fsx"
 )
@@ -38,11 +35,7 @@ func qoderSettingsPath() string { return filepath.Join(QoderHome(), "settings.js
 // stdout JSON（decision/reason/hookSpecificOutput.additionalContext）——输出协议
 // Claude JSON（args 末尾 "claude"），hook.go 输出层零改动。PostToolUse 追
 // Write|Edit（Qoder 与 Claude 同款写盘工具），不追 Bash——与 claude 对齐。
-var qoderHookEvents = []struct {
-	event   string // Qoder 事件名（逐字沿用 Claude Code 命名）
-	matcher string // 组级 matcher（空或 * 匹配全部，| 多值）
-	okHook  string // ok hook 子命令
-}{
+var qoderHookEvents = []hookEvent{
 	{"UserPromptSubmit", "*", "prompt"},
 	{"PostToolUse", "Write|Edit", "post-tool"},
 	{"Stop", "*", "stop"},
@@ -60,59 +53,21 @@ var qoderHookEvents = []struct {
 // 已知限制：用户名含空格时包装路径带空格，cmd /s 仍会截断——上游修复前不额外处理。
 func qoderCommand(exe, okHook string) string {
 	if runtime.GOOS == "windows" {
-		return qoderWrapperPath(okHook)
+		return hookWrapperPath(QoderHome(), okHook)
 	}
-	return strconv.Quote(filepath.ToSlash(exe)) + " hook " + okHook + " claude"
-}
-
-// qoderWrapperPath 返回 Windows 包装文件路径：<QoderHome>/ok-hook-<okHook>.cmd
-// （filepath.Join 在 Windows 出反斜杠形态——settings.json command 裸串即它）。
-func qoderWrapperPath(okHook string) string {
-	return filepath.Join(QoderHome(), "ok-hook-"+okHook+".cmd")
-}
-
-// qoderWrapperContent 返回包装文件内容：单行 @"<exe>" hook <okHook> claude（CRLF
-// 结尾）。exe 路径在 .cmd 文件内部带引号无妨——cmd /s 剥引号只作用于 settings.json
-// 的命令行。
-func qoderWrapperContent(exe, okHook string) string {
-	return "@\"" + exe + "\" hook " + okHook + " claude\r\n"
+	return quotedShellCommand(exe, okHook)
 }
 
 // ensureQoderWrappers 确保三个包装文件存在且内容为当前 exe（缺失/过期重写，
 // 已当前则不写盘）。仅 Windows 调用。
 func ensureQoderWrappers(exe string) error {
-	for _, e := range qoderHookEvents {
-		path := qoderWrapperPath(e.okHook)
-		want := qoderWrapperContent(exe, e.okHook)
-		if data, err := os.ReadFile(path); err == nil && string(data) == want {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return fmt.Errorf("写入 qoder hook 包装: %w", err)
-		}
-		if err := fsx.WriteFile(path, []byte(want), 0o644); err != nil {
-			return fmt.Errorf("写入 qoder hook 包装: %w", err)
-		}
-	}
-	return nil
+	return ensureHookWrappers(QoderHome(), "写入 qoder hook 包装", qoderHookEvents, exe)
 }
 
 // removeQoderWrappers 删除三个包装文件，返回是否有删除。仅删内容确为 ok 生成的
 // （含 " hook <okHook> claude"）——防误删用户同名文件。仅 Windows 调用。
 func removeQoderWrappers() bool {
-	removed := false
-	for _, e := range qoderHookEvents {
-		path := qoderWrapperPath(e.okHook)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		if strings.Contains(string(data), " hook "+e.okHook+" claude") &&
-			os.Remove(path) == nil {
-			removed = true
-		}
-	}
-	return removed
+	return removeHookWrappers(QoderHome(), qoderHookEvents)
 }
 
 // isOKQoderHook 判定一条 hook 条目是否 ok 生成：type=command 且命令串形态匹配——
@@ -121,25 +76,7 @@ func removeQoderWrappers() bool {
 // claude" 两种形态；其他平台只认 quoted 后缀。不看 exe basename——改名/迁移/测试
 // 二进制都不影响识别。
 func isOKQoderHook(h map[string]any) bool {
-	typ, _ := h["type"].(string)
-	cmd, _ := h["command"].(string)
-	if typ != "command" || cmd == "" {
-		return false
-	}
-	cmd = strings.TrimSpace(cmd)
-	for _, e := range qoderHookEvents {
-		if runtime.GOOS == "windows" {
-			for _, sep := range []string{"/", "\\"} {
-				if hasSuffixFold(cmd, sep+"ok-hook-"+e.okHook+".cmd") {
-					return true
-				}
-			}
-		}
-		if strings.HasSuffix(cmd, " hook "+e.okHook+" claude") {
-			return true
-		}
-	}
-	return false
+	return isOKShellCommand(h, qoderHookEvents, true)
 }
 
 // qoderAgent Qoder CN CLI 适配器：hook 集成 = 合并写 ~/.qoder-cn/settings.json 的
@@ -164,149 +101,32 @@ func (qoderAgent) Detect() bool {
 	return err == nil && info.IsDir()
 }
 
-// qoderOKGroup 生成一个事件的 ok hook 组：type=command shell 串，
-// timeout 秒级 = 全局 HookTimeoutSec()。
-func qoderOKGroup(exe, matcher, okHook string) map[string]any {
-	hook := map[string]any{
-		"type":    "command",
-		"command": qoderCommand(exe, okHook),
-		"timeout": HookTimeoutSec(),
-	}
-	return map[string]any{"matcher": matcher, "hooks": []any{hook}}
-}
-
 // loadQoderSettings 读 settings.json；文件不存在返回空对象，解析失败报错
 // （不覆盖损坏文件）。map 合并写会重排 key 顺序——未知字段内容保留，代价可接受。
 func loadQoderSettings() (map[string]any, error) {
-	data, err := os.ReadFile(qoderSettingsPath())
-	if os.IsNotExist(err) {
-		return map[string]any{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	cfg := map[string]any{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("qoder settings.json 解析失败: %w", err)
-	}
-	return cfg, nil
+	return loadSettingsJSON(qoderSettingsPath(), "qoder settings.json")
 }
 
 // qoderEventsOf 取 hooks 事件表（只读视图），不做任何创建。
 func qoderEventsOf(cfg map[string]any) map[string]any {
-	events, _ := cfg["hooks"].(map[string]any)
-	return events
+	return hookEventsOf(cfg)
 }
 
 // qoderEventsEdit 取 hooks 事件表供写入：缺失时创建。
 func qoderEventsEdit(cfg map[string]any) map[string]any {
-	events, _ := cfg["hooks"].(map[string]any)
-	if events == nil {
-		events = map[string]any{}
-		cfg["hooks"] = events
-	}
-	return events
-}
-
-// stripOKQoderHooks 移除事件表里所有 ok 自有 hook（组内 hooks 被删空时整组移除，
-// 事件数组空了删事件键），返回是否有改动。第三方条目原样保留。
-func stripOKQoderHooks(events map[string]any) bool {
-	changed := false
-	for name, v := range events {
-		groups, _ := v.([]any)
-		if groups == nil {
-			continue
-		}
-		kept := groups[:0]
-		for _, g := range groups {
-			gm, _ := g.(map[string]any)
-			hooks, _ := gm["hooks"].([]any)
-			if gm == nil || hooks == nil {
-				kept = append(kept, g)
-				continue
-			}
-			var keptHooks []any
-			for _, h := range hooks {
-				if hm, _ := h.(map[string]any); hm != nil && isOKQoderHook(hm) {
-					changed = true
-					continue
-				}
-				keptHooks = append(keptHooks, h)
-			}
-			if len(keptHooks) == 0 {
-				changed = true // 整组都是 ok 的，连组移除
-				continue
-			}
-			gm["hooks"] = keptHooks
-			kept = append(kept, g)
-		}
-		if len(kept) == 0 {
-			delete(events, name)
-		} else {
-			events[name] = kept
-		}
-	}
-	return changed
+	return hookEventsEdit(cfg)
 }
 
 // hasOKQoderHook 报告事件表里是否存在任何 ok 自有 hook。
 func hasOKQoderHook(events map[string]any) bool {
-	for _, v := range events {
-		groups, _ := v.([]any)
-		for _, g := range groups {
-			gm, _ := g.(map[string]any)
-			hooks, _ := gm["hooks"].([]any)
-			for _, h := range hooks {
-				if hm, _ := h.(map[string]any); hm != nil && isOKQoderHook(hm) {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return containsOKHook(events, isOKQoderHook)
 }
 
 // qoderHooksCurrent 报告三事件的 ok hook 是否均为当前期望形态（command=当前命令、
 // matcher 与 timeout 正确）；Windows 另要求包装文件内容为当前 exe（exe 迁移后包装
 // 过期 = 集成失效，需自愈重写）。
 func qoderHooksCurrent(events map[string]any, exe string) bool {
-	wantTimeout := float64(HookTimeoutSec())
-	for _, e := range qoderHookEvents {
-		if runtime.GOOS == "windows" {
-			data, err := os.ReadFile(qoderWrapperPath(e.okHook))
-			if err != nil || string(data) != qoderWrapperContent(exe, e.okHook) {
-				return false
-			}
-		}
-		groups, _ := events[e.event].([]any)
-		found := false
-		for _, g := range groups {
-			gm, _ := g.(map[string]any)
-			if gm == nil {
-				continue
-			}
-			matcher, _ := gm["matcher"].(string)
-			if matcher != e.matcher {
-				continue
-			}
-			hooks, _ := gm["hooks"].([]any)
-			for _, h := range hooks {
-				hm, _ := h.(map[string]any)
-				if hm == nil || !isOKQoderHook(hm) {
-					continue
-				}
-				cmd, _ := hm["command"].(string)
-				timeout, _ := hm["timeout"].(float64)
-				if cmd == qoderCommand(exe, e.okHook) && timeout == wantTimeout {
-					found = true
-				}
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
+	return shellHooksCurrent(events, qoderHookEvents, exe, isOKQoderHook, qoderCommand, QoderHome())
 }
 
 // qoderHooksConfigEnabled 报告 settings 顶层 hooksConfig 的 enabled 是否为真。
@@ -342,18 +162,7 @@ func qoderEnableHooksConfig(cfg map[string]any) bool {
 
 // writeQoderSettings 备份后写回 settings.json（MarshalIndent，未知字段保留）。
 func writeQoderSettings(cfg map[string]any) error {
-	path := qoderSettingsPath()
-	if data, err := os.ReadFile(path); err == nil {
-		_ = os.WriteFile(path+".bak-openknowledge", data, 0o644)
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return fsx.WriteFile(path, append(data, '\n'), 0o644)
+	return writeSettingsJSON(qoderSettingsPath(), cfg)
 }
 
 func (qoderAgent) InstallHooks(exe string) error {
@@ -363,19 +172,20 @@ func (qoderAgent) InstallHooks(exe string) error {
 			return err
 		}
 	}
-	cfg, err := loadQoderSettings()
-	if err != nil {
-		return err
-	}
-	events := qoderEventsEdit(cfg)
-	stripOKQoderHooks(events)
-	for _, e := range qoderHookEvents {
-		groups, _ := events[e.event].([]any)
-		events[e.event] = append(groups, qoderOKGroup(exe, e.matcher, e.okHook))
-	}
-	// hooksConfig.enabled 默认关闭（装了也静默不派发）——安装时一并开启。
-	qoderEnableHooksConfig(cfg)
-	return writeQoderSettings(cfg)
+	// 读-改-写全程包在 fsx.WithFileLock 内：selfHealHooks 每个 prompt 都跑，与
+	// GUI /api/setup/hooks 并发时裸跑会 load→改→rename 互相覆盖、丢第三方 hooks。
+	return fsx.WithFileLock(qoderSettingsPath(), func() error {
+		cfg, err := loadQoderSettings()
+		if err != nil {
+			return err
+		}
+		events := qoderEventsEdit(cfg)
+		stripOKHooks(events, isOKQoderHook)
+		appendShellOKGroups(events, qoderHookEvents, exe, qoderCommand)
+		// hooksConfig.enabled 默认关闭（装了也静默不派发）——安装时一并开启。
+		qoderEnableHooksConfig(cfg)
+		return writeQoderSettings(cfg)
+	})
 }
 
 // RemoveHooks 移除 settings.json 里 ok 的 hooks 条目；Windows 另删 3 个包装文件
@@ -383,26 +193,40 @@ func (qoderAgent) InstallHooks(exe string) error {
 // 存在无副作用（只是允许 Qoder 派发 hooks；关掉会连带停掉用户的第三方 hooks），
 // 不随移除关闭。
 func (qoderAgent) RemoveHooks() (bool, error) {
-	wrappersRemoved := false
-	if runtime.GOOS == "windows" {
-		wrappersRemoved = removeQoderWrappers()
-	}
 	if _, err := os.Stat(qoderSettingsPath()); os.IsNotExist(err) {
-		return wrappersRemoved, nil
+		// settings.json 不存在：无指向包装文件的命令，删包装无死命令风险。
+		if runtime.GOOS == "windows" {
+			return removeQoderWrappers(), nil
+		}
+		return false, nil
 	}
-	cfg, err := loadQoderSettings()
+	removed := false
+	wrappersRemoved := false
+	// 读-改-写包在 fsx.WithFileLock 内（同 InstallHooks）。
+	err := fsx.WithFileLock(qoderSettingsPath(), func() error {
+		cfg, err := loadQoderSettings()
+		if err != nil {
+			// 解析失败即停，包装文件保留——settings.json 里指向它们的命令还在（L-01）。
+			return err
+		}
+		events := qoderEventsOf(cfg)
+		if events != nil && hasOKQoderHook(events) {
+			stripOKHooks(events, isOKQoderHook)
+			if err := writeQoderSettings(cfg); err != nil {
+				return fmt.Errorf("移除 qoder hooks: %w", err)
+			}
+			removed = true
+		}
+		// ok 条目清完再删包装——反序会在上方失败路径留下指向已删文件的死命令（L-01）。
+		if runtime.GOOS == "windows" {
+			wrappersRemoved = removeQoderWrappers()
+		}
+		return nil
+	})
 	if err != nil {
 		return false, err
 	}
-	events := qoderEventsOf(cfg)
-	if events == nil || !hasOKQoderHook(events) {
-		return wrappersRemoved, nil
-	}
-	stripOKQoderHooks(events)
-	if err := writeQoderSettings(cfg); err != nil {
-		return false, fmt.Errorf("移除 qoder hooks: %w", err)
-	}
-	return true, nil
+	return removed || wrappersRemoved, nil
 }
 
 // EnsureHooks 自愈：settings 存在、曾安装过 ok hooks 且内容过期（exe 迁移、超时
@@ -413,30 +237,30 @@ func (qoderAgent) EnsureHooks(exe string) error {
 	if _, err := os.Stat(qoderSettingsPath()); err != nil {
 		return nil
 	}
-	cfg, err := loadQoderSettings()
-	if err != nil {
-		return err
-	}
-	events := qoderEventsOf(cfg)
-	if events == nil || !hasOKQoderHook(events) {
-		return nil // 从未安装（无任何 ok 条目）不复活——含用户显式移除
-	}
-	if runtime.GOOS == "windows" {
-		if err := ensureQoderWrappers(exe); err != nil {
+	// 读-改-写包在 fsx.WithFileLock 内（同 InstallHooks）。
+	return fsx.WithFileLock(qoderSettingsPath(), func() error {
+		cfg, err := loadQoderSettings()
+		if err != nil {
 			return err
 		}
-	}
-	if qoderHooksCurrent(events, exe) && qoderHooksConfigEnabled(cfg) {
-		return nil
-	}
-	events = qoderEventsEdit(cfg)
-	stripOKQoderHooks(events)
-	for _, e := range qoderHookEvents {
-		groups, _ := events[e.event].([]any)
-		events[e.event] = append(groups, qoderOKGroup(exe, e.matcher, e.okHook))
-	}
-	qoderEnableHooksConfig(cfg)
-	return writeQoderSettings(cfg)
+		events := qoderEventsOf(cfg)
+		if events == nil || !hasOKQoderHook(events) {
+			return nil // 从未安装（无任何 ok 条目）不复活——含用户显式移除
+		}
+		if runtime.GOOS == "windows" {
+			if err := ensureQoderWrappers(exe); err != nil {
+				return err
+			}
+		}
+		if qoderHooksCurrent(events, exe) && qoderHooksConfigEnabled(cfg) {
+			return nil
+		}
+		events = qoderEventsEdit(cfg)
+		stripOKHooks(events, isOKQoderHook)
+		appendShellOKGroups(events, qoderHookEvents, exe, qoderCommand)
+		qoderEnableHooksConfig(cfg)
+		return writeQoderSettings(cfg)
+	})
 }
 
 func (qoderAgent) HooksInstalled() bool {

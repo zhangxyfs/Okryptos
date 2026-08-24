@@ -1,16 +1,19 @@
 package setupx
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/daemonx"
+	"openknowledge/internal/fsx"
 )
 
 // setupUninstallEnv 构造 hooks 配置、技能、全局配置齐全的沙盒。
@@ -191,6 +194,67 @@ func TestRemoveSectionPreservesTrailingWhitespace(t *testing.T) {
 	}
 	if strings.Contains(got, "embedding") || strings.Contains(got, "api_key") {
 		t.Fatalf("embedding section should be removed: %q", got)
+	}
+}
+
+// TestRemoveSectionConcurrentWithLockedWriters 回归 M-02：RemoveSection 与
+// 其他锁内写方（仿 GUI Save* 的锁内读-改-写）并发时不得互相覆盖丢更新。
+func TestRemoveSectionConcurrentWithLockedWriters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	initial := "[embedding]\napi_key = \"sk\"\n\n[inject]\nmax_tokens = 2000\n"
+	if err := os.WriteFile(path, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	const writers = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, writers+1)
+	// 写方：锁内读-追加拿-写（仿 updateGlobalConfig 的读-改-写纪律）
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sec := fmt.Sprintf("[sec%d]\nv = %d\n", i, i)
+			err := fsx.WithFileLock(path, func() error {
+				data, err := os.ReadFile(path)
+				if os.IsNotExist(err) {
+					data = nil
+				} else if err != nil {
+					return err
+				}
+				return fsx.WriteFile(path, []byte(string(data)+"\n"+sec), 0o644)
+			})
+			errs <- err
+		}(i)
+	}
+	// 并发删除 [embedding]
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, err := RemoveSection(path, "[embedding]")
+		errs <- err
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "[embedding]") || strings.Contains(got, "api_key") {
+		t.Fatalf("embedding should be removed: %q", got)
+	}
+	// 每个写方追加的小节都必须还在——任何一个丢失都说明发生了无锁覆盖
+	for i := 0; i < writers; i++ {
+		if !strings.Contains(got, fmt.Sprintf("[sec%d]", i)) {
+			t.Fatalf("lost concurrent write [sec%d]: %q", i, got)
+		}
 	}
 }
 

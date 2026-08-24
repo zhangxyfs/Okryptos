@@ -170,6 +170,12 @@ func Add(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
+		// 源文件若自带 front matter，直接当正文落库会被 Serialize 再包一层 ---，
+		// 内层元数据静默变正文（历史坑）；剥离并警告，元数据以命令行参数为准
+		if stripped, ok := entry.StripFrontmatter(data); ok {
+			fmt.Fprintf(stderr, "警告: %s 含 front matter，已剥离（条目的 title/type 等以命令行参数为准）\n", *file)
+			data = stripped
+		}
 		body = string(data)
 	}
 	sum := *summary
@@ -210,7 +216,12 @@ func Add(args []string, stdout, stderr io.Writer) int {
 	if fi, err := os.Stat(path); err == nil {
 		prev = fi.ModTime()
 	}
-	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
+	out, err := e.Serialize()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := fsx.WriteFile(path, out, 0o644); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -275,7 +286,12 @@ func BackfillBorn(args []string, in io.Reader, stdout, stderr io.Writer) int {
 		if fi, statErr := os.Stat(f); statErr == nil {
 			prev = fi.ModTime()
 		}
-		if err := fsx.WriteFile(f, e.Serialize(), 0o644); err != nil {
+		out, err := e.Serialize()
+		if err != nil {
+			fmt.Fprintf(stderr, "序列化失败 %s: %v\n", f, err)
+			continue
+		}
+		if err := fsx.WriteFile(f, out, 0o644); err != nil {
 			fmt.Fprintf(stderr, "写回失败 %s: %v\n", f, err)
 			continue
 		}
@@ -298,7 +314,7 @@ func afterAdd(pc *project.Context, stdout, stderr io.Writer) int {
 	if c := embeddingClientForIndex(pc); c != nil {
 		client = c
 	}
-	if err := db.Sync(pc.Store.KnowledgeDir(), client, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err != nil {
+	if err := db.Sync(pc.Store.KnowledgeDir(), client, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines, FeedbackWindowDays: pc.Config.Retrieve.Feedback.WindowDays}); err != nil {
 		var corrupt *index.CorruptEntriesError
 		switch {
 		case errors.As(err, &corrupt):
@@ -309,7 +325,7 @@ func afterAdd(pc *project.Context, stdout, stderr io.Writer) int {
 			return 1
 		default:
 			// embedding 失败：降级为只同步 INDEX，向量稍后 ok index 补齐
-			if err2 := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err2 != nil {
+			if err2 := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines, FeedbackWindowDays: pc.Config.Retrieve.Feedback.WindowDays}); err2 != nil {
 				fmt.Fprintln(stderr, err2)
 				if !errors.As(err2, &corrupt) {
 					return 1
@@ -438,7 +454,7 @@ func Index(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 	}
-	if err := db.Sync(pc.Store.KnowledgeDir(), client, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err != nil {
+	if err := db.Sync(pc.Store.KnowledgeDir(), client, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines, FeedbackWindowDays: pc.Config.Retrieve.Feedback.WindowDays}); err != nil {
 		var corrupt *index.CorruptEntriesError
 		if errors.As(err, &corrupt) {
 			// 损坏条目已跳过、INDEX 已重建：警告到 stderr，成功流程继续
@@ -505,11 +521,11 @@ func Archive(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	undo := fs.Bool("undo", false, "取消归档")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return 1
 	}
 	if fs.NArg() == 0 {
 		fmt.Fprintln(stderr, "用法: ok archive [--undo] <文件.md...>")
-		return 2
+		return 1
 	}
 	pc, code := resolveFromCwd(stderr)
 	if pc == nil {
@@ -537,7 +553,12 @@ func Archive(args []string, stdout, stderr io.Writer) int {
 			prev = fi.ModTime()
 		}
 		// 原子写（tmp+fsync+rename）：裸 os.WriteFile 中途崩溃会留半截文件
-		if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
+		out, serr := e.Serialize()
+		if serr != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", base, serr)
+			return 1
+		}
+		if err := fsx.WriteFile(path, out, 0o644); err != nil {
 			fmt.Fprintf(stderr, "%s: %v\n", base, err)
 			return 1
 		}
@@ -549,7 +570,7 @@ func Archive(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer func() { _ = db.Close() }()
-	if err := db.Sync(dir, nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err != nil {
+	if err := db.Sync(dir, nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines, FeedbackWindowDays: pc.Config.Retrieve.Feedback.WindowDays}); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -567,9 +588,11 @@ func List(args []string, stdout, stderr io.Writer) int {
 	for _, p := range reg.Projects {
 		fmt.Fprintf(stdout, "%s → %s\n", p.Name, strings.Join(p.Paths, ", "))
 		st := store.New(filepath.Join(registry.Home(), "projects", p.Name))
-		entries, err := entry.Load(st.KnowledgeDir())
-		if err != nil {
-			continue
+		// LoadTolerant：单个坏文件不得吞掉整个项目的条目列表；错误须暴露
+		// 给用户（与 entry 包注释口径一致），告警到 stderr、好条目照常列出
+		entries, loadErrs := entry.LoadTolerant(st.KnowledgeDir())
+		for _, lerr := range loadErrs {
+			fmt.Fprintf(stderr, "警告: %s: %v（已跳过）\n", p.Name, lerr)
 		}
 		for _, e := range entries {
 			mark := "  "
@@ -722,7 +745,12 @@ func Propose(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "条目已存在: %s\n", path)
 		return 1
 	}
-	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
+	out, err := e.Serialize()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := fsx.WriteFile(path, out, 0o644); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -734,7 +762,7 @@ func Propose(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer db.Close()
-	if err := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err != nil {
+	if err := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines, FeedbackWindowDays: pc.Config.Retrieve.Feedback.WindowDays}); err != nil {
 		var corrupt *index.CorruptEntriesError
 		if errors.As(err, &corrupt) {
 			// 损坏条目已跳过、INDEX 已重建：警告到 stderr，成功流程继续
@@ -776,11 +804,10 @@ func Approve(args []string, stdout, stderr io.Writer) int {
 	if pc == nil {
 		return code
 	}
-	path := fs.Arg(0)
-	if _, err := os.Stat(path); err != nil {
-		// 裸文件名按 knowledge 目录解析
-		path = filepath.Join(pc.Store.KnowledgeDir(), filepath.Base(path))
-	}
+	// 固定收敛到库内 knowledge 目录（与 Archive 同口径）：裸文件名若直接按
+	// cwd 解析，cwd 恰有同名文件（如导出编辑的草稿副本）时会批准并重写 cwd 那份，
+	// 真草稿静默失效且写穿到知识库外
+	path := filepath.Join(pc.Store.KnowledgeDir(), filepath.Base(fs.Arg(0)))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(stderr, "条目不存在: %v\n", err)
@@ -802,7 +829,12 @@ func Approve(args []string, stdout, stderr io.Writer) int {
 	if fi, statErr := os.Stat(path); statErr == nil {
 		prev = fi.ModTime()
 	}
-	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
+	out, err := e.Serialize()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := fsx.WriteFile(path, out, 0o644); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -893,7 +925,7 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("wiki", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return 1
 	}
 	pc, code := resolveFromCwd(stderr)
 	if pc == nil {
@@ -966,7 +998,7 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 		count := 0
 		var merged []string
 		if db, err := index.Open(pc.Store.KbPath()); err == nil {
-			if err := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines}); err == nil {
+			if err := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines, FeedbackWindowDays: pc.Config.Retrieve.Feedback.WindowDays}); err == nil {
 				count, _ = db.WikiCount()
 			} else {
 				// 不吞错：Sync 失败时 count 归零会让游标记录假计数，至少提示
@@ -1083,6 +1115,6 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 		return 0
 	default:
 		fmt.Fprintln(stderr, "用法: ok wiki <status|mark [commit]|base [分支名]|diff>")
-		return 2
+		return 1
 	}
 }

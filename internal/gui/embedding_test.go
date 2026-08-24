@@ -334,6 +334,57 @@ func TestEmbeddingTestNameRequired(t *testing.T) {
 	}
 }
 
+// TestEmbeddingTestNameOnlyKeyless：name-only 复测无 key profile（ollama）——
+// base_url/api_key 均留空时应回填已存地址完成复测（M-04 回归：回填曾只在
+// key 分支执行，ollama 复测必报"profile 不可用"）。
+func TestEmbeddingTestNameOnlyKeyless(t *testing.T) {
+	h := newTestHandler(t)
+	var hits []*http.Request
+	srv := fakeEmbeddingsServer(t, &hits)
+	embPost(t, h, "/api/setup/embedding/profile",
+		`{"name":"o","type":"ollama","base_url":"`+srv.URL+`","model":"m"}`)
+	w := embPost(t, h, "/api/setup/embedding/test", `{"name":"o","type":"ollama","model":"m"}`)
+	if w.Code != 200 {
+		t.Fatal(w.Body)
+	}
+	var out map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if out["ok"] != true {
+		t.Fatalf("无 key profile name-only 复测应可用: %v", out)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("应回填已存地址命中假服务: %d", len(hits))
+	}
+	if got := hits[0].Header.Get("Authorization"); got != "" {
+		t.Fatalf("无 key profile 不应带 Authorization: %q", got)
+	}
+}
+
+// TestDlSnapshotStableOrder：多个 downloading 任务并存时快照选取顺序稳定
+// （L-10 回归：map 随机序曾让进度条在轮询间乱跳）。
+func TestDlSnapshotStableOrder(t *testing.T) {
+	h := newTestHandler(t)
+	h.dlMu.Lock()
+	h.dl["m-b"] = &dlJob{ModelID: "m-b", State: "downloading", Done: 1, Total: 2}
+	h.dl["m-a"] = &dlJob{ModelID: "m-a", State: "downloading", Done: 3, Total: 4}
+	h.dlMu.Unlock()
+	for i := 0; i < 50; i++ {
+		if got := h.dlSnapshot().ModelID; got != "m-a" {
+			t.Fatalf("第 %d 次快照应稳定取 m-a: %q", i, got)
+		}
+	}
+	// 无 downloading 时取排序最后的任务，同样稳定
+	h.dlMu.Lock()
+	h.dl["m-a"].State = "done"
+	h.dl["m-b"].State = "error"
+	h.dlMu.Unlock()
+	for i := 0; i < 50; i++ {
+		if got := h.dlSnapshot().ModelID; got != "m-b" {
+			t.Fatalf("第 %d 次快照应稳定取 m-b: %q", i, got)
+		}
+	}
+}
+
 // TestModelsDirEndpoints：GET 暴露 models_dir/models_dir_default；POST models-dir
 // 合法路径 200 且配置落盘（目录曾不存在则创建）、坏路径（父级是文件）400 且配置不变、
 // 空串恢复默认；open-models-dir 经 openFolder 接缝收到生效目录。

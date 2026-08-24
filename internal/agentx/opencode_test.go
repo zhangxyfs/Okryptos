@@ -253,6 +253,25 @@ func TestOpencodeEnsureHooks(t *testing.T) {
 	}
 }
 
+// TestOpencodeHooksInstalledStaleExe exe 迁移/改名后插件烘焙的是旧路径，
+// HooksInstalled 必须判为未安装/过期，doctor 与自愈入口据此触发重装。
+func TestOpencodeHooksInstalledStaleExe(t *testing.T) {
+	setupOpencode(t)
+	a := opencodeAgent{}
+	if err := a.InstallHooks(`D:\old\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	if a.HooksInstalled() {
+		t.Fatal("旧 exe 路径应判为未安装/过期")
+	}
+	if err := a.InstallHooks(currentExe(t)); err != nil {
+		t.Fatal(err)
+	}
+	if !a.HooksInstalled() {
+		t.Fatal("当前 exe 安装后 HooksInstalled 应为真")
+	}
+}
+
 // TestOpencodePluginRuntimePortable 插件必须同时可加载于 Node（opencode 桌面端
 // 服务器跑在 Electron/Node 里）与 Bun（CLI/TUI）：禁止 "bun" 模块导入
 // （Node 下 Cannot find package 'bun' → 整个插件加载失败，2026-08-12 实报），

@@ -75,8 +75,16 @@ func (opencodeAgent) HooksInstalled() bool {
 		return false
 	}
 	content := string(data)
-	return strings.Contains(content, opencodePluginMarker) &&
-		strings.Contains(content, "// fingerprint: "+opencodeTemplateFingerprint())
+	if !strings.Contains(content, opencodePluginMarker) ||
+		!strings.Contains(content, "// fingerprint: "+opencodeTemplateFingerprint()) {
+		return false
+	}
+	// 旧 exe 路径视为过期（与 dshAgent 同款，以解析后的当前可执行文件为基准）
+	exe, err := currentCLIExe()
+	if err != nil {
+		return false
+	}
+	return content == renderOpencodePlugin(exe)
 }
 
 func (opencodeAgent) InstallHooks(exe string) error {

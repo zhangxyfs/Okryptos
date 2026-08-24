@@ -3,11 +3,9 @@ package gui
 import (
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
 
 	"openknowledge/internal/config"
-	"openknowledge/internal/registry"
 )
 
 // enforceRuleJSON 是 [[enforce]] 规则的前端契约形状（字段对应 config.EnforceRule）。
@@ -50,7 +48,7 @@ func (h *Handler) apiEnforceRulesSet(w http.ResponseWriter, r *http.Request) {
 	}
 	cfgPath := ""
 	if req.Project == "" {
-		cfgPath = filepath.Join(registry.Home(), "config.toml")
+		cfgPath = globalConfigPath()
 	} else {
 		st := resolveProject(w, req.Project)
 		if st == nil {

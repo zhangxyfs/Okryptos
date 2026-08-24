@@ -30,15 +30,7 @@ func applyFeedback(hits map[string]*Hit, stats map[string]FeedbackStat, cfg conf
 	for _, h := range hits {
 		sorted = append(sorted, h)
 	}
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Score != sorted[j].Score {
-			return sorted[i].Score > sorted[j].Score
-		}
-		if sorted[i].Title != sorted[j].Title {
-			return sorted[i].Title < sorted[j].Title
-		}
-		return sorted[i].Filename < sorted[j].Filename
-	})
+	sort.Slice(sorted, func(i, j int) bool { return hitLess(sorted[i], sorted[j]) })
 	var demoted []string
 	for _, h := range sorted {
 		s, ok := stats[h.Filename]

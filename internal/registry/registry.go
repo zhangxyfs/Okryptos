@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 
@@ -32,19 +34,43 @@ func Home() string {
 		return filepath.Join(home, ".openknowledge")
 	}
 	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".openknowledge"
+	if err == nil {
+		return filepath.Join(home, ".openknowledge")
 	}
-	return filepath.Join(home, ".openknowledge")
+	return fallbackHome()
+}
+
+var (
+	fallbackHomeOnce sync.Once
+	fallbackHomeDir  string
+)
+
+// fallbackHome 是 realProfileDir 与 os.UserHomeDir 双重失败时的兜底根：
+// 裸相对路径 ".openknowledge" 会让数据根随 cwd 漂移，且两次调用可能解析到
+// 不同目录——进程内只解析一次并转绝对路径，保证一致性。
+func fallbackHome() string {
+	fallbackHomeOnce.Do(func() {
+		if abs, err := filepath.Abs(".openknowledge"); err == nil {
+			fallbackHomeDir = abs
+		} else {
+			fallbackHomeDir = ".openknowledge"
+		}
+	})
+	return fallbackHomeDir
 }
 
 func DefaultPath() string { return filepath.Join(Home(), "registry.toml") }
 
-// NormalizePath 统一路径用于比较：分隔符转为 "/"，转小写，去掉尾部 "/"。
+// NormalizePath 统一路径用于比较：分隔符转为 "/"，去掉尾部 "/"。
+// 小写折叠仅 Windows 生效——Linux 文件系统大小写敏感，/src/Foo 与 /src/foo
+// 是不同目录，折叠会让两个项目互相遮蔽（FindByCwd 命中先注册者串库）。
 func NormalizePath(p string) string {
 	p = strings.ReplaceAll(p, "\\", "/")
 	p = strings.TrimRight(p, "/")
-	return strings.ToLower(p)
+	if runtime.GOOS == "windows" {
+		p = strings.ToLower(p)
+	}
+	return p
 }
 
 func Load(path string) (*Registry, error) {
@@ -93,6 +119,7 @@ func (r *Registry) FindByCwd(cwd string) *Project {
 }
 
 func (r *Registry) AddProject(name, path string) error {
+	npath := NormalizePath(path)
 	for _, p := range r.Projects {
 		if p.Name == name {
 			return fmt.Errorf("项目 %q 已存在", name)
@@ -101,6 +128,13 @@ func (r *Registry) AddProject(name, path string) error {
 		// 目录，两个项目会共享同一 store 串数据
 		if strings.EqualFold(p.Name, name) {
 			return fmt.Errorf("项目 %q 与已注册的 %q 仅大小写不同（Windows 上会共享同一知识库目录）", name, p.Name)
+		}
+		// 同路径冲突拒绝：同目录换名重复注册后 FindByCwd 仍命中先注册者，
+		// ok add 会静默写进旧项目知识库（串库且无告警）
+		for _, ep := range p.Paths {
+			if NormalizePath(ep) == npath {
+				return fmt.Errorf("路径 %q 已注册给项目 %q（同目录重复注册会导致写串知识库）", path, p.Name)
+			}
 		}
 	}
 	r.Projects = append(r.Projects, Project{Name: name, Paths: []string{path}})

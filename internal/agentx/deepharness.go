@@ -64,10 +64,18 @@ func dshPluginFileURL() string {
 	return (&url.URL{Scheme: "file", Path: p}).String()
 }
 
+// dshYAMLSingleQuoted 把 s 包成 YAML 单引号标量：串内单引号双写（''）——单引号
+// 字符串的唯一转义规则（L-04）。当前 dshPluginFileURL 经 url.URL 百分号编码后
+// 不含裸 '，本函数是生成层变化时的防线；YAML 解析后 '' 还原为 '，消费方拿到原串。
+func dshYAMLSingleQuoted(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
 // dshPatchBlock 家目录 patch 行：file:// URL 挂载本地插件（cordis patch 的 name
-// 字段直接进 Node ESM import；YAML 单引号字符串原样保留，规避转义）。
+// 字段直接进 Node ESM import；name 经 dshYAMLSingleQuoted 转义，路径含 ' 时
+// 标量不截断、file URL 不断裂）。
 func dshPatchBlock() string {
-	return "- insert:\n    - id: ok-hooks\n      name: '" + dshPluginFileURL() + "'\n"
+	return "- insert:\n    - id: ok-hooks\n      name: " + dshYAMLSingleQuoted(dshPluginFileURL()) + "\n"
 }
 
 // dshAgent DeepSeek Harness 适配器：hook 集成 = 本地 JS 插件 + 家目录 patch 行挂载；

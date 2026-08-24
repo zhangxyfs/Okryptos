@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +16,6 @@ import (
 	"openknowledge/internal/embed"
 	"openknowledge/internal/embedsidecar"
 	"openknowledge/internal/index"
-	"openknowledge/internal/registry"
 	"openknowledge/internal/setupx"
 )
 
@@ -32,12 +31,19 @@ type dlJob struct {
 }
 
 // dlSnapshot 返回当前下载任务快照（优先 downloading；无任务返回零值）。
+// key 排序后遍历，顺序稳定——map 随机序会让并发下载的进度条在轮询间乱跳。
 // 逐字段拷贝避免复制 sync.Mutex（go vet copylocks）。
 func (h *Handler) dlSnapshot() *dlJob {
 	h.dlMu.Lock()
 	defer h.dlMu.Unlock()
+	keys := make([]string, 0, len(h.dl))
+	for k := range h.dl {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	var pick *dlJob
-	for _, j := range h.dl {
+	for _, k := range keys {
+		j := h.dl[k]
 		pick = j
 		if j.State == "downloading" {
 			break
@@ -55,7 +61,7 @@ func (h *Handler) dlSnapshot() *dlJob {
 // 记录的建索引模型身份）与 active_identity（使用中 profile 身份）——前端据此在
 // 换模型时显示"需 ok index 重建"警示条；kb.db 缺失/打开失败一律 fail-open 为空串。
 func (h *Handler) apiEmbeddingGet(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+	cfg, err := config.LoadMerged("", globalConfigPath())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -168,7 +174,7 @@ func (h *Handler) apiEmbeddingActive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Name != "" {
-		cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+		cfg, err := config.LoadMerged("", globalConfigPath())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -237,8 +243,8 @@ func (h *Handler) apiEmbeddingTest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "名称不能为空")
 		return
 	}
-	// 显式给了 base_url 才校验 scheme；留空（name-only 复测）由 ClientForProfile
-	// 判 nil 报错，本就发不出请求，无泄露面。
+	// 显式给了 base_url 才校验 scheme；留空（name-only 复测）跟随已存 profile 地址，
+	// 无 profile 可回填时由 ClientForProfile 判 nil 报错，本就发不出请求，无泄露面。
 	if req.Type != "builtin" && req.BaseURL != "" && !httpBaseURLOK(req.BaseURL) {
 		writeErr(w, http.StatusBadRequest, "base_url 必须是 http/https URL")
 		return
@@ -248,22 +254,23 @@ func (h *Handler) apiEmbeddingTest(w http.ResponseWriter, r *http.Request) {
 		Model: req.Model, APIKey: req.APIKey, Mirror: req.Mirror,
 	}
 	if p.APIKey == "" {
-		cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+		cfg, err := config.LoadMerged("", globalConfigPath())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		for _, saved := range cfg.Embedding.Profiles {
 			if saved.Name == p.Name {
+				// base_url 留空（name-only 复测）跟随已存地址，等价于复测已存
+				// profile——无 key profile（如 ollama）同样生效，不能只在 key 分支回填。
+				if p.BaseURL == "" {
+					p.BaseURL = saved.BaseURL
+				}
 				if key := saved.ResolvedAPIKey(); key != "" {
-					// 请求显式改地址时不得带出已存真实 key（密钥外传）；
-					// 留空则跟随已存地址，等价于复测已存 profile。
-					if p.BaseURL != "" && saved.BaseURL != p.BaseURL {
+					// 请求显式改地址时不得带出已存真实 key（密钥外传）。
+					if saved.BaseURL != p.BaseURL {
 						writeErr(w, http.StatusBadRequest, "base_url 与已存配置不一致：改用新地址须同时重填 api_key")
 						return
-					}
-					if p.BaseURL == "" {
-						p.BaseURL = saved.BaseURL
 					}
 					p.APIKey = key
 				}
@@ -293,7 +300,7 @@ func (h *Handler) apiEmbeddingDownload(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "未知内置模型: "+req.ModelID)
 		return
 	}
-	cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+	cfg, err := config.LoadMerged("", globalConfigPath())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -401,7 +408,7 @@ var openFolder = func(dir string) error {
 
 // apiEmbeddingOpenModelsDir：系统文件管理器打开生效的模型目录（不存在先创建）。
 func (h *Handler) apiEmbeddingOpenModelsDir(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml"))
+	cfg, err := config.LoadMerged("", globalConfigPath())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

@@ -1276,3 +1276,73 @@ func TestProposeShowsSimilarEntries(t *testing.T) {
 		t.Errorf("propose 应提示疑似同域条目，got: %q", out.String())
 	}
 }
+
+// H-04 回归：--file 传入带 front matter 的文件时，front matter 被剥离，
+// 录入后的条目不嵌套、元数据以命令行参数为准。
+func TestAddFileStripsFrontmatter(t *testing.T) {
+	_, kb := setupProject(t)
+	src := filepath.Join(t.TempDir(), "body.md")
+	content := "---\ntitle: 内层标题\ntype: pitfall\nsummary: 内层摘要\n---\n\n纯正文\n"
+	if err := os.WriteFile(src, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := Add([]string{"--title", "外层标题", "--type", "note", "--file", src}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d err=%q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "front matter") {
+		t.Fatalf("应打印剥离警告: %q", errb.String())
+	}
+	data, err := os.ReadFile(filepath.Join(kb, "knowledge", "外层标题.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := entry.Parse(data)
+	if err != nil {
+		t.Fatalf("条目应不嵌套、可解析: %v\n%s", err, data)
+	}
+	if e.Title != "外层标题" || e.Type != "note" {
+		t.Fatalf("元数据应以命令行参数为准: %+v", e)
+	}
+	if e.Body != "纯正文" {
+		t.Fatalf("正文应为剥离后的内容: %q", e.Body)
+	}
+}
+
+// M-17：单个坏条目不得吞掉整项目——LoadTolerant 跳过坏文件、告警到 stderr，
+// 好条目照常列出（此前严格 Load 报错即 continue，项目条目整体消失且无提示）。
+func TestListWarnsOnCorruptEntry(t *testing.T) {
+	_, kbRoot := setupCLIProject(t)
+	writeCLIEntry(t, kbRoot, "good.md", "---\ntitle: 好条目\ntype: note\nsummary: s\n---\n\n正文。\n")
+	writeCLIEntry(t, kbRoot, "bad.md", "这不是 frontmatter")
+	var out, errBuf bytes.Buffer
+	if code := List(nil, &out, &errBuf); code != 0 {
+		t.Fatalf("list code=%d err=%q", code, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "好条目") {
+		t.Fatalf("好条目被坏文件吞掉: %q", out.String())
+	}
+	if !strings.Contains(errBuf.String(), "bad.md") {
+		t.Fatalf("坏文件应告警到 stderr: %q", errBuf.String())
+	}
+}
+
+// L-22：CLI 用法错误一律退出码 1；exit 2 仅留给 hook stop 阻断。
+func TestUsageErrorsReturnExitCode1(t *testing.T) {
+	setupCLIProject(t)
+	var out, errBuf bytes.Buffer
+	cases := []struct {
+		name string
+		code int
+	}{
+		{"archive 非法 flag", Archive([]string{"--nope"}, &out, &errBuf)},
+		{"archive 缺参数", Archive(nil, &out, &errBuf)},
+		{"wiki 非法 flag", WikiCmd([]string{"--nope"}, &out, &errBuf)},
+		{"wiki 未知子命令", WikiCmd([]string{"bogus"}, &out, &errBuf)},
+	}
+	for _, c := range cases {
+		if c.code != 1 {
+			t.Fatalf("%s: code=%d, want 1", c.name, c.code)
+		}
+	}
+}

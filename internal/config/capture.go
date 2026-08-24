@@ -16,7 +16,7 @@ import (
 // 写者（updateGlobalConfig 保存 LLM/embedding profile）交错时裸跑会把对方
 // 刚写入的内容静默回滚。
 func SetCapture(path, mode string, turnInterval int, header string) error {
-	block := "[capture]\nmode = " + strconv.Quote(mode) + "\nturn_interval = " + strconv.Itoa(turnInterval) + "\n"
+	block := captureBlock(mode, turnInterval)
 	return fsx.WithFileLock(path, func() error {
 		data, err := os.ReadFile(path)
 		if errors.Is(err, os.ErrNotExist) {
@@ -25,34 +25,45 @@ func SetCapture(path, mode string, turnInterval int, header string) error {
 		if err != nil {
 			return err
 		}
-		lines := strings.Split(string(data), "\n")
-		start, end := -1, len(lines)
-		for i, l := range lines {
-			t := strings.TrimSpace(l)
-			if start < 0 {
-				if t == "[capture]" {
-					start = i
-				}
-				continue
-			}
-			if strings.HasPrefix(t, "[") {
-				end = i
-				break
-			}
-		}
-		var out []string
-		if start >= 0 {
-			out = append(out, lines[:start]...)
-			out = append(out, strings.TrimSuffix(block, "\n"))
-			out = append(out, lines[end:]...)
-		} else {
-			out = append(out, lines...)
-			// 与上文保持空行分隔
-			if n := len(out); n > 0 && strings.TrimSpace(out[n-1]) != "" {
-				out = append(out, "")
-			}
-			out = append(out, strings.TrimSuffix(block, "\n"))
-		}
-		return fsx.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+		return fsx.WriteFile(path, []byte(replaceSection(string(data), "[capture]", block)), 0o644)
 	})
+}
+
+func captureBlock(mode string, turnInterval int) string {
+	return "[capture]\nmode = " + strconv.Quote(mode) + "\nturn_interval = " + strconv.Itoa(turnInterval) + "\n"
+}
+
+// replaceSection 返回 content 中整段替换 name 小节后的内容：小节已存在则替换到
+// 下一个 [section] 或文件尾，不存在则文件尾追加（与上文保持空行分隔）；其余
+// 内容（含注释）原样保留。纯函数，落盘与加锁由调用方负责。
+func replaceSection(content, name, block string) string {
+	lines := strings.Split(content, "\n")
+	start, end := -1, len(lines)
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if start < 0 {
+			if t == name {
+				start = i
+			}
+			continue
+		}
+		if strings.HasPrefix(t, "[") {
+			end = i
+			break
+		}
+	}
+	var out []string
+	if start >= 0 {
+		out = append(out, lines[:start]...)
+		out = append(out, strings.TrimSuffix(block, "\n"))
+		out = append(out, lines[end:]...)
+	} else {
+		out = append(out, lines...)
+		// 与上文保持空行分隔
+		if n := len(out); n > 0 && strings.TrimSpace(out[n-1]) != "" {
+			out = append(out, "")
+		}
+		out = append(out, strings.TrimSuffix(block, "\n"))
+	}
+	return strings.Join(out, "\n")
 }

@@ -3,6 +3,8 @@ package gui
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,12 +48,14 @@ type Handler struct {
 	doneOnce sync.Once
 	dlMu     sync.Mutex
 	dl       map[string]*dlJob
+	tkMu     sync.Mutex
+	tickets  map[string]assetTicket
 }
 
 // NewHandler 构建路由。beats 收到每次 /api/heartbeat 的信号（非阻塞，可传 nil）；
 // /api/shutdown 会关闭 Done() 返回的通道，由调用方执行 Server.Shutdown。
 func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
-	h := &Handler{webDir: webDir, token: token, beats: beats, done: make(chan struct{}), dl: map[string]*dlJob{}}
+	h := &Handler{webDir: webDir, token: token, beats: beats, done: make(chan struct{}), dl: map[string]*dlJob{}, tickets: map[string]assetTicket{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", h.serveIndex)
 	mux.HandleFunc("GET /index.html", h.serveIndex)
@@ -93,8 +97,11 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/entry/optimize", h.apiEntryOptimize)
 	api("GET /api/project/branch-info", h.apiProjectBranchInfo)
 	api("GET /api/project/readme", h.apiProjectReadme)
-	// README 相对路径图片直链：<img src> 无法带 X-Ok-Token 头，本端点另放 ?token= 校验
-	mux.HandleFunc("GET /api/project/readme-asset", h.withAuthQuery(h.apiProjectReadmeAsset))
+	// README 相对路径图片直链：<img src> 无法带 X-Ok-Token 头，改一次性短时票据——
+	// 前端先 POST 申领 ticket（走 withAuth）再拼 ?ticket= src，长期 token 不进
+	// URL（浏览器历史/书签会留 query，L-07）
+	api("POST /api/project/readme-asset-ticket", h.apiReadmeAssetTicket)
+	mux.HandleFunc("GET /api/project/readme-asset", h.apiProjectReadmeAsset)
 	api("POST /api/heartbeat", h.apiHeartbeat)
 	api("POST /api/shutdown", h.apiShutdown)
 	api("POST /api/uninstall", h.apiUninstall)
@@ -140,18 +147,6 @@ func (h *Handler) withAuth(fn http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// withAuthQuery 同 withAuth，另接受 ?token= 查询参数——仅供 <img src> 直链端点
-// （浏览器 img 请求无法携带自定义头），其他端点一律走 withAuth 不放查询令牌。
-func (h *Handler) withAuthQuery(fn http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Ok-Token") != h.token && r.URL.Query().Get("token") != h.token {
-			writeErr(w, http.StatusUnauthorized, "缺少或错误的令牌")
-			return
-		}
-		fn(w, r)
-	}
-}
-
 // serveIndex 原样返回 index.html。token 不再内嵌进 HTML（首页无鉴权，内嵌等于
 // 把 token 白送给任何能连 loopback 的进程）——改由 daemon 以 URL fragment
 // （#token=）一次性递交给浏览器，fragment 不随请求发出，inline script 自行读取。
@@ -186,18 +181,20 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 
 // ---------- 项目解析 ----------
 
-// findProject 按名称解析注册表项目；found=false 表示未注册。
-func findProject(name string) (st *store.Store, found bool, err error) {
+// findProject 按名称解析注册表项目：返回知识库 Store 与登记的项目根目录列表
+// （L-11 收口：凡"注册表线性找项目"一律走这里，不再各自 registry.Load+循环）；
+// found=false 表示未注册。
+func findProject(name string) (st *store.Store, paths []string, found bool, err error) {
 	reg, err := registry.Load(registry.DefaultPath())
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	for _, p := range reg.Projects {
 		if p.Name == name {
-			return store.New(filepath.Join(registry.Home(), "projects", name)), true, nil
+			return store.New(filepath.Join(registry.Home(), "projects", name)), p.Paths, true, nil
 		}
 	}
-	return nil, false, nil
+	return nil, nil, false, nil
 }
 
 // resolveProject 是 findProject 的 HTTP 层封装：缺参 400、形状非法 400、未注册 404。
@@ -210,7 +207,7 @@ func resolveProject(w http.ResponseWriter, name string) *store.Store {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("非法项目名: %q", name))
 		return nil
 	}
-	st, found, err := findProject(name)
+	st, _, found, err := findProject(name)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return nil
@@ -283,14 +280,15 @@ func entryPath(w http.ResponseWriter, st *store.Store, file string) string {
 	return filepath.Join(st.KnowledgeDir(), file)
 }
 
-// syncOpts 取项目合并配置的索引渲染选项（[index] max_lines）；配置读取失败
-// 按零值（渲染层默认 50），不阻断同步。
+// syncOpts 取项目合并配置的索引同步选项（[index] max_lines 与
+// [retrieve.feedback] window_days）；配置读取失败按零值（渲染层默认 50、
+// 统计窗口默认 30），不阻断同步。
 func syncOpts(st *store.Store) index.SyncOptions {
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	cfg, err := config.LoadMerged(st.ConfigPath(), globalConfigPath())
 	if err != nil {
 		return index.SyncOptions{}
 	}
-	return index.SyncOptions{MaxLines: cfg.Index.MaxLines}
+	return index.SyncOptions{MaxLines: cfg.Index.MaxLines, FeedbackWindowDays: cfg.Retrieve.Feedback.WindowDays}
 }
 
 // syncIndex 以无 embedding 客户端模式同步索引库；损坏条目警告不视为失败。
@@ -447,7 +445,7 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	embeddingConfigured := false
 	embedding := map[string]any{"configured": false}
 	hooksTimeout := 10
-	if cfg, err := config.LoadMerged("", filepath.Join(registry.Home(), "config.toml")); err == nil {
+	if cfg, err := config.LoadMerged("", globalConfigPath()); err == nil {
 		if p := cfg.Embedding.ActiveProfile(); p != nil {
 			embeddingConfigured = true
 			embedding = map[string]any{
@@ -583,17 +581,10 @@ func (h *Handler) apiExport(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "非法项目名: "+project)
 			return
 		}
-		reg, err := registry.Load(registry.DefaultPath())
+		_, _, found, err := findProject(project)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
-		}
-		found := false
-		for _, p := range reg.Projects {
-			if p.Name == project {
-				found = true
-				break
-			}
 		}
 		if !found {
 			writeErr(w, http.StatusNotFound, "项目不存在: "+project)
@@ -800,7 +791,13 @@ func writeEntry(w http.ResponseWriter, st *store.Store, path string, req *entryR
 		Archived:  archived,
 		Path:      path,
 	}
-	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
+	out, err := e.Serialize()
+	if err != nil {
+		log.Printf("序列化条目失败 %s: %v", path, err)
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := fsx.WriteFile(path, out, 0o644); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -816,24 +813,16 @@ func writeEntry(w http.ResponseWriter, st *store.Store, path string, req *entryR
 // 分支按注册表项目第一个路径（Paths[0]）探测——daemon 的 cwd 未必是项目目录；
 // auto_born 关闭、非 git 或探测失败返回 ""（fail-open，不阻断创建）。
 func guiBornTag(st *store.Store, project string) string {
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	cfg, err := config.LoadMerged(st.ConfigPath(), globalConfigPath())
 	if err != nil || !cfg.Provenance.AutoBorn {
 		return ""
 	}
-	reg, err := registry.Load(registry.DefaultPath())
-	if err != nil {
+	_, paths, found, err := findProject(project)
+	if err != nil || !found || len(paths) == 0 {
 		return ""
 	}
-	for _, p := range reg.Projects {
-		if p.Name == project {
-			if len(p.Paths) == 0 {
-				return ""
-			}
-			if b := wiki.CurrentBranch(p.Paths[0]); b != "" {
-				return "born:" + b
-			}
-			return ""
-		}
+	if b := wiki.CurrentBranch(paths[0]); b != "" {
+		return "born:" + b
 	}
 	return ""
 }
@@ -941,7 +930,7 @@ func (h *Handler) apiSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	cfg, err := config.LoadMerged(st.ConfigPath(), globalConfigPath())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -971,8 +960,20 @@ var terminalWhitelist = []string{
 	"list", "search", "add", "propose", "approve", "archive", "capture", "wiki", "doctor", "on", "off",
 }
 
-// terminalExecTimeout 终端命令超时（超时 kill 子进程）；测试可调小。
+// terminalExecTimeout 终端命令默认超时（超时 kill 子进程）；测试可调小。
 var terminalExecTimeout = 10 * time.Second
+
+// terminalLongExecTimeout 长任务命令超时：wiki 等多轮 git+LLM 任务 10s 必被
+// 误杀（退出码 124），按"超时按场景区分"约定给足时长；测试可调小。
+var terminalLongExecTimeout = 10 * time.Minute
+
+// terminalTimeoutFor 按命令类别返回超时：白名单内 wiki 是长任务，其余走默认短超时。
+func terminalTimeoutFor(cmd string) time.Duration {
+	if cmd == "wiki" {
+		return terminalLongExecTimeout
+	}
+	return terminalExecTimeout
+}
 
 // terminalMaxOutput 单程（stdout/stderr）输出上限，超出截断并标注，防 list 类命令刷屏。
 const terminalMaxOutput = 64 * 1024
@@ -1052,24 +1053,17 @@ func (h *Handler) apiTerminalExec(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, fmt.Sprintf("非法项目名: %q", req.Project))
 			return
 		}
-		reg, err := registry.Load(registry.DefaultPath())
+		_, paths, found, err := findProject(req.Project)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		found := false
-		for _, p := range reg.Projects {
-			if p.Name == req.Project {
-				found = true
-				if len(p.Paths) > 0 {
-					cwd = p.Paths[0]
-				}
-				break
-			}
-		}
 		if !found {
 			writeErr(w, http.StatusNotFound, fmt.Sprintf("项目未注册: %s", req.Project))
 			return
+		}
+		if len(paths) > 0 {
+			cwd = paths[0]
 		}
 	}
 	exe, err := terminalCLI()
@@ -1077,7 +1071,8 @@ func (h *Handler) apiTerminalExec(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("定位 ok CLI 失败: %v", err))
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), terminalExecTimeout)
+	timeout := terminalTimeoutFor(req.Args[0])
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, exe, req.Args...)
 	if cwd != "" {
@@ -1092,7 +1087,7 @@ func (h *Handler) apiTerminalExec(w http.ResponseWriter, r *http.Request) {
 	case ctx.Err() == context.DeadlineExceeded:
 		// CommandContext 已 kill 子进程；退出码借用 timeout(1) 的 124 约定
 		resp.Code = 124
-		msg := fmt.Sprintf("命令超时（%v），已终止", terminalExecTimeout)
+		msg := fmt.Sprintf("命令超时（%v），已终止", timeout)
 		if resp.Stderr != "" {
 			resp.Stderr = strings.TrimRight(resp.Stderr, "\r\n") + "\n" + msg
 		} else {
@@ -1114,7 +1109,7 @@ func (h *Handler) apiTerminalExec(w http.ResponseWriter, r *http.Request) {
 // embeddingClientFor 按合并配置构建 embedding 客户端；未配置返回 nil。
 // 构造收口在 embedx，供 approve 批准草稿时补算向量（索引路径：超时下限 120s）。
 func embeddingClientFor(st *store.Store) embed.Client {
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	cfg, err := config.LoadMerged(st.ConfigPath(), globalConfigPath())
 	if err != nil {
 		return nil
 	}
@@ -1164,8 +1159,14 @@ func (h *Handler) apiApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data, err := os.ReadFile(path)
-	if err != nil {
+	if errors.Is(err, os.ErrNotExist) {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("条目不存在: %s", req.File))
+		return
+	}
+	if err != nil {
+		// L-09：非"不存在"的 IO 错误（权限/占用/介质）不伪装 400，记日志并 500
+		log.Printf("approve 读取条目失败 %s: %v", path, err)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	e, err := entry.Parse(data)
@@ -1184,7 +1185,13 @@ func (h *Handler) apiApprove(w http.ResponseWriter, r *http.Request) {
 	if fi, statErr := os.Stat(path); statErr == nil {
 		prev = fi.ModTime()
 	}
-	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
+	out, serr := e.Serialize()
+	if serr != nil {
+		log.Printf("approve 序列化条目失败 %s: %v", path, serr)
+		writeErr(w, http.StatusInternalServerError, serr.Error())
+		return
+	}
+	if err := fsx.WriteFile(path, out, 0o644); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1217,8 +1224,14 @@ func (h *Handler) apiEntryArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data, err := os.ReadFile(path)
-	if err != nil {
+	if errors.Is(err, os.ErrNotExist) {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("条目不存在: %s", req.File))
+		return
+	}
+	if err != nil {
+		// L-09：同 apiApprove，非"不存在"的 IO 错误记日志并 500
+		log.Printf("archive 读取条目失败 %s: %v", path, err)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	e, err := entry.Parse(data)
@@ -1232,7 +1245,13 @@ func (h *Handler) apiEntryArchive(w http.ResponseWriter, r *http.Request) {
 	if fi, statErr := os.Stat(path); statErr == nil {
 		prev = fi.ModTime()
 	}
-	if err := fsx.WriteFile(path, e.Serialize(), 0o644); err != nil {
+	out, serr := e.Serialize()
+	if serr != nil {
+		log.Printf("archive 序列化条目失败 %s: %v", path, serr)
+		writeErr(w, http.StatusInternalServerError, serr.Error())
+		return
+	}
+	if err := fsx.WriteFile(path, out, 0o644); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1260,51 +1279,9 @@ func (h *Handler) apiCaptureGet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// setProvenanceAutoBorn 重写 config.toml 的 [provenance] 小节（auto_born 键）：
-// 已存在则整段替换（到下一个 [section] 或文件尾），不存在则在文件尾追加；
-// 其余内容（含注释）原样保留。算法与 config.SetCapture 同款（[capture] → [provenance]）。
-func setProvenanceAutoBorn(path string, autoBorn bool) error {
-	block := "[provenance]\nauto_born = " + strconv.FormatBool(autoBorn) + "\n"
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return fsx.WriteFile(path, []byte(block), 0o644)
-	}
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(string(data), "\n")
-	start, end := -1, len(lines)
-	for i, l := range lines {
-		t := strings.TrimSpace(l)
-		if start < 0 {
-			if t == "[provenance]" {
-				start = i
-			}
-			continue
-		}
-		if strings.HasPrefix(t, "[") {
-			end = i
-			break
-		}
-	}
-	var out []string
-	if start >= 0 {
-		out = append(out, lines[:start]...)
-		out = append(out, strings.TrimSuffix(block, "\n"))
-		out = append(out, lines[end:]...)
-	} else {
-		out = append(out, lines...)
-		// 与上文保持空行分隔
-		if n := len(out); n > 0 && strings.TrimSpace(out[n-1]) != "" {
-			out = append(out, "")
-		}
-		out = append(out, strings.TrimSuffix(block, "\n"))
-	}
-	return fsx.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
-}
-
 // apiCaptureSet 设置 capture 模式、轮次间隔与 provenance auto_born：
-// [capture] 小节走 config.SetCapture；[provenance] 小节走 setProvenanceAutoBorn。
+// [capture] 与 [provenance] 两小节走 config.SetCaptureAndAutoBorn 一次锁内写，
+// 避免两步独立落盘在第二步失败时留下 capture 已改而 auto_born 未改的中间态。
 // mode 为空、turn_interval 为 0、auto_born 缺省（null）均表示保持不变。
 // project 缺省 = 写全局 config.toml；显式 project = 写项目 config.toml（旧行为）。
 func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
@@ -1337,17 +1314,13 @@ func (h *Handler) apiCaptureSet(w http.ResponseWriter, r *http.Request) {
 	if req.TurnInterval > 0 {
 		interval = req.TurnInterval
 	}
-	if err := config.SetCapture(cfgPath, mode, interval, ""); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	autoBorn := cfg.Provenance.AutoBorn
 	if req.AutoBorn != nil {
 		autoBorn = *req.AutoBorn
-		if err := setProvenanceAutoBorn(cfgPath, autoBorn); err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+	}
+	if err := config.SetCaptureAndAutoBorn(cfgPath, mode, interval, autoBorn, ""); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode, "turn_interval": interval, "auto_born": autoBorn})
 }
@@ -1454,7 +1427,7 @@ func (h *Handler) apiInjectGet(w http.ResponseWriter, r *http.Request) {
 	if st == nil {
 		return
 	}
-	cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
+	cfg, err := config.LoadMerged(st.ConfigPath(), globalConfigPath())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1548,40 +1521,35 @@ func (h *Handler) apiProjectBranchInfo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// 当前分支取注册表项目第一个路径的 checkout 分支（非 git/失败为空串，fail-open）
-	if reg, err := registry.Load(registry.DefaultPath()); err == nil {
-		for _, p := range reg.Projects {
-			if p.Name == name && len(p.Paths) > 0 {
-				path := p.Paths[0]
-				out["current_branch"] = wiki.CurrentBranch(path)
-				cfg, err := config.LoadMerged(st.ConfigPath(), filepath.Join(registry.Home(), "config.toml"))
-				if err != nil {
-					cfg = config.Default() // fail-open：阈值回退默认
-				}
-				ws := wiki.CheckStatus(st.StateDir(), path, cfg.Wiki.StaleCommits)
-				if ws.BranchState != "" {
-					out["branch_state"] = ws.BranchState
-				}
-				if ws.InheritedFrom != "" {
-					out["inherited_from"] = ws.InheritedFrom
-				}
-				out["behind"] = ws.Behind
-				out["stale"] = ws.Stale
-				out["threshold"] = ws.Threshold
-				if ws.LastCommit != "" {
-					out["last_commit"] = ws.LastCommit
-				}
-				// generated_at/entry_count 取实际生效游标：继承态为来源分支，否则当前分支
-				if s := wiki.LoadState(st.StateDir()); s != nil {
-					cursorBranch := ws.Branch
-					if ws.InheritedFrom != "" {
-						cursorBranch = ws.InheritedFrom
-					}
-					if cur, ok := s.Cursors[cursorBranch]; ok {
-						out["generated_at"] = cur.GeneratedAt
-						out["entry_count"] = cur.EntryCount
-					}
-				}
-				break
+	if _, paths, found, err := findProject(name); err == nil && found && len(paths) > 0 {
+		path := paths[0]
+		out["current_branch"] = wiki.CurrentBranch(path)
+		cfg, err := config.LoadMerged(st.ConfigPath(), globalConfigPath())
+		if err != nil {
+			cfg = config.Default() // fail-open：阈值回退默认
+		}
+		ws := wiki.CheckStatus(st.StateDir(), path, cfg.Wiki.StaleCommits)
+		if ws.BranchState != "" {
+			out["branch_state"] = ws.BranchState
+		}
+		if ws.InheritedFrom != "" {
+			out["inherited_from"] = ws.InheritedFrom
+		}
+		out["behind"] = ws.Behind
+		out["stale"] = ws.Stale
+		out["threshold"] = ws.Threshold
+		if ws.LastCommit != "" {
+			out["last_commit"] = ws.LastCommit
+		}
+		// generated_at/entry_count 取实际生效游标：继承态为来源分支，否则当前分支
+		if s := wiki.LoadState(st.StateDir()); s != nil {
+			cursorBranch := ws.Branch
+			if ws.InheritedFrom != "" {
+				cursorBranch = ws.InheritedFrom
+			}
+			if cur, ok := s.Cursors[cursorBranch]; ok {
+				out["generated_at"] = cur.GeneratedAt
+				out["entry_count"] = cur.EntryCount
 			}
 		}
 	}
@@ -1599,17 +1567,14 @@ func (h *Handler) apiProjectReadme(w http.ResponseWriter, r *http.Request) {
 	if st == nil {
 		return
 	}
-	reg, err := registry.Load(registry.DefaultPath())
+	_, paths, found, err := findProject(name)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	root := ""
-	for _, p := range reg.Projects {
-		if p.Name == name && len(p.Paths) > 0 {
-			root = p.Paths[0]
-			break
-		}
+	if found && len(paths) > 0 {
+		root = paths[0]
 	}
 	if root != "" {
 		for _, fn := range []string{"README.md", "README_EN.md", "readme.md"} {
@@ -1673,21 +1638,90 @@ var readmeImageTypes = map[string]string{
 	".bmp":  "image/bmp",
 }
 
-// apiProjectReadmeAsset 分发项目 README 引用的相对路径图片（管理页 README 视图把
-// 相对路径 <img> 重写为本端点直链）。安全口径：项目名走 resolveProject 校验；
-// path 拒绝绝对路径/盘符/rooted 路径与 .. 穿越（Clean 后仍须落在项目根目录内，
-// Abs 复核兜底）；仅放行 readmeImageTypes 图片扩展名；10MB 上限防病态文件。
-// 缺失 404、非法扩展 400、越界/超限 403。svg 经 <img> 加载脚本不执行，可放行。
-func (h *Handler) apiProjectReadmeAsset(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Query().Get("project")
-	if st := resolveProject(w, name); st == nil {
+// ---------- README 图片一次性票据（L-07） ----------
+
+// assetTicketTTL：一次性票据有效期。<img src> 无法带 X-Ok-Token 头，长期 token
+// 放 URL query 会进浏览器历史/书签——改为前端先 POST 申领短时票据再拼 ?ticket= src。
+const assetTicketTTL = 60 * time.Second
+
+// assetTicket 一次性短时票据：绑定项目与相对路径，核销即删。
+type assetTicket struct {
+	project string
+	path    string
+	expires time.Time
+}
+
+// issueTicket 申领票据（随机 16 字节 hex）；顺带惰性清理过期票据，防长期运行堆积。
+func (h *Handler) issueTicket(project, path string) (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	now := time.Now()
+	h.tkMu.Lock()
+	defer h.tkMu.Unlock()
+	for k, v := range h.tickets {
+		if now.After(v.expires) {
+			delete(h.tickets, k)
+		}
+	}
+	t := hex.EncodeToString(b)
+	h.tickets[t] = assetTicket{project: project, path: path, expires: now.Add(assetTicketTTL)}
+	return t, nil
+}
+
+// redeemTicket 核销票据：命中即删（一次性）；不存在/过期均视为无效。
+func (h *Handler) redeemTicket(t string) (assetTicket, bool) {
+	h.tkMu.Lock()
+	defer h.tkMu.Unlock()
+	tk, ok := h.tickets[t]
+	if ok {
+		delete(h.tickets, t)
+	}
+	if !ok || time.Now().After(tk.expires) {
+		return assetTicket{}, false
+	}
+	return tk, true
+}
+
+// apiReadmeAssetTicket 申领 readme-asset 一次性票据（走 withAuth 头鉴权）；
+// path 的穿越/扩展名校验在兑换端点照旧执行，这里只约束非空。
+func (h *Handler) apiReadmeAssetTicket(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project string `json:"project"`
+		Path    string `json:"path"`
+	}
+	if !decodeJSON(w, r, &req) {
 		return
 	}
-	rel := r.URL.Query().Get("path")
-	if rel == "" {
+	if st := resolveProject(w, req.Project); st == nil {
+		return
+	}
+	if strings.TrimSpace(req.Path) == "" {
 		writeErr(w, http.StatusBadRequest, "缺少 path 参数")
 		return
 	}
+	t, err := h.issueTicket(req.Project, req.Path)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ticket": t})
+}
+
+// apiProjectReadmeAsset 分发项目 README 引用的相对路径图片（管理页 README 视图把
+// 相对路径 <img> 重写为本端点直链）。鉴权走 ?ticket= 一次性短时票据（申领端点
+// 见上，项目与路径在申领时已绑定进票据）；path 拒绝绝对路径/盘符/rooted 路径与
+// .. 穿越（Clean 后仍须落在项目根目录内，Abs 复核兜底）；仅放行 readmeImageTypes
+// 图片扩展名；10MB 上限防病态文件。票据无效/过期 401、缺失 404、非法扩展 400、
+// 越界/超限 403。svg 经 <img> 加载脚本不执行，可放行。
+func (h *Handler) apiProjectReadmeAsset(w http.ResponseWriter, r *http.Request) {
+	tk, ok := h.redeemTicket(r.URL.Query().Get("ticket"))
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "票据无效或已过期")
+		return
+	}
+	name, rel := tk.project, tk.path
 	if filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" ||
 		strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, "\\") {
 		writeErr(w, http.StatusForbidden, "非法路径：拒绝绝对路径与盘符")
@@ -1703,23 +1737,16 @@ func (h *Handler) apiProjectReadmeAsset(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "仅允许图片扩展名")
 		return
 	}
-	reg, err := registry.Load(registry.DefaultPath())
+	_, paths, found, err := findProject(name)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	root := ""
-	for _, p := range reg.Projects {
-		if p.Name == name && len(p.Paths) > 0 {
-			root = p.Paths[0]
-			break
-		}
-	}
-	if root == "" {
+	if !found || len(paths) == 0 {
 		writeErr(w, http.StatusNotFound, "项目无根目录")
 		return
 	}
-	rootAbs, err := filepath.Abs(root)
+	rootAbs, err := filepath.Abs(paths[0])
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1783,15 +1810,10 @@ func (h *Handler) apiHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	var version int64
 	if name := r.URL.Query().Get("project"); name != "" {
-		if reg, err := registry.Load(registry.DefaultPath()); err == nil {
-			for _, p := range reg.Projects {
-				if p.Name == name {
-					kb := filepath.Join(registry.Home(), "projects", p.Name, "kb.db")
-					if fi, err := os.Stat(kb); err == nil {
-						version = fi.ModTime().UnixNano()
-					}
-					break
-				}
+		if _, _, found, err := findProject(name); err == nil && found {
+			kb := filepath.Join(registry.Home(), "projects", name, "kb.db")
+			if fi, err := os.Stat(kb); err == nil {
+				version = fi.ModTime().UnixNano()
 			}
 		}
 	}

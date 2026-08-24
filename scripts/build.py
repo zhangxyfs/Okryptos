@@ -73,15 +73,16 @@ def main():
     ap.add_argument("--skip-winres", action="store_true", help="跳过 exe 图标/版本信息嵌入")
     args = ap.parse_args()
 
-    # 1. exe 图标与版本信息（go-winres，缺失时跳过不报错）
+    # 1. exe 图标与版本信息（go-winres）：缺失或失败即中断——静默跳过会让发布的
+    #    exe 无 VS_VERSION_INFO 版本资源（M-16）；确需跳过须显式 --skip-winres
     if not args.skip_winres:
         winres = shutil.which("go-winres") or str(Path(os.environ.get("GOPATH", Path.home() / "go")) / "bin" / "go-winres.exe")
-        if Path(winres).exists() if not shutil.which("go-winres") else True:
-            for pkg in ("ok", "okd", "okmanager"):
-                run([winres, "make", "--in", "winres.json"], cwd=ROOT / "cmd" / pkg)
-        else:
-            print("go-winres 未安装，跳过 exe 图标嵌入")
-            print("  安装: go install github.com/tc-hib/go-winres@latest")
+        if not (shutil.which("go-winres") or Path(winres).exists()):
+            sys.exit("未找到 go-winres，无法生成 exe 图标/版本资源\n"
+                     "  安装: go install github.com/tc-hib/go-winres@latest\n"
+                     "  确需跳过: --skip-winres")
+        for pkg in ("ok", "okd", "okmanager"):
+            run([winres, "make", "--in", "winres.json"], cwd=ROOT / "cmd" / pkg)
 
     # 2. 编译 dist/ 三 exe + 拷贝 web/（注入版本号，与 build-dist.sh 一致）
     ldflags = f"{LDFLAGS} -X openknowledge/internal/version.Version={app_version()}"
