@@ -515,3 +515,27 @@ func TestOnInputBadPayloadLogs(t *testing.T) {
 		t.Errorf("坏 payload 应记 ok.log，got: %q", string(data))
 	}
 }
+
+// TestOnToolAfterFilePathField 兼容 file_path 字段名（R3 F-02）：宿主字段名
+// 漂移到 file_path 时 TrackTouched 不能静默零派发（与 hook 层 Event.FilePath
+// 双字段同款，已记载坑"派发层字段名断链零派发"）。
+func TestOnToolAfterFilePathField(t *testing.T) {
+	projDir, _ := setupProject(t)
+	h := &handler{sessionID: "s11", cwd: projDir}
+	// 与 TestOnToolAfterTracksTouched 同款 %q 构造：内层 JSON 需双层转义
+	//（外层 unmarshal 一次、内层再一次），手写 raw string 只翻倍一次不够。
+	inner := `{"file_path":"` + strings.ReplaceAll(filepath.Join(projDir, "c.go"), `\`, `\\`) + `"}`
+	payload := fmt.Sprintf(`{"name":"edit_file","arguments":%q,"isError":false}`, inner)
+	res, err := h.onToolAfter(context.Background(), "tool.after", []byte(payload))
+	if err != nil || res.Decision != extension.DecisionContinue {
+		t.Fatalf("tool.after 应恒 Continue: %v %v", res, err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := state.Load(pc.Store.StateDir(), "s11")
+	if len(st.Touched) != 1 || st.Touched[0] != "c.go" {
+		t.Fatalf("file_path 字段也应记录 touched: %+v", st.Touched)
+	}
+}

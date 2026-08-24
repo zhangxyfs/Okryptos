@@ -255,17 +255,27 @@ func (h *handler) onToolAfter(_ context.Context, _ string, payload json.RawMessa
 	default:
 		return res, nil
 	}
+	// path/file_path 双字段兼容（R3 F-02）：宿主字段名漂移时 TrackTouched
+	// 不做静默零派发——与 hook 层 Event.FilePath 同款口径。
 	var args struct {
-		Path string `json:"path"`
+		Path     string `json:"path"`
+		FilePath string `json:"file_path"`
 	}
-	if err := json.Unmarshal([]byte(p.Arguments), &args); err != nil || args.Path == "" {
+	if err := json.Unmarshal([]byte(p.Arguments), &args); err != nil {
+		return res, nil
+	}
+	path := args.Path
+	if path == "" {
+		path = args.FilePath
+	}
+	if path == "" {
 		return res, nil
 	}
 	pc, err := project.FromCwd(h.cwd)
 	if err != nil {
 		return res, nil
 	}
-	hook.TrackTouched(pc, h.sessionID, p.Name, args.Path)
+	hook.TrackTouched(pc, h.sessionID, p.Name, path)
 	return res, nil
 }
 
