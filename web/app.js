@@ -1053,20 +1053,23 @@ function refreshManage(){
   }).then(()=>{
     mgmtRefreshBusy = false;
     if(mgmtRefreshAgain){ mgmtRefreshAgain = false; refreshManage(); }   // in-flight 期间又有触发 → 补一轮全量
-    if(state.pendingJump){   // 终端 search 定位重试（jumpToEntry 缓存缺失兜底）：数据到位后重跳
-      const j = state.pendingJump; state.pendingJump = null;
-      jumpToEntry(j.file, j.project, true);
-      return;
-    }
-    /* 有意不走 menuRender（L-30）：守卫（menu/edBusy）之后还有保焦分支——
-       终端输入态跳过、过滤框聚焦时只原位重填树不整页重渲 */
-    if(state.menu!=="manage" || edBusy()) return;   // 编辑/对照态中不重渲（草稿优先）
+    /* 守卫先行（R3 F-01）：pendingJump 重试不再绕过编辑/终端/过滤态——被守卫
+       拦下时直接放弃挂起（清 pendingJump），不弹 confirm、不清终端输入。
+       有意不走 menuRender（L-30）：守卫之后还有保焦分支——终端输入态跳过、
+       过滤框聚焦时只原位重填树不整页重渲 */
+    if(state.menu!=="manage" || edBusy()){ state.pendingJump = null; return; }   // 编辑/对照态中不重渲（草稿优先）
     const ae = document.activeElement;
-    if(termBusy || (ae && ae.classList && ae.classList.contains("term-in"))) return;   // 终端输入/执行态不打断（需求 3）
+    if(termBusy || (ae && ae.classList && ae.classList.contains("term-in"))){ state.pendingJump = null; return; }   // 终端输入/执行态不打断（需求 3）
     if(ae && ae.classList && ae.classList.contains("search")){
+      state.pendingJump = null;
       const sc = document.querySelector(".tree-scroll");
       if(sc) fillTree(sc);
       return;
+    }
+    if(state.pendingJump){   // 终端 search 定位重试（jumpToEntry 缓存缺失兜底）：数据到位后重跳一次
+      const j = state.pendingJump; state.pendingJump = null;
+      jumpToEntry(j.file, j.project, true);
+      return;   // 命中则 jumpToEntry 自带整页重渲；仍缺则挂起已清，留待下轮轮询常规重渲
     }
     render();
   });
