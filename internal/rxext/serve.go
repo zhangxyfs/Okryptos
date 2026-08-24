@@ -16,6 +16,7 @@ import (
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/daemonx"
 	"openknowledge/internal/hook"
+	"openknowledge/internal/logx"
 	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
 	extension "openknowledge/internal/rxext/sdk"
@@ -196,7 +197,9 @@ func isSyntheticTurn(text string) bool {
 // 不再上报）。sidecar 的 stderr 由宿主脱敏留尾，协议类故障（如宿主载荷漂移）
 // 需进 ok.log 才能在 GUI 日志页诊断。
 func logErr(format string, args ...any) {
-	f, err := os.OpenFile(filepath.Join(registry.Home(), "ok.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	p := filepath.Join(registry.Home(), "ok.log")
+	logx.RotateIfOversize(p)
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}

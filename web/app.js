@@ -160,6 +160,7 @@ const I18N = {
     termPh:"输入命令，例如 list", termSend:"发送",
     termRunning:"⏳ 执行中…", termOk:"执行成功", termErr:"执行失败",
     termBadCmd:"不可用命令：{c}", termAvail:"可用命令：",
+    termJumpTip:"点击定位到条目：", termMin:"最小化终端",
     tc_list:"列出项目与条目", tc_search:"语义检索条目", tc_doctor:"环境自检",
     tc_capture:"查看或设置沉淀模式", tc_approve:"批准草稿条目", tc_wiki:"项目 wiki 状态",
     tc_add:"新建条目", tc_propose:"提议草稿", tc_archive:"归档条目",
@@ -295,6 +296,7 @@ const I18N = {
     termPh:"Type a command, e.g. list", termSend:"Send",
     termRunning:"⏳ Running…", termOk:"Succeeded", termErr:"Failed",
     termBadCmd:"Unavailable command: {c}", termAvail:"Available commands:",
+    termJumpTip:"Click to locate entry:", termMin:"Minimize terminal",
     tc_list:"List projects and entries", tc_search:"Semantic search entries", tc_doctor:"Environment self-check",
     tc_capture:"View or set capture mode", tc_approve:"Approve a draft entry", tc_wiki:"Project wiki status",
     tc_add:"Add an entry", tc_propose:"Propose a draft", tc_archive:"Archive entries",
@@ -325,6 +327,7 @@ const ICON = {
   prefs:  svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
   logs:   svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
   misc:   svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>'),
+  term:   svg('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
   folder: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>', 14),
   history: svg('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>'),   // 预留（演进历程已改回文件夹图标）
   branch: svg('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>', 10),
@@ -651,6 +654,8 @@ const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
                 catDefaulted:{},                                              // 需求 5：首展默认展开每项目只应用一次
                 cmd:null, cmdRaw:"", cmdErr:"", cmdHelp:false, scopeNote:"",   // 需求 2：搜索框命令态
                 termHist:loadTermHist(),                                      // 需求 3：终端历史（localStorage 持久化）
+                pendingJump:null,                                             // search 命中定位的缓存缺失重试（refreshManage 到位后重跳一次）
+                termMin:false,                                                // 终端面板最小化（会话级，不落盘；恢复按钮在侧栏底部）
                 edView:"read",   // 详情区态：read 只读 | edit 内联编辑 | cmp 优化对照
                 layout:loadLayout(), cfgOpen:false, cfgDraft:null,            // 需求 4：栏目布局 + 设置弹窗
                 logSrc:{ ok:true, daemon:true, sidecar:true }, logSem:false, logQ:"",
@@ -1048,6 +1053,11 @@ function refreshManage(){
   }).then(()=>{
     mgmtRefreshBusy = false;
     if(mgmtRefreshAgain){ mgmtRefreshAgain = false; refreshManage(); }   // in-flight 期间又有触发 → 补一轮全量
+    if(state.pendingJump){   // 终端 search 定位重试（jumpToEntry 缓存缺失兜底）：数据到位后重跳
+      const j = state.pendingJump; state.pendingJump = null;
+      jumpToEntry(j.file, j.project, true);
+      return;
+    }
     /* 有意不走 menuRender（L-30）：守卫（menu/edBusy）之后还有保焦分支——
        终端输入态跳过、过滤框聚焦时只原位重填树不整页重渲 */
     if(state.menu!=="manage" || edBusy()) return;   // 编辑/对照态中不重渲（草稿优先）
@@ -1832,6 +1842,10 @@ function renderTerminal(extraCls){
   termHeadEl = head;
   head.appendChild(Object.assign(el("span","tt"),{textContent:t("termTitle")}));
   head.appendChild(Object.assign(el("span","sub"),{textContent:t("termSub")}));
+  const minBtn = el("button","icon-btn term-min");       // 最小化：终端面板收起，侧栏底部出现恢复按钮
+  minBtn.title = t("termMin"); minBtn.textContent = "—";
+  minBtn.onclick = ()=>{ state.termMin = true; render(); };
+  head.appendChild(minBtn);
   tp.appendChild(head);
   termHistEl = el("div","term-hist");
   termHistEl.onscroll = hideScoreTip;   // 锚点滚动即关浮窗，避免滞留脱节（L-27）
@@ -1916,6 +1930,59 @@ function hideScoreTip(){ if(scoreTipEl){ scoreTipEl.remove(); scoreTipEl = null;
 /* 输出块：按行拆分，每行单行截断 + title 悬浮看全文；
    ok search 命中行（"%.4f\t标题 (文件)"，cli.go:397）的分数段包 .t-score，
    悬浮弹出 RRF 分释义，其余部分保留 title 看全文 */
+// 条目所在类目键（与 groupEntries 分组口径一致）
+function catKeyOf(e){
+  return e.archived ? "archived" : e.draft ? "draft" : e.mandatory ? "mandatory"
+    : e.type==="rule" ? "rule" : e.type==="pitfall" ? "pitfall" : e.type==="note" ? "note"
+    : "reference";
+}
+/* search 命中行单击定位（终端→树+详情联动）：项目口径与 sendTerm 工作目录一致
+   （选中条目项目 > README 视图项目 > 当前展开项目，可用 project 参数显式指定）。
+   找到后清过滤（过滤态会藏目标）、展开项目（手风琴互斥）与所在类目/子目录、
+   懒加载计数覆盖目标序号，选中并拉详情，整页重渲后把选中行滚入视口。
+   条目缓存缺失（外部刚增删）时经 pendingJump 全量重拉后重试一次（isRetry），仍缺则静默放弃 */
+function jumpToEntry(file, project, isRetry){
+  const proj = project || (state.sel && state.sel.project) || state.projSel
+    || (MGMT && MGMT.list && (MGMT.list.find(p=>state.open[p.name]===true)||{}).name) || "";
+  if(!proj || !MGMT || !MGMT.list) return;
+  const p = MGMT.list.find(x=>x.name===proj);
+  const hit = p && findEntry(proj, file);
+  if(!hit){
+    if(!isRetry){ state.pendingJump = { project:proj, file:file }; refreshManage(); }
+    return;
+  }
+  if(!exitEditGuarded()) return;
+  const e = hit.entry;
+  state.q = ""; state.cmd = null; state.cmdRaw = "";
+  state.cmdErr = ""; state.cmdHelp = false; state.scopeNote = "";
+  state.openTouched = true;
+  state.open = {}; state.open[p.name] = true;
+  const ck = proj+"/"+catKeyOf(e);
+  state.catOpen[ck] = true;
+  const cover = (key, list)=>{   // 懒加载计数覆盖目标序号（leafList 按 shown 截断渲染）
+    const idx = list.indexOf(e);
+    if(idx>=0) state.treeShown[key] = Math.max(state.treeShown[key]||LAZY_STEP, idx+1);
+  };
+  if(catKeyOf(e)==="reference"){
+    const sg = refSubGroups(p, p.entries||[]);
+    let sub = null, list = null;
+    if(sg.overview.indexOf(e)>=0 || sg.evo.indexOf(e)>=0){ /* 双身份节点本身：展开 reference 即渲染 */ }
+    else if((list=sg.chapters).indexOf(e)>=0) sub = "架构总览";
+    else if((list=sg.evoSegs).indexOf(e)>=0) sub = "演进历程";
+    else { list = sg.plain; sub = "其他"; }
+    if(sub){ state.catOpen[ck+"/"+sub] = true; cover(ck+"/"+sub, list); }
+  } else {
+    cover(ck, (groupEntries(p.entries||[]))[catKeyOf(e)]);
+  }
+  state.catSel = null; state.projSel = null;
+  state.sel = { project:proj, file:e.file }; state.mgmtFb = null;
+  loadDetail();
+  render();
+  requestAnimationFrame(()=>{   // render 外壳恢复滚动后，把选中行滚入视口
+    const n = document.querySelector(".tree-scroll .leaf.sel");
+    if(n) n.scrollIntoView({ block:"nearest" });
+  });
+}
 function outBlock(text){
   const box = el("div","t-out");
   (text||"").split("\n").forEach(l=>{
@@ -1929,11 +1996,21 @@ function outBlock(text){
       sc.onmouseleave = hideScoreTip;
       sc.onfocus = ()=>showScoreTip(sc);
       sc.onblur = hideScoreTip;
-      sc.onclick = ()=>showScoreTip(sc);     // 触屏 tap 兜底（部分浏览器 tap 不触发 mouseenter）
+      sc.onclick = ev=>{ ev.stopPropagation(); showScoreTip(sc); };   // 触屏 tap 兜底；不触发整行跳转
       const rest = el("span");
       rest.textContent = l.slice(m[0].length);
       rest.title = l;
       ln.appendChild(sc); ln.appendChild(rest);
+      const fm = / \(([^()]+?\.md)\)\s*$/.exec(l);   // search 命中行尾 (文件名.md) → 整行可单击定位
+      if(fm){
+        ln.classList.add("t-link");
+        ln.title = t("termJumpTip")+" "+fm[1];
+        ln.onclick = ()=>{
+          const ws = window.getSelection();
+          if(ws && !ws.isCollapsed) return;   // 划词选择不触发跳转
+          jumpToEntry(fm[1]);
+        };
+      }
     } else {
       ln.textContent = l; ln.title = l;
     }
@@ -1990,8 +2067,9 @@ function sendTerm(){
   };
   const args = v.split(/\s+/).filter(Boolean);   // 用户输入不带 ok 前缀，按第一个 token 匹配子命令
   if(TERM_WHITELIST.indexOf(args[0])<0){         // 白名单外命令前端先行拦截（后端同样会拦）
+    // 可用命令横排（顿号分隔，与后端 apiTerminalExec 拦截文案同口径），不竖列占位
     finish(1, "", t("termBadCmd").replace("{c}", args[0]||t("cmdEmpty"))
-      + "\n" + t("termAvail") + "\n  " + TERM_WHITELIST.join("\n  "));
+      + "\n" + t("termAvail") + TERM_WHITELIST.join("、"));
     return;
   }
   // 工作目录语义：当前选中条目项目 > 选中项目（README 视图）> 当前展开项目
@@ -2067,7 +2145,7 @@ function renderManageLayout(main){
   const cfg = state.layout;
   const area = el("div","layout-area");
   main.appendChild(area);
-  if(cfg.term==="bottom"){
+  if(cfg.term==="bottom" && !state.termMin){
     // 终端在下：上部 = 树+详情横向两栏，下部 = 终端整条（默认高 40%，横分隔条可拖并持久化）
     const upper = el("div","layout-row");
     area.appendChild(upper);
@@ -2097,7 +2175,7 @@ function renderManageLayout(main){
   } else {
     const row = el("div","layout-row");
     area.appendChild(row);
-    placePanels(row, cfg, ["tree","detail","term"]);
+    placePanels(row, cfg, state.termMin ? ["tree","detail"] : ["tree","detail","term"]);   // 最小化时终端不占槽
   }
 }
 
@@ -3936,6 +4014,13 @@ function renderBody(app){
     };
     side.appendChild(b);
   });
+  if(state.termMin){   // 终端最小化时的恢复按钮：沉底 + 顶部分隔线，点回后自身消失
+    const rb = el("button","mi term-restore");
+    rb.innerHTML = '<span class="ico">'+ICON.term+'</span><span class="txt">'+t("termTitle")+'</span>'
+                 + '<span class="tip">'+t("termTitle")+'</span>';
+    rb.onclick = ()=>{ state.termMin = false; render(); };
+    side.appendChild(rb);
+  }
   main.appendChild(side);
 
   // 五页均已接入真实数据：管理（Task 5）、引导（Task 7）、设置（Task 6）、日志（Task 3）、其他（Task 4）

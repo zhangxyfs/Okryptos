@@ -137,7 +137,9 @@ func runExtensionServe() int {
 // logTruncation 把 hook payload 超 1MB 截断记进 ok.log（与 hook.logErr 同一文件、
 // 同一行格式）；写不进也不影响主流程（fail-open）。
 func logTruncation(event string) {
-	f, err := os.OpenFile(filepath.Join(registry.Home(), "ok.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	p := filepath.Join(registry.Home(), "ok.log")
+	logx.RotateIfOversize(p)
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}

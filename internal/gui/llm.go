@@ -17,6 +17,7 @@ import (
 	"openknowledge/internal/config"
 	"openknowledge/internal/index"
 	"openknowledge/internal/llmx"
+	"openknowledge/internal/logx"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/retrieve"
 	"openknowledge/internal/setupx"
@@ -246,7 +247,9 @@ func (h *Handler) apiLLMTest(w http.ResponseWriter, r *http.Request) {
 // logOptimize 追加优化调用记录到 ok.log（GUI「日志」页 ok 来源即此文件，
 // 前端轮询 /api/logs 自动显示，无需改动）。与 hook.logErr 同一格式。
 func logOptimize(format string, args ...any) {
-	f, err := os.OpenFile(filepath.Join(registry.Home(), "ok.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	p := filepath.Join(registry.Home(), "ok.log")
+	logx.RotateIfOversize(p)
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}

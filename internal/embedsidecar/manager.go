@@ -144,6 +144,7 @@ func (m *Manager) spawnLocked(model embed.BuiltinModel) (*exec.Cmd, *State, chan
 	}
 	cmd := ServerCommand(server, args...)
 	hideWindow(cmd)
+	logx.RotateIfOversize(logPath()) // sidecar 重启窗口轮替：上一进程已退出，句柄已释放
 	logF, err := os.OpenFile(logPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	var logW *logx.Writer
 	if err == nil {

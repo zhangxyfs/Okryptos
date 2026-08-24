@@ -9,12 +9,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"openknowledge/internal/daemonx"
 	"openknowledge/internal/embedsidecar"
 	"openknowledge/internal/gui"
+	"openknowledge/internal/logx"
+	"openknowledge/internal/registry"
 	"openknowledge/internal/tray"
 	"openknowledge/internal/version"
 )
@@ -31,6 +34,7 @@ var trayEnabled = true
 // Run 以单实例运行 daemon 并阻塞：端口即锁，第二个实例发现已有健康 daemon 即退出 0。
 // 默认端口被非 daemon 占用时回退随机端口。/api/shutdown 或进程信号结束运行。
 func Run(webDir string, stdout, stderr io.Writer) int {
+	logx.CleanArchives(filepath.Join(registry.Home(), "logs")) // 过期归档日志清理（保留 7 天）
 	fp, err := daemonx.ExeFingerprint()
 	if err != nil {
 		fmt.Fprintln(stderr, err)

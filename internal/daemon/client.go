@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"openknowledge/internal/daemonx"
+	"openknowledge/internal/logx"
 	"openknowledge/internal/registry"
 )
 
@@ -51,7 +52,9 @@ func Ensure() {
 	if exe == "" {
 		return
 	}
-	_ = SpawnDetached(exe, args, filepath.Join(registry.Home(), "daemon.log"))
+	logPath := filepath.Join(registry.Home(), "daemon.log")
+	logx.RotateIfOversize(logPath) // 拉起窗口轮替：旧 daemon 已不在，句柄已释放
+	_ = SpawnDetached(exe, args, logPath)
 }
 
 // EnsureCurrent 返回健康且指纹一致的 daemon 凭证；

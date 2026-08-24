@@ -12,6 +12,7 @@ import (
 
 	"openknowledge/internal/agentx"
 	"openknowledge/internal/daemonx"
+	"openknowledge/internal/logx"
 	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/state"
@@ -154,7 +155,9 @@ func stopBlock(stderr, stdout io.Writer, format, reason string) int {
 }
 
 func logErr(format string, args ...any) {
-	f, err := os.OpenFile(filepath.Join(registry.Home(), "ok.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	p := filepath.Join(registry.Home(), "ok.log")
+	logx.RotateIfOversize(p)
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}
