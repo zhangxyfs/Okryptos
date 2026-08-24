@@ -721,6 +721,12 @@ func Propose(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
+		// 与 Add 同款（R3 E-01）：源文件自带 front matter 时剥离并警告，
+		// 元数据以命令行参数为准；直接落库会被 Serialize 再包一层 ---
+		if stripped, ok := entry.StripFrontmatter(data); ok {
+			fmt.Fprintf(stderr, "警告: %s 含 front matter，已剥离（条目的 title/type 等以命令行参数为准）\n", *file)
+			data = stripped
+		}
 		content = string(data)
 	case *body != "":
 		content = *body

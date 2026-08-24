@@ -274,3 +274,32 @@ func TestApproveIgnoresSameNameFileInCwd(t *testing.T) {
 		t.Fatalf("cwd 副本被改写: %q", cwdData)
 	}
 }
+
+// --file 带 front matter 必须剥离（R3 E-01，与 Add 同款历史坑）：
+// 直接落库会被 Serialize 再包一层 ---，内层元数据静默变正文。
+func TestProposeFileStripsFrontmatter(t *testing.T) {
+	_, kb := setupProject(t)
+	src := filepath.Join(t.TempDir(), "src.md")
+	fm := "---\ntitle: 内层标题\ntype: pitfall\n---\n\n真正的正文。\n"
+	if err := os.WriteFile(src, []byte(fm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errBuf bytes.Buffer
+	if code := Propose([]string{"--title", "外层标题", "--file", src}, &out, &errBuf); code != 0 {
+		t.Fatalf("propose code=%d err=%q", code, errBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), "front matter") {
+		t.Fatalf("应警告已剥离 front matter: %q", errBuf.String())
+	}
+	entries, err := entry.Load(filepath.Join(kb, "knowledge"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries %+v err=%v", entries, err)
+	}
+	e := entries[0]
+	if e.Title != "外层标题" || strings.Contains(e.Body, "---") || strings.Contains(e.Body, "内层标题") {
+		t.Fatalf("front matter 应剥离、title 以命令行为准: %+v body=%q", e, e.Body)
+	}
+	if !strings.Contains(e.Body, "真正的正文") {
+		t.Fatalf("正文应保留: %q", e.Body)
+	}
+}
