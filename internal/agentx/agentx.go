@@ -74,3 +74,7 @@ func currentCLIExe() (string, error) {
 	}
 	return daemonx.CliTargetFor(exe)
 }
+
+// CLIExe 导出 currentCLIExe 供包外复用同一检测口径（GUI skillsInstalled 等，
+// R3 B-01：技能状态须与 hooks 检测基于同一 exe 基准）。
+func CLIExe() (string, error) { return currentCLIExe() }

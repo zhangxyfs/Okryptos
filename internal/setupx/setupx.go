@@ -68,21 +68,67 @@ func AllSkillDirs() []string {
 	return dirs
 }
 
+// renderSkill 渲染技能模板（烘焙 exe 绝对路径，正斜杠口径同 InstallSkills）。
+func renderSkill(name, exe string) string {
+	return strings.ReplaceAll(skillTemplates[name], "{{EXE}}", filepath.ToSlash(exe))
+}
+
 // InstallSkills 把技能模板（烘焙 exe 路径）写入 SkillDirs() 的每个目录。
 func InstallSkills(exe string) error {
 	for _, home := range SkillDirs() {
-		for name, tpl := range skillTemplates {
+		for name := range skillTemplates {
 			dir := filepath.Join(home, name)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return err
 			}
-			content := strings.ReplaceAll(tpl, "{{EXE}}", filepath.ToSlash(exe))
-			if err := fsx.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+			if err := fsx.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(renderSkill(name, exe)), 0o644); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// EnsureSkills 技能自愈（R3 B-01，与各适配器 EnsureHooks 同款"不复活"语义）：
+// 文件存在、front matter name 表明是本项目技能、但烘焙的 exe 已过期
+//（gui-split 部署迁移/改名）时重写为当前路径；文件缺失不复活（用户显式
+// 删除），外来内容（name 不匹配）不动。技能指令里的 exe 指向死路径时
+// agent 执行报错，而状态页只查存在性会误报正常——故须随 selfHealHooks
+// 同窗口自愈。
+func EnsureSkills(exe string) error {
+	cur := `"` + filepath.ToSlash(exe) + `"`
+	for _, home := range SkillDirs() {
+		for name := range skillTemplates {
+			p := filepath.Join(home, name, "SKILL.md")
+			data, err := os.ReadFile(p)
+			if err != nil {
+				continue // 缺失不复活
+			}
+			content := string(data)
+			if !strings.Contains(content, "name: "+name+"\n") || strings.Contains(content, cur) {
+				continue // 外来内容不动；exe 仍最新不动
+			}
+			if err := fsx.WriteFile(p, []byte(renderSkill(name, exe)), 0o644); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// SkillsInstalled 技能状态检测（R3 B-01）：全部目标目录的全部技能文件存在
+// 且烘焙的 exe 为当前路径。只查存在性会把 exe 迁移后的死路径误报为已接入。
+func SkillsInstalled(exe string) bool {
+	cur := `"` + filepath.ToSlash(exe) + `"`
+	for _, home := range SkillDirs() {
+		for _, name := range SkillNames() {
+			data, err := os.ReadFile(filepath.Join(home, name, "SKILL.md"))
+			if err != nil || !strings.Contains(string(data), cur) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // updateGlobalConfig 跨进程锁内 读-改-写 全局 config.toml（0600）：LoadMerged 取

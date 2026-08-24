@@ -433,14 +433,10 @@ func (h *Handler) apiStatus(w http.ResponseWriter, _ *http.Request) {
 			"hooksInstalled": a.HooksInstalled(),
 		})
 	}
-	skillsInstalled := true
-	for _, home := range setupx.SkillDirs() {
-		for _, name := range setupx.SkillNames() {
-			if _, err := os.Stat(filepath.Join(home, name, "SKILL.md")); err != nil {
-				skillsInstalled = false
-				break
-			}
-		}
+	// 技能状态比对烘焙内容（R3 B-01）：只查存在性会把 exe 迁移后的死路径误报为已接入
+	skillsInstalled := false
+	if exe, err := agentx.CLIExe(); err == nil {
+		skillsInstalled = setupx.SkillsInstalled(exe)
 	}
 	embeddingConfigured := false
 	embedding := map[string]any{"configured": false}

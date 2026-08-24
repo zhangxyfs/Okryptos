@@ -15,6 +15,7 @@ import (
 	"openknowledge/internal/logx"
 	"openknowledge/internal/project"
 	"openknowledge/internal/registry"
+	"openknowledge/internal/setupx"
 	"openknowledge/internal/state"
 	"openknowledge/internal/wiki"
 )
@@ -210,6 +211,10 @@ func selfHealHooks() {
 		if err := a.EnsureHooks(exe); err != nil {
 			logErr("self-heal hooks (%s): %v", a.ID(), err)
 		}
+	}
+	// 技能同窗口自愈（R3 B-01）：烘焙的 exe 过期时重写；缺失/外来不动
+	if err := setupx.EnsureSkills(exe); err != nil {
+		logErr("self-heal skills: %v", err)
 	}
 }
 
