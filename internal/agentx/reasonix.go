@@ -97,7 +97,7 @@ func loadReasonixState() (map[string]any, error) {
 	return st, nil
 }
 
-// writeReasonixState 备份后原子写（temp+rename）。
+// writeReasonixState 备份后经 fsx.WriteFile 原子写（tmp+fsync+rename）。
 func writeReasonixState(st map[string]any) error {
 	path := reasonixStatePath()
 	if data, err := os.ReadFile(path); err == nil {
@@ -107,14 +107,7 @@ func writeReasonixState(st map[string]any) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp := path + ".tmp-openknowledge"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fsx.WriteFile(path, append(data, '\n'), 0o644)
 }
 
 // reasonixStatePlugins 取 plugins 数组（只读视图）。
@@ -234,42 +227,54 @@ func reasonixInterceptsCover(v any) bool {
 }
 
 func (reasonixAgent) InstallHooks(exe string) error {
-	st, err := loadReasonixState()
-	if err != nil {
-		return err
-	}
-	if err := writeReasonixManifest(exe); err != nil {
-		return err
-	}
-	upsertOKReasonixEntry(st)
-	return writeReasonixState(st)
+	// plugin-packages.json 是宿主登记文件，读-改-写包在 WithFileLock 内
+	//（manifest 为自家整文件写，无需锁）。
+	return fsx.WithFileLock(reasonixStatePath(), func() error {
+		st, err := loadReasonixState()
+		if err != nil {
+			return err
+		}
+		if err := writeReasonixManifest(exe); err != nil {
+			return err
+		}
+		upsertOKReasonixEntry(st)
+		return writeReasonixState(st)
+	})
 }
 
 func (reasonixAgent) RemoveHooks() (bool, error) {
 	if _, err := os.Stat(reasonixStatePath()); os.IsNotExist(err) {
 		return false, nil
 	}
-	st, err := loadReasonixState()
+	removed := false
+	err := fsx.WithFileLock(reasonixStatePath(), func() error {
+		st, err := loadReasonixState()
+		if err != nil {
+			return err
+		}
+		changed := removeOKReasonixEntry(st)
+		// 插件目录仅当内含 ok manifest 才删（防误删同名外来目录）
+		if data, err := os.ReadFile(reasonixManifestPath()); err == nil {
+			mf := map[string]any{}
+			if json.Unmarshal(data, &mf) == nil && mf["name"] == "openknowledge" {
+				if err := os.RemoveAll(reasonixPluginDir()); err == nil {
+					changed = true
+				}
+			}
+		}
+		if !changed {
+			return nil
+		}
+		if err := writeReasonixState(st); err != nil {
+			return fmt.Errorf("移除 reasonix 插件登记: %w", err)
+		}
+		removed = true
+		return nil
+	})
 	if err != nil {
 		return false, err
 	}
-	changed := removeOKReasonixEntry(st)
-	// 插件目录仅当内含 ok manifest 才删（防误删同名外来目录）
-	if data, err := os.ReadFile(reasonixManifestPath()); err == nil {
-		mf := map[string]any{}
-		if json.Unmarshal(data, &mf) == nil && mf["name"] == "openknowledge" {
-			if err := os.RemoveAll(reasonixPluginDir()); err == nil {
-				changed = true
-			}
-		}
-	}
-	if !changed {
-		return false, nil
-	}
-	if err := writeReasonixState(st); err != nil {
-		return false, fmt.Errorf("移除 reasonix 插件登记: %w", err)
-	}
-	return true, nil
+	return removed, nil
 }
 
 // EnsureHooks 自愈：state 存在、曾登记过 ok 插件且内容过期时重写；
@@ -278,18 +283,20 @@ func (reasonixAgent) EnsureHooks(exe string) error {
 	if _, err := os.Stat(reasonixStatePath()); err != nil {
 		return nil
 	}
-	st, err := loadReasonixState()
-	if err != nil {
-		return err
-	}
-	if findOKReasonixEntry(reasonixStatePlugins(st)) < 0 || reasonixCurrent(st, exe) {
-		return nil
-	}
-	if err := writeReasonixManifest(exe); err != nil {
-		return err
-	}
-	upsertOKReasonixEntry(st)
-	return writeReasonixState(st)
+	return fsx.WithFileLock(reasonixStatePath(), func() error {
+		st, err := loadReasonixState()
+		if err != nil {
+			return err
+		}
+		if findOKReasonixEntry(reasonixStatePlugins(st)) < 0 || reasonixCurrent(st, exe) {
+			return nil
+		}
+		if err := writeReasonixManifest(exe); err != nil {
+			return err
+		}
+		upsertOKReasonixEntry(st)
+		return writeReasonixState(st)
+	})
 }
 
 func (reasonixAgent) HooksInstalled() bool {

@@ -180,19 +180,30 @@ func (dshAgent) RemoveHooks() (bool, error) {
 		}
 		removed = true
 	}
+	// patch 行是宿主 cordis.patch.yml 的读-改-写，包在 WithFileLock 内
+	//（同 UpsertHooksBlock；插件文件为自家 marker 校验后的整删，无需锁）。
 	patch := dshPatchPath()
-	data, err = os.ReadFile(patch)
-	switch {
-	case os.IsNotExist(err):
-	case err != nil:
-		return removed, err
-	default:
-		if out, ok := removeDSHMarkerBlock(string(data)); ok {
+	err = fsx.WithFileLock(patch, func() error {
+		data, err := os.ReadFile(patch)
+		switch {
+		case os.IsNotExist(err):
+			return nil
+		case err != nil:
+			return err
+		default:
+			out, ok := removeDSHMarkerBlock(string(data))
+			if !ok {
+				return nil
+			}
 			if err := fsx.WriteFile(patch, []byte(out), 0o644); err != nil {
-				return removed, fmt.Errorf("移除 patch 行: %w", err)
+				return fmt.Errorf("移除 patch 行: %w", err)
 			}
 			removed = true
 		}
+		return nil
+	})
+	if err != nil {
+		return removed, err
 	}
 	return removed, nil
 }

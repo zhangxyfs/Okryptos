@@ -143,7 +143,14 @@ func stripMarkerBlocks(content, configPath string) (string, error) {
 
 // UpsertHooksBlock 以标记块幂等写入 hooks 配置：先清除存量 ok hooks（含无标记的
 // 历史遗留块），已存在标记块则原位替换（exe 路径随之更新），否则追加。
+// 读-改-写包在 fsx.WithFileLock 内（宿主文件，kimi config.toml 与 dsh patch 共用）。
 func UpsertHooksBlock(configPath, block string) error {
+	return fsx.WithFileLock(configPath, func() error {
+		return upsertHooksBlockLocked(configPath, block)
+	})
+}
+
+func upsertHooksBlockLocked(configPath, block string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -197,27 +204,30 @@ func UpsertHooksBlock(configPath, block string) error {
 // 仍残留 ok 的 [[hooks]] 表（okHookCommand 命中）时自动备份并重新 Upsert 修复；
 // 标记块存在、或完全无 ok hook 表（用户显式卸载/从未安装）则不动——与其它适配器
 // "无 ok 条目不复活"对称，显式移除的集成不被自愈复活。调用方按 fail-open 处理返回错误。
+// 检查与重写整体在锁内（WithFileLock 不可重入，内部走 upsertHooksBlockLocked）。
 func EnsureHooksBlock(configPath, exe string) error {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return err
-	}
-	content := string(data)
-	if strings.Contains(content, MarkerBegin) {
-		return nil
-	}
-	hasOKHook := false
-	for _, l := range strings.Split(content, "\n") {
-		if okHookCommand.MatchString(l) {
-			hasOKHook = true
-			break
+	return fsx.WithFileLock(configPath, func() error {
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			return err
 		}
-	}
-	if !hasOKHook {
-		return nil
-	}
-	_ = os.WriteFile(configPath+".bak-openknowledge", data, 0o644)
-	return UpsertHooksBlock(configPath, HooksBlockFor(exe, HookTimeoutSec()))
+		content := string(data)
+		if strings.Contains(content, MarkerBegin) {
+			return nil
+		}
+		hasOKHook := false
+		for _, l := range strings.Split(content, "\n") {
+			if okHookCommand.MatchString(l) {
+				hasOKHook = true
+				break
+			}
+		}
+		if !hasOKHook {
+			return nil
+		}
+		_ = os.WriteFile(configPath+".bak-openknowledge", data, 0o644)
+		return upsertHooksBlockLocked(configPath, HooksBlockFor(exe, HookTimeoutSec()))
+	})
 }
 
 // kimiAgent kimiCode 适配器。
@@ -251,38 +261,50 @@ func (kimiAgent) HooksInstalled() bool {
 
 func (kimiAgent) InstallHooks(exe string) error {
 	cfgPath := kimiConfigPath()
-	if data, err := os.ReadFile(cfgPath); err == nil {
-		_ = os.WriteFile(cfgPath+".bak-openknowledge", data, 0o644)
-	}
-	return UpsertHooksBlock(cfgPath, HooksBlockFor(exe, HookTimeoutSec()))
+	// 备份+写整体在锁内（WithFileLock 不可重入，内部走 locked 变体）。
+	return fsx.WithFileLock(cfgPath, func() error {
+		if data, err := os.ReadFile(cfgPath); err == nil {
+			_ = os.WriteFile(cfgPath+".bak-openknowledge", data, 0o644)
+		}
+		return upsertHooksBlockLocked(cfgPath, HooksBlockFor(exe, HookTimeoutSec()))
+	})
 }
 
 func (kimiAgent) RemoveHooks() (bool, error) {
 	cfgPath := kimiConfigPath()
-	data, err := os.ReadFile(cfgPath)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
+	removed := false
+	// 读-改-写包在 fsx.WithFileLock 内（同 InstallHooks）。
+	err := fsx.WithFileLock(cfgPath, func() error {
+		data, err := os.ReadFile(cfgPath)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		content := string(data)
+		orig := content
+		i := strings.Index(content, MarkerBegin)
+		j := strings.Index(content, MarkerEnd)
+		if i >= 0 && j > i {
+			tail := strings.TrimPrefix(content[j+len(MarkerEnd):], "\n")
+			head := strings.TrimRight(content[:i], "\n")
+			content = head + "\n" + tail
+		}
+		content = StripLegacyOKHooks(content)
+		if content == orig {
+			return nil
+		}
+		if err := fsx.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("移除 hooks 配置: %w", err)
+		}
+		removed = true
+		return nil
+	})
 	if err != nil {
 		return false, err
 	}
-	content := string(data)
-	orig := content
-	i := strings.Index(content, MarkerBegin)
-	j := strings.Index(content, MarkerEnd)
-	if i >= 0 && j > i {
-		tail := strings.TrimPrefix(content[j+len(MarkerEnd):], "\n")
-		head := strings.TrimRight(content[:i], "\n")
-		content = head + "\n" + tail
-	}
-	content = StripLegacyOKHooks(content)
-	if content == orig {
-		return false, nil
-	}
-	if err := fsx.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
-		return false, fmt.Errorf("移除 hooks 配置: %w", err)
-	}
-	return true, nil
+	return removed, nil
 }
 
 func (kimiAgent) EnsureHooks(exe string) error { return EnsureHooksBlock(kimiConfigPath(), exe) }

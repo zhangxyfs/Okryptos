@@ -25,6 +25,12 @@ func TestInstallHooksRespectsSettingsLock(t *testing.T) {
 		{"qoder", isolateQoder, qoderAgent{}, qoderSettingsPath},
 		{"qoderide", isolateQoderIde, qoderIdeAgent{}, lingmaSettingsPath},
 		{"zcode", setupZcode, zcodeAgent{}, zcodeConfigPath},
+		// R3 A-01：kimi（config.toml 标记块）、dsh（cordis.patch.yml 标记块）、
+		// reasonix（plugin-packages.json 登记）三家的读-改-写同属宿主文件，
+		// 与上五家同款必须走 WithFileLock。
+		{"kimi", isolateKimiLock, kimiAgent{}, kimiConfigPath},
+		{"dsh", isolateDshLock, dshAgent{}, dshPatchPath},
+		{"reasonix", isolateReasonixLock, reasonixAgent{}, reasonixStatePath},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -114,4 +120,28 @@ func TestClaudeHooksConcurrentReadModifyWrite(t *testing.T) {
 	if len(pre) != 1 {
 		t.Error("第三方 PreToolUse 组被丢")
 	}
+}
+
+// isolateKimiLock kimi 隔离（KIMI_CODE_HOME 官方重定位变量即可隔离）。
+func isolateKimiLock(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+	return home
+}
+
+// isolateDshLock dsh 隔离（OK_DSH_HOME 测试口）。
+func isolateDshLock(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("OK_DSH_HOME", home)
+	return home
+}
+
+// isolateReasonixLock reasonix 隔离（OK_REASONIX_HOME 测试口）。
+func isolateReasonixLock(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("OK_REASONIX_HOME", home)
+	return home
 }
