@@ -22,8 +22,9 @@ import (
 	"openknowledge/internal/version"
 )
 
-// OpenBrowserFunc 打开浏览器并返回窗口句柄；测试可替换。
-var OpenBrowserFunc = gui.OpenBrowser
+// OpenBrowserFunc 打开 GUI 首选路径（Windows 内嵌窗口优先、浏览器回退）并返回
+// 窗口句柄；测试可替换。
+var OpenBrowserFunc = gui.OpenPreferred
 
 // selfCheckInterval 自省间隔；测试可调小。
 var selfCheckInterval = 15 * time.Second
