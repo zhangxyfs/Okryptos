@@ -42,3 +42,14 @@ func TestLoadWindowStateInvalidRect(t *testing.T) {
 		t.Fatal("right<=left should yield ok=false")
 	}
 }
+
+func TestLoadWindowStateOffscreenRect(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	p := windowStatePath()
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	// 离屏创建阶段采到的垃圾值（真实案例）：矩形有效但整体在屏外，必须按无状态处理
+	os.WriteFile(p, []byte(`{"maximized":false,"left":-32000,"top":-32000,"right":-30080,"bottom":-30920}`), 0o644)
+	if _, ok := LoadWindowState(); ok {
+		t.Fatal("fully offscreen rect should yield ok=false")
+	}
+}

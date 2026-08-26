@@ -343,10 +343,15 @@ func runHost(stdout, stderr io.Writer) int {
 	// 是已渲染的品牌页，零白帧。4s 兜底防导航回调不到（okd 异常等）窗口永不出现。
 	// 实测依据：隐藏（无 WS_VISIBLE）父窗口上 WebView2 初始化后不再渲染，故必须
 	// 离屏可见而非隐藏——两条路互斥，此为最终形态。
+	var last atomic.Value
+	stop := make(chan struct{})
 	show := func() {
 		ctx.showOnce.Do(func() {
 			ctx.show()
 			ctx.chromium.Navigate(ctx.url)
+			// 窗口入屏到最终形态后才开始采样 placement——此前（离屏创建阶段）
+			// 采到的是 -32000 垃圾值，落盘会毒害下次启动的状态恢复。
+			go trackPlacement(hwnd, &last, stop)
 		})
 	}
 	chromium.NavigationCompletedCallback = func(_ *edge.ICoreWebView2, _ *edge.ICoreWebView2NavigationCompletedEventArgs) {
@@ -374,10 +379,6 @@ func runHost(stdout, stderr io.Writer) int {
 	chromium.Init(gui.TokenInitScript(info.URL(), info.Token))
 	chromium.Resize()
 	chromium.NavigateToString(loadingPageHTML)
-
-	var last atomic.Value
-	stop := make(chan struct{})
-	go trackPlacement(hwnd, &last, stop)
 
 	var m msg
 	for { // 消息循环直至 WM_QUIT

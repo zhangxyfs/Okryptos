@@ -37,6 +37,9 @@ func LoadWindowState() (*WindowState, bool) {
 	if s.Right <= s.Left || s.Bottom <= s.Top {
 		return nil, false
 	}
+	if s.Right < 0 || s.Bottom < 0 { // 整体位于屏外（如离屏创建阶段的 -32000 垃圾值）：按无状态处理
+		return nil, false
+	}
 	return &s, true
 }
 
