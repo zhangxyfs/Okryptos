@@ -45,6 +45,8 @@ var (
 	procSetFocus               = hostUser32.NewProc("SetFocus")
 	hostShell32                = windows.NewLazySystemDLL("shell32.dll")
 	procExtractIconW           = hostShell32.NewProc("ExtractIconW")
+	hostGdi32                  = windows.NewLazySystemDLL("gdi32.dll")
+	procCreateSolidBrush       = hostGdi32.NewProc("CreateSolidBrush")
 	hostKernel32               = windows.NewLazySystemDLL("kernel32.dll")
 	procHostGetModuleHandleExW = hostKernel32.NewProc("GetModuleHandleExW")
 )
@@ -161,6 +163,24 @@ func trackPlacement(hwnd uintptr, last *atomic.Value, stop <-chan struct{}) {
 	}
 }
 
+// loadingPageHTML 是 okd 页面加载前的本地过渡页：无网络依赖、首帧即渲染，
+// 底色与 GUI 一致（#f3f4f6），替代"白屏等待"。token 注入脚本按 origin 门控，
+// 本地页不会拿到 token。
+const loadingPageHTML = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  html,body{margin:0;height:100%;background:#f3f4f6;display:flex;align-items:center;justify-content:center;
+    font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#6b7280}
+  .box{text-align:center}
+  .logo{width:56px;height:56px;margin:0 auto 14px;border-radius:14px;background:#2563eb;color:#fff;
+    font-size:26px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .t{font-size:15px;letter-spacing:.5px}
+  .d{margin-top:10px;font-size:12px;color:#9ca3af}
+</style></head><body>
+  <div class="box"><div class="logo">ok</div>
+  <div class="t">OpenKnowledge 配置中心</div>
+  <div class="d">正在加载…</div></div>
+</body></html>`
+
 // hostCtx 是 hwnd 关联的窗口上下文（WndProc 经 hostContexts 查取，
 // 参照库 webview.go 的 windowContext 模式）。
 type hostCtx struct {
@@ -240,12 +260,16 @@ func registerHostClass(className *uint16) {
 				}
 			}
 		}
+		// 背景刷与 GUI 底色一致（#f3f4f6 → COLORREF 0x00F6F4F3）：WebView2 首绘
+		// 之前窗框也不是白底。句柄进程生命周期内不释放。
+		bg, _, _ := procCreateSolidBrush.Call(0x00F6F4F3)
 		wc := wndClassExW{
 			CbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
 			HInstance:     hinstance,
 			LpszClassName: className,
 			HIcon:         windows.Handle(icon),
 			HIconSm:       windows.Handle(icon),
+			HbrBackground: windows.Handle(bg),
 			LpfnWndProc:   windows.NewCallback(hostWndProc),
 		}
 		procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
@@ -316,6 +340,9 @@ func runHost(stdout, stderr io.Writer) int {
 	}
 	chromium.Init(gui.TokenInitScript(info.URL(), info.Token))
 	chromium.Resize()
+	// 先渲染本地加载页（零网络、首帧即出），再导航——加载期用户看到品牌页
+	// 而非白底。okd 未启动时 EnsureCurrent 已在建窗前完成拉起等待。
+	chromium.NavigateToString(loadingPageHTML)
 	chromium.Navigate(info.URL() + "/")
 
 	var last atomic.Value
