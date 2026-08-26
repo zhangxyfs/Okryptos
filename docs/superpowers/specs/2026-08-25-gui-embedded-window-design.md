@@ -1,7 +1,7 @@
 # GUI 内嵌窗口化设计：go-webview2 原生窗口（Windows）+ 浏览器回退
 
 - 日期：2026-08-25
-- 状态：待评审（未批准，未进入实施计划）
+- 状态：已实施（2026-08-25，commits cffd781..5db5d8c；含终审修复波：回退链防重入 + token 注入 origin 门控）
 - 背景：GUI 现状是 okd  serving `web/` 五页 + 系统浏览器 `--app=` 模式打开（`cmd/okmanager/main.go` 薄启动器 + `internal/daemon/run.go:164` OpenGUI）。不满两点：依赖浏览器的形态；窗口"先小再最大化"的闪烁。决策已出：**Windows 用 go-webview2 内嵌窗口，Linux 保留浏览器形态，全程保留浏览器回退**。
 
 ## 1. 目标
@@ -29,17 +29,17 @@
 OkManager 从"拉起即退的薄启动器"变为**窗口宿主**：
 
 1. 确保 okd 在线（沿用 `EnsureCurrent` 现有逻辑，含版本切换）；
-2. 创建 Win32 窗口（`CreateWindowEx` 直接带 `WS_MAXIMIZE`，见 §4）；
+2. 创建窗口（go-webview2 自建窗口，创建尺寸=主屏，见 §4 的实际机制）；
 3. 窗口内初始化 WebView2，导航到 okd GUI URL（**不带 token**，见 §5）；
 4. 驻留消息循环直至窗口关闭，随后退出。okd 驻留职责不变；
-5. WebView2 运行时缺失/初始化失败 → 回退现有浏览器 `--app=` 路径（同一 URL 同一前端，GUI 永远打得开）。
+5. WebView2 运行时缺失/初始化失败 → 回退现有浏览器 `--app=` 路径（同一 URL 同一前端，GUI 永远打得开；初始化失败分支直调 `gui.OpenBrowser` 不经 OpenPreferred，防回退重入内嵌路径形成进程派生链）。
 
-托盘"双击聚焦唯一 GUI"扩展：okd 托盘侧当前聚焦浏览器窗口的逻辑，改为优先聚焦已登记的 OkManager 窗口句柄（窗口创建后经管理 API 或约定标题登记），找不到再回退浏览器行为。
+托盘"双击聚焦唯一 GUI"：**托盘代码零改动**——`daemon.OpenBrowserFunc` 切换为 `gui.OpenPreferred` 后，内嵌窗口 hwnd 进入既有 `guiHwnd` 缓存与 `FocusWindow` 聚焦链（与进程无关）；`openEmbeddedDefault` 经约定标题（"OpenKnowledge 配置中心"）查找已运行窗口复用。
 
 ## 4. 窗口行为
 
-- **启动最大化**：`WS_MAXIMIZE` 随创建生效，无中间小窗口态；
-- **状态记忆**：窗口关闭/移动时记录 placement（normal rect + maximized 标志）到 `~/.openknowledge/gui-state.json`（机器本地，不进任何同步面）；下次启动原样恢复——上次最大化则直接最大化创建，上次普通尺寸则还原矩形；
+- **启动最大化**（实际机制）：go-webview2 的 `NewWithOptions` 建窗即 `SW_SHOW`（宿主不可干预），故采用"创建尺寸=主屏 + 立即 `ShowWindow(SW_MAXIMIZE)`/`SetWindowPlacement`（均在 Navigate 之前）"——首帧已是全屏尺寸，小窗闪烁消除；有状态恢复时或见"全屏→记忆矩形"一跳，可接受；
+- **状态记忆**：窗口存活期每 2s 采样 placement（窗口销毁后不可查），退出时落盘最后一次有效值到 `~/.openknowledge/gui-state.json`（机器本地，不进任何同步面）；下次启动原样恢复——上次最大化则最大化，上次普通尺寸则还原矩形；
 - 自定义最小尺寸（防止拖到不可用）；标题固定"OpenKnowledge 配置中心"；图标用 OkManager 现成的 winres 图标。
 
 已知限制：go-webview2 的公开 WebView 接口未暴露导航事件（NavigationStarting/NewWindowRequested 需访问内部 edge.Chromium），**外部链接拦截不实现**；GUI 页面无外部链接依赖，`_blank` 链接按 WebView2 默认行为处理。若未来需要，再评估 fork 或换绑定层。
@@ -48,8 +48,8 @@ OkManager 从"拉起即退的薄启动器"变为**窗口宿主**：
 
 内嵌路径不再用 `URL#token=`：
 
-1. WebView2 经 `AddScriptToExecuteOnDocumentCreated` 在页面脚本执行前注入 `window.__okToken = "<token>"`；
-2. `web/app.js` 取 token 处加一级优先级：`__okToken` > location.hash（前端唯一改动，约一行）；
+1. WebView2 经 `AddScriptToExecuteOnDocumentCreated` 在页面脚本执行前注入，**按 origin 门控**（脚本对每个文档生效，导航离开本机地址不得带出 token）：`if(location.origin==="<okd origin>"){window.__okToken = "<token>";}`；
+2. `web/index.html` 的 inline script 取 token 处加一级优先级：`__okToken` > sessionStorage（前端唯一改动；hash 解析段保留给浏览器路径）；
 3. 浏览器路径（含 Linux 与回退）维持现有 hash 方式不变。
 
 token 获取仍读本机 `daemon.json`（0600），不引入新凭证流。注入脚本在每次导航创建时执行，刷新页面不丢 token。
