@@ -56,7 +56,8 @@ const (
 	swMaximize   = 3
 
 	cwUseDefault       = 0x80000000
-	wsOverlappedWindow = 0xCF0000 // 不带 WS_VISIBLE：首帧前窗口不可见
+	wsOverlappedWindow = 0xCF0000   // 不带 WS_VISIBLE
+	wsVisible          = 0x10000000 // WS_VISIBLE：与 wsOverlappedWindow 组合，离屏可见（WebView2 要求父窗口可见才渲染）
 
 	wmDestroy       = 0x0002
 	wmMove          = 0x0003
@@ -164,21 +165,37 @@ func trackPlacement(hwnd uintptr, last *atomic.Value, stop <-chan struct{}) {
 }
 
 // loadingPageHTML 是 okd 页面加载前的本地过渡页：无网络依赖、首帧即渲染，
-// 底色与 GUI 一致（#f3f4f6），替代"白屏等待"。token 注入脚本按 origin 门控，
-// 本地页不会拿到 token。
+// 底色与 GUI 一致（#f3f4f6）。logo 为方案 B：蓝/墨双页书（左页 O、右页 K），
+// 右页绕书脊翻动 + 加载点跳动。token 注入脚本按 origin 门控，本地页拿不到 token。
 const loadingPageHTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
   html,body{margin:0;height:100%;background:#f3f4f6;display:flex;align-items:center;justify-content:center;
-    font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#6b7280}
+    font-family:"Segoe UI","Microsoft YaHei",sans-serif}
   .box{text-align:center}
-  .logo{width:56px;height:56px;margin:0 auto 14px;border-radius:14px;background:#2563eb;color:#fff;
-    font-size:26px;font-weight:700;display:flex;align-items:center;justify-content:center}
-  .t{font-size:15px;letter-spacing:.5px}
-  .d{margin-top:10px;font-size:12px;color:#9ca3af}
+  .t{margin-top:18px;font-size:17px;font-weight:600;color:#1f2937;letter-spacing:.5px}
+  .d{margin-top:6px;font-size:12px;color:#9ca3af}
+  .dots{margin-top:14px}
+  .dots span{display:inline-block;width:6px;height:6px;margin:0 3px;border-radius:50%;background:#9ca3af;
+    animation:dot 1.2s ease-in-out infinite}
+  .dots span:nth-child(2){animation-delay:.15s}
+  .dots span:nth-child(3){animation-delay:.3s}
+  @keyframes dot{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}
+  .flip{transform-box:fill-box;transform-origin:left center;animation:flip 2.4s ease-in-out infinite}
+  @keyframes flip{0%,18%{transform:rotateY(0)}48%,58%{transform:rotateY(-52deg)}88%,100%{transform:rotateY(0)}}
 </style></head><body>
-  <div class="box"><div class="logo">ok</div>
-  <div class="t">OpenKnowledge 配置中心</div>
-  <div class="d">正在加载…</div></div>
+  <div class="box">
+    <svg width="112" height="96" viewBox="0 0 112 96">
+      <path d="M54 22 Q20 14 14 26 L14 70 Q20 82 54 74 Z" fill="#2B6CEE"/>
+      <circle cx="34" cy="48" r="11" fill="none" stroke="#f3f4f6" stroke-width="5"/>
+      <g class="flip">
+        <path d="M58 22 Q92 14 98 26 L98 70 Q92 82 58 74 Z" fill="#1f2937"/>
+        <path d="M72 34 V62 M72 50 L86 34 M76 46 L88 62" fill="none" stroke="#f3f4f6" stroke-width="5" stroke-linecap="round"/>
+      </g>
+    </svg>
+    <div class="t">OpenKnowledge</div>
+    <div class="d">配置中心 · 正在加载</div>
+    <div class="dots"><span></span><span></span><span></span></div>
+  </div>
 </body></html>`
 
 // hostCtx 是 hwnd 关联的窗口上下文（WndProc 经 hostContexts 查取，
@@ -187,6 +204,8 @@ type hostCtx struct {
 	hwnd     uintptr
 	chromium *edge.Chromium
 	saved    *gui.WindowState // 有保存状态时显示走 SetWindowPlacement
+	url      string           // 过渡页渲染完成后导航的目标
+	showOnce sync.Once        // 入屏动作幂等：导航回调与兜底定时器谁先到谁执行
 }
 
 var (
@@ -293,12 +312,13 @@ func runHost(stdout, stderr io.Writer) int {
 	className, _ := windows.UTF16PtrFromString("OkManagerHost")
 	registerHostClass(className)
 	title, _ := windows.UTF16PtrFromString(gui.WindowTitle)
+	offscreen := int32(-32000) // 离屏坐标（变量转换绕开常量溢出检查；位模式即 int32 原值）
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(title)),
-		wsOverlappedWindow, // 不带 WS_VISIBLE：导航完成前不显示
-		cwUseDefault, cwUseDefault,
+		wsOverlappedWindow|wsVisible, // 离屏可见：WebView2 要求父窗口可见才渲染，但坐标在屏外用户看不到
+		uintptr(uint32(offscreen)), uintptr(uint32(offscreen)),
 		uintptr(screenW), uintptr(screenH),
 		0, 0, 0, 0,
 	)
@@ -314,15 +334,28 @@ func runHost(stdout, stderr io.Writer) int {
 	if s, ok := gui.LoadWindowState(); ok {
 		ctx.saved = s
 	}
+	ctx.url = info.URL() + "/"
 	hostContextsMu.Lock()
 	hostContexts[hwnd] = ctx
 	hostContextsMu.Unlock()
 
-	// 创建即显示（最终形态一次到位：有状态恢复 placement，无则最大化，之后
-	// 不再有任何窗口状态跳变）。实测：WebView2 在隐藏父窗口上完成初始化后
-	// 内容不再渲染（白屏），故不能延迟到导航完成再显示——加载期短暂白屏
-	// 属所有浏览器/内嵌 WebView 的正常行为。
-	ctx.show()
+	// 过渡页渲染完成（NavigationCompleted）才把窗口搬回屏内：用户第一帧看到的
+	// 是已渲染的品牌页，零白帧。4s 兜底防导航回调不到（okd 异常等）窗口永不出现。
+	// 实测依据：隐藏（无 WS_VISIBLE）父窗口上 WebView2 初始化后不再渲染，故必须
+	// 离屏可见而非隐藏——两条路互斥，此为最终形态。
+	show := func() {
+		ctx.showOnce.Do(func() {
+			ctx.show()
+			ctx.chromium.Navigate(ctx.url)
+		})
+	}
+	chromium.NavigationCompletedCallback = func(_ *edge.ICoreWebView2, _ *edge.ICoreWebView2NavigationCompletedEventArgs) {
+		show()
+	}
+	go func() {
+		time.Sleep(4 * time.Second)
+		show()
+	}()
 
 	if !chromium.Embed(hwnd) { // WebView2 初始化失败：直开浏览器（不经 OpenPreferred，防回退重入内嵌路径）
 		fmt.Fprintln(stderr, "WebView2 初始化失败，回退浏览器打开")
@@ -340,10 +373,7 @@ func runHost(stdout, stderr io.Writer) int {
 	}
 	chromium.Init(gui.TokenInitScript(info.URL(), info.Token))
 	chromium.Resize()
-	// 先渲染本地加载页（零网络、首帧即出），再导航——加载期用户看到品牌页
-	// 而非白底。okd 未启动时 EnsureCurrent 已在建窗前完成拉起等待。
 	chromium.NavigateToString(loadingPageHTML)
-	chromium.Navigate(info.URL() + "/")
 
 	var last atomic.Value
 	stop := make(chan struct{})
