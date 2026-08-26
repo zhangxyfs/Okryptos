@@ -213,16 +213,32 @@ var (
 	hostContextsMu sync.RWMutex
 )
 
-// show 首次显示窗口：有保存状态恢复 placement，无则直接最大化；随后聚焦 WebView2。
+// show 首次显示窗口：有保存状态恢复 placement，无则默认最大化；随后聚焦 WebView2。
 func (c *hostCtx) show() {
+	var wp windowPlacement
 	if c.saved != nil {
-		wp := placementFromState(c.saved)
-		procSetWindowPlacement.Call(c.hwnd, uintptr(unsafe.Pointer(&wp)))
+		wp = placementFromState(c.saved)
 	} else {
-		procHostShowWindow.Call(c.hwnd, swMaximize)
+		// 无状态：最大化，但 normal 矩形必须给屏内居中值——直接 ShowWindow(SW_MAXIMIZE)
+		// 会把创建时的离屏位置（-32000）记为还原矩形，用户取消最大化时窗口跳到屏外。
+		wp = placementFromState(defaultWindowState())
 	}
+	procSetWindowPlacement.Call(c.hwnd, uintptr(unsafe.Pointer(&wp)))
 	procHostUpdateWindow.Call(c.hwnd)
 	c.chromium.Focus()
+}
+
+// defaultWindowState 无保存状态时的默认 placement：最大化 + 屏内居中 2/3 屏的还原矩形。
+func defaultWindowState() *gui.WindowState {
+	w, h := primaryScreenSize()
+	rw, rh := int32(w)*2/3, int32(h)*2/3
+	return &gui.WindowState{
+		Maximized: true,
+		Left:      (int32(w) - rw) / 2,
+		Top:       (int32(h) - rh) / 2,
+		Right:     (int32(w) + rw) / 2,
+		Bottom:    (int32(h) + rh) / 2,
+	}
 }
 
 func hostWndProc(hwnd, message, wp, lp uintptr) uintptr {
