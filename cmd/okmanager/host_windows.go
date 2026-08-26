@@ -43,7 +43,8 @@ var (
 	procDispatchMessageW       = hostUser32.NewProc("DispatchMessageW")
 	procPostQuitMessage        = hostUser32.NewProc("PostQuitMessage")
 	procSetFocus               = hostUser32.NewProc("SetFocus")
-	procExtractIconW           = hostUser32.NewProc("ExtractIconW")
+	hostShell32                = windows.NewLazySystemDLL("shell32.dll")
+	procExtractIconW           = hostShell32.NewProc("ExtractIconW")
 	hostKernel32               = windows.NewLazySystemDLL("kernel32.dll")
 	procHostGetModuleHandleExW = hostKernel32.NewProc("GetModuleHandleExW")
 )
@@ -166,7 +167,6 @@ type hostCtx struct {
 	hwnd     uintptr
 	chromium *edge.Chromium
 	saved    *gui.WindowState // 有保存状态时显示走 SetWindowPlacement
-	showOnce sync.Once        // 显示动作幂等：导航回调与 5s 兜底谁先到谁执行
 }
 
 var (
@@ -294,15 +294,11 @@ func runHost(stdout, stderr io.Writer) int {
 	hostContexts[hwnd] = ctx
 	hostContextsMu.Unlock()
 
-	// 首次导航完成才显示窗口（此时页面已渲染，无白屏跳变）；
-	// 5s 兜底：okd 中途挂掉导致导航回调不到时也强制显示，防窗口永不出现。
-	chromium.NavigationCompletedCallback = func(_ *edge.ICoreWebView2, _ *edge.ICoreWebView2NavigationCompletedEventArgs) {
-		ctx.showOnce.Do(ctx.show)
-	}
-	go func() {
-		time.Sleep(5 * time.Second)
-		ctx.showOnce.Do(ctx.show)
-	}()
+	// 创建即显示（最终形态一次到位：有状态恢复 placement，无则最大化，之后
+	// 不再有任何窗口状态跳变）。实测：WebView2 在隐藏父窗口上完成初始化后
+	// 内容不再渲染（白屏），故不能延迟到导航完成再显示——加载期短暂白屏
+	// 属所有浏览器/内嵌 WebView 的正常行为。
+	ctx.show()
 
 	if !chromium.Embed(hwnd) { // WebView2 初始化失败：直开浏览器（不经 OpenPreferred，防回退重入内嵌路径）
 		fmt.Fprintln(stderr, "WebView2 初始化失败，回退浏览器打开")
