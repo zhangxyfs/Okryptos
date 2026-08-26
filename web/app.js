@@ -658,7 +658,7 @@ const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
                 termMin:false,                                                // 终端面板最小化（会话级，不落盘；恢复按钮在侧栏底部）
                 edView:"read",   // 详情区态：read 只读 | edit 内联编辑 | cmp 优化对照
                 layout:loadLayout(), cfgOpen:false, cfgDraft:null,            // 需求 4：栏目布局 + 设置弹窗
-                logSrc:{ ok:true, daemon:true, sidecar:true }, logSem:false, logQ:"",
+                logSrc:{ ok:true, daemon:false, sidecar:false }, logSem:false, logQ:"",
                 logAuto:true, logStick:true, miscFb:null };
 const t = k => I18N[state.lang][k];
 
@@ -3537,7 +3537,7 @@ function paintLogs(){
           + esc(l.text)+"\n";
   });
   logBodyEl.innerHTML = count ? html : '<span class="empty">'+t("lgEmpty")+'</span>';
-  if(state.logStick) logBodyEl.scrollTop = logBodyEl.scrollHeight;
+  if(state.logStick) logBodyEl.scrollTop = logBodyEl.scrollHeight;   // 粘住底部：新日志自动滚到最新
   if(logMetaEl) logMetaEl.textContent =
     t("lgMeta").replace("{n}",LOG_LINES.length).replace("{m}",count);
 }
