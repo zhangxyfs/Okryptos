@@ -117,9 +117,10 @@ func runHost(stdout, stderr io.Writer) int {
 			Height: screenH,
 		},
 	})
-	if w == nil { // WebView2 初始化失败：回退浏览器，GUI 永远打得开
+	if w == nil { // WebView2 初始化失败：直开浏览器（不经 OpenPreferred，防回退重入内嵌路径）
 		fmt.Fprintln(stderr, "WebView2 初始化失败，回退浏览器打开")
-		return daemon.OpenGUI(stdout, stderr)
+		gui.OpenBrowser(info.URL() + "/#token=" + info.Token)
+		return 0
 	}
 
 	hwnd := uintptr(w.Window())
@@ -130,7 +131,7 @@ func runHost(stdout, stderr io.Writer) int {
 		procHostShowWindow.Call(hwnd, swMaximize) // 首启：内容加载前即最大化
 	}
 	w.SetSize(960, 600, webview2.HintMin) // 最小尺寸
-	w.Init(gui.TokenInitScript(info.Token))
+	w.Init(gui.TokenInitScript(info.URL(), info.Token))
 	w.Navigate(info.URL() + "/")
 
 	var last atomic.Value

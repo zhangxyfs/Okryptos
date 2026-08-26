@@ -17,6 +17,14 @@ func TestOpenPreferredEmbeddedWins(t *testing.T) {
 	}
 }
 
+func TestOpenEmbeddedDefaultNoRuntime(t *testing.T) {
+	defer func(f func() bool) { webView2RuntimeAvailable = f }(webView2RuntimeAvailable)
+	webView2RuntimeAvailable = func() bool { return false }
+	if h := openEmbeddedDefault("x"); h != 0 {
+		t.Fatalf("got %d, want 0 when WebView2 runtime missing", h)
+	}
+}
+
 func TestOpenPreferredFallsBack(t *testing.T) {
 	defer func(e, b func(string) uintptr) { embeddedOpener, browserOpener = e, b }(embeddedOpener, browserOpener)
 	embeddedOpener = func(string) uintptr { return 0 }

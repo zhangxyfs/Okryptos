@@ -7,9 +7,9 @@ import (
 )
 
 func TestWindowStateRoundTrip(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
 	p := windowStatePath()
 	os.MkdirAll(filepath.Dir(p), 0o755)
-	defer os.Remove(p)
 	want := &WindowState{Maximized: true, Left: 10, Top: 20, Right: 1610, Bottom: 900}
 	if err := SaveWindowState(want); err != nil {
 		t.Fatalf("save: %v", err)
@@ -24,9 +24,9 @@ func TestWindowStateRoundTrip(t *testing.T) {
 }
 
 func TestLoadWindowStateCorrupt(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
 	p := windowStatePath()
 	os.MkdirAll(filepath.Dir(p), 0o755)
-	defer os.Remove(p)
 	os.WriteFile(p, []byte("{not json"), 0o644)
 	if _, ok := LoadWindowState(); ok {
 		t.Fatal("corrupt file should yield ok=false")
@@ -34,9 +34,9 @@ func TestLoadWindowStateCorrupt(t *testing.T) {
 }
 
 func TestLoadWindowStateInvalidRect(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
 	p := windowStatePath()
 	os.MkdirAll(filepath.Dir(p), 0o755)
-	defer os.Remove(p)
 	os.WriteFile(p, []byte(`{"maximized":false,"left":100,"top":0,"right":50,"bottom":10}`), 0o644)
 	if _, ok := LoadWindowState(); ok {
 		t.Fatal("right<=left should yield ok=false")

@@ -162,7 +162,7 @@ func Stop(stdout, _ io.Writer) int {
 	return 0
 }
 
-// OpenGUI 确保 daemon 在线（含版本切换）后打开浏览器并立即返回。
+// OpenGUI 确保 daemon 在线（含版本切换）后打开 GUI 首选路径（内嵌窗口优先、浏览器回退）并立即返回。
 func OpenGUI(_, stderr io.Writer) int {
 	if info, ok := EnsureCurrent(); ok {
 		OpenBrowserFunc(info.URL() + "/#token=" + info.Token)
