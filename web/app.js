@@ -98,7 +98,7 @@ const I18N = {
     rType:"类型", rGlobs:"code globs", rCl:"changelog glob", rMsg:"提示语", rAdd:"+ 添加规则",
     capTitle:"经验沉淀", capDesc:"propose = AI 提议草稿、人批准后入库；auto = 按轮次间隔自动提取；全局生效（对所有项目生效）",
     capMode:"模式", capPropose:"propose（人批准）", capAuto:"auto（自动提取）", capInterval:"轮次间隔",
-    lgSemantic:"◆ 语义", lgFilter:"过滤日志…", lgAuto:"自动刷新",
+    lgSemantic:"◆ 语义", lgFilter:"过滤日志…", lgAuto:"自动刷新", lgBackLatest:"↓ 回到最新",
     lgMeta:"共 {n} 行 · 显示 {m} 行", lgEmpty:"（无匹配日志）",
     xExport:"数据导出", xExportDesc:"导出 registry 与条目（不含索引，导入时自动重建）",
     xImport:"数据导入", xImportDesc:"导入 zip 备份（数据导出的产物）；条目合并入库，索引自动重建",
@@ -234,7 +234,7 @@ const I18N = {
     rType:"Type", rGlobs:"code globs", rCl:"changelog glob", rMsg:"Message", rAdd:"+ Add rule",
     capTitle:"Experience capture", capDesc:"propose = AI drafts, human approves; auto = extract every N turns; applies globally to all projects",
     capMode:"Mode", capPropose:"propose (human-approved)", capAuto:"auto (automatic)", capInterval:"Turn interval",
-    lgSemantic:"◆ Semantic", lgFilter:"Filter logs…", lgAuto:"Auto-refresh",
+    lgSemantic:"◆ Semantic", lgFilter:"Filter logs…", lgAuto:"Auto-refresh", lgBackLatest:"↓ Back to latest",
     lgMeta:"{n} lines · showing {m}", lgEmpty:"(no matching logs)",
     xExport:"Export data", xExportDesc:"Exports the registry and entries (no index — rebuilt on import).",
     xImport:"Import data", xImportDesc:"Import a zip backup (produced by Export); entries merge in, index rebuilds automatically",
@@ -3510,7 +3510,9 @@ function renderLlmModal(){
    刷新开启时轮询；离开页面不清状态（数据/签名/过滤/开关全保留），回来自动续轮。
    结构/样式/交互照抄原型日志页（prototype-manager-v2.html 1475-1570），mock 换真。 */
 let LOG_LINES = [], logSig = "", logLoaded = false;
-let logBodyEl = null, logMetaEl = null;
+let logBodyEl = null, logMetaEl = null, logBackEl = null;
+// "回到最新"浮动按钮：脱粘（上翻）时浮现，点击恢复粘底并滚到最新。
+function paintLogBack(){ if(logBackEl) logBackEl.style.display = state.logStick ? "none" : ""; }
 async function fetchLogs(){
   let d;
   try {
@@ -3538,6 +3540,7 @@ function paintLogs(){
   });
   logBodyEl.innerHTML = count ? html : '<span class="empty">'+t("lgEmpty")+'</span>';
   if(state.logStick) logBodyEl.scrollTop = logBodyEl.scrollHeight;   // 粘住底部：新日志自动滚到最新
+  paintLogBack();
   if(logMetaEl) logMetaEl.textContent =
     t("lgMeta").replace("{n}",LOG_LINES.length).replace("{m}",count);
 }
@@ -3572,9 +3575,18 @@ function renderLogs(){
   logBodyEl = el("div","logbody");
   logBodyEl.addEventListener("scroll", ()=>{
     state.logStick = logBodyEl.scrollHeight - logBodyEl.scrollTop - logBodyEl.clientHeight < 40;
+    paintLogBack();
   });
   d.appendChild(logBodyEl);
-  paintLogs();
+  logBackEl = el("button","logback");
+  logBackEl.style.display = "none";   // 脱粘（上翻）时才浮现
+  logBackEl.textContent = t("lgBackLatest");
+  logBackEl.onclick = ()=>{ state.logStick = true; paintLogs(); };
+  d.appendChild(logBackEl);
+  // 进页绘制必须推迟到 attach 之后：detached 元素 scrollHeight 为 0，直接 paintLogs
+  // 的"滚到底"赋值无效（切 tab 回来时 logLoaded=true 不再拉取、轮询 unchanged，
+  // 无人补第二次绘制——用户实证：切走再切回不滚底）。
+  requestAnimationFrame(paintLogs);
   if(!logLoaded){ logLoaded = true; fetchLogs(); }   // 首次进入立即拉取，不等首个轮询周期
   return d;
 }
