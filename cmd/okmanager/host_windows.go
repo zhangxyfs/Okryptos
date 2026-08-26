@@ -11,6 +11,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -41,6 +42,8 @@ var (
 	procTranslateMessage       = hostUser32.NewProc("TranslateMessage")
 	procDispatchMessageW       = hostUser32.NewProc("DispatchMessageW")
 	procPostQuitMessage        = hostUser32.NewProc("PostQuitMessage")
+	procSetFocus               = hostUser32.NewProc("SetFocus")
+	procExtractIconW           = hostUser32.NewProc("ExtractIconW")
 	hostKernel32               = windows.NewLazySystemDLL("kernel32.dll")
 	procHostGetModuleHandleExW = hostKernel32.NewProc("GetModuleHandleExW")
 )
@@ -55,8 +58,10 @@ const (
 	wmDestroy       = 0x0002
 	wmMove          = 0x0003
 	wmSize          = 0x0005
+	wmActivate      = 0x0006
 	wmClose         = 0x0010
 	wmGetMinMaxInfo = 0x0024
+	wmNCLButtonDown = 0x00A1
 )
 
 // 镜像 Win32 结构体（仅用到的字段完整保留布局）。
@@ -194,6 +199,14 @@ func hostWndProc(hwnd, message, wp, lp uintptr) uintptr {
 		c.chromium.Resize()
 	case wmMove:
 		_ = c.chromium.NotifyParentWindowPositionChanged()
+	case wmActivate:
+		if wp != 0 { // 非 WA_INACTIVE：Alt-Tab 切回等场景把键盘焦点交还 WebView2
+			c.chromium.Focus()
+		}
+	case wmNCLButtonDown:
+		procSetFocus.Call(c.hwnd)
+		r, _, _ := procDefWindowProcW.Call(hwnd, message, wp, lp)
+		return r
 	case wmClose:
 		procDestroyWindow.Call(hwnd)
 	case wmDestroy:
@@ -216,10 +229,23 @@ func registerHostClass(className *uint16) {
 		var hinstance windows.Handle
 		// GetModuleHandleExW(0, NULL, &hinstance)
 		procHostGetModuleHandleExW.Call(0, 0, uintptr(unsafe.Pointer(&hinstance)))
+		// 任务栏/Alt-Tab 图标：取 exe 自身（winres 嵌入）首个图标；
+		// 句柄进程生命周期内不释放。失败留 0（系统默认图标），不影响注册。
+		var icon uintptr
+		if exe, err := os.Executable(); err == nil {
+			if exePath, err := windows.UTF16PtrFromString(exe); err == nil {
+				icon, _, _ = procExtractIconW.Call(0, uintptr(unsafe.Pointer(exePath)), 0)
+				if icon <= 1 { // ExtractIconW 失败返回 0/1
+					icon = 0
+				}
+			}
+		}
 		wc := wndClassExW{
 			CbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
 			HInstance:     hinstance,
 			LpszClassName: className,
+			HIcon:         windows.Handle(icon),
+			HIconSm:       windows.Handle(icon),
 			LpfnWndProc:   windows.NewCallback(hostWndProc),
 		}
 		procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
