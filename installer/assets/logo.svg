@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 96" role="img" aria-label="OpenKnowledge">
+  <!-- 方案 B 书形 mark：蓝/墨双页书，左页镂空 O、右页镂空 K -->
+  <path d="M54 22 Q20 14 14 26 L14 70 Q20 82 54 74 Z" fill="#2B6CEE"/>
+  <circle cx="34" cy="48" r="11" fill="none" stroke="#FFFFFF" stroke-width="5"/>
+  <path d="M58 22 Q92 14 98 26 L98 70 Q92 82 58 74 Z" fill="#1F2937"/>
+  <path d="M72 34 V62 M72 50 L86 34 M76 46 L88 62" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
+</svg>
