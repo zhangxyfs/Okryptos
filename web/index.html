@@ -16,8 +16,8 @@
       try { sessionStorage.setItem("ok_token", decodeURIComponent(m[1])); } catch (e) {}
       history.replaceState(null, "", location.pathname + location.search);
     }
-    var t = "";
-    try { t = sessionStorage.getItem("ok_token") || ""; } catch (e) {}
+    var t = window.__okToken || "";
+    if (!t) { try { t = sessionStorage.getItem("ok_token") || ""; } catch (e) {} }
     window.OK_TOKEN = t;
   })();
   </script>
