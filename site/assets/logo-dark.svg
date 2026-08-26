@@ -1,16 +1,43 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 120" width="580" height="120" role="img" aria-label="OpenKnowledge">
-  <style>
-    .flip{transform-box:fill-box;transform-origin:left center;animation:flip 3.2s ease-in-out infinite}
-    @keyframes flip{0%,30%{transform:rotateY(0)}50%,60%{transform:rotateY(-52deg)}80%,100%{transform:rotateY(0)}}
-  </style>
-  <!-- 深色背景变体：双页改浅蓝，K 镂空改深色（右页每 3.2s 翻动一次；无 CSS 环境退化为静态） -->
-  <g transform="translate(6,12)">
+  <!-- 书形 mark（2026-08-26 方案 B 深色变体）：浅蓝双页书，左页镂空 O、右页深色镂空 K -->
+  <g transform="translate(13.7,41.5) scale(0.469)">
     <path d="M54 22 Q20 14 14 26 L14 70 Q20 82 54 74 Z" fill="#60a5fa"/>
     <circle cx="34" cy="48" r="11" fill="none" stroke="#FFFFFF" stroke-width="5"/>
-    <g class="flip">
-      <path d="M58 22 Q92 14 98 26 L98 70 Q92 82 58 74 Z" fill="#93c5fd"/>
-      <path d="M72 34 V62 M72 50 L86 34 M76 46 L88 62" fill="none" stroke="#1F2937" stroke-width="5" stroke-linecap="round"/>
+    <path d="M58 22 Q92 14 98 26 L98 70 Q92 82 58 74 Z" fill="#93c5fd"/>
+    <path d="M72 34 V62 M72 50 L86 34 M76 46 L88 62" fill="none" stroke="#1F2937" stroke-width="5" stroke-linecap="round"/>
+  </g>
+  <circle cx="73" cy="31" r="5.5" fill="#60a5fa">
+    <animate attributeName="opacity" values="1;0.25;1" keyTimes="0;0.5;1" dur="5s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- 入场编排（3s，只演一次并定格；基准值即最终态，无 SMIL 时退化为完整静态 logo）：
+       开场书本+Knowledge 贴着停留 1.2s；随后 Open 加速展开挤入（300ms，起步慢末段快，
+       用中间关键帧逼近 ease-in），Knowledge 被顶得冲过终点多飞 24px（像被炸过去），
+       回弹过 -3px 后归位；之后 K 的翻转循环接管。 -->
+  <g transform="translate(92,0)">
+    <g>
+      <animateTransform attributeName="transform" type="scale"
+                        values="0 1;0 1;0.15 1;0.5 1;1.03 1;1 1;1 1"
+                        keyTimes="0;0.4;0.4333;0.4667;0.5;0.5667;1" dur="3s" fill="freeze"/>
+      <text x="0" y="86" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="700"
+            fill="#93c5fd" textLength="140" lengthAdjust="spacingAndGlyphs">Open</text>
     </g>
   </g>
-  <text x="140" y="82" font-family="Segoe UI, Arial, sans-serif" font-size="56" font-weight="700"><tspan fill="#93c5fd">Open</tspan><tspan fill="#60a5fa">Knowledge</tspan></text>
+  <g>
+    <animateTransform attributeName="transform" type="translate"
+                      values="-150 0;-150 0;-125 0;-70 0;24 0;-3 0;0 0;0 0"
+                      keyTimes="0;0.4;0.4333;0.4667;0.5;0.5667;0.6333;1" dur="3s" fill="freeze"/>
+    <!-- K：每 5 秒水平翻转一次（绕字母垂直中线，SMIL），首次翻转发生在入场定格之后 -->
+    <g transform="translate(255,0)">
+      <g>
+        <animateTransform attributeName="transform" type="scale"
+                          values="1 1;1 1;-1 1;-1 1;1 1;1 1"
+                          keyTimes="0;0.72;0.8;0.86;0.94;1" dur="5s" repeatCount="indefinite"/>
+        <text x="-21" y="86" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="700"
+              fill="#60a5fa" textLength="42" lengthAdjust="spacingAndGlyphs" text-anchor="start">K</text>
+      </g>
+    </g>
+    <text x="276" y="86" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="700"
+          fill="#60a5fa" textLength="278" lengthAdjust="spacingAndGlyphs">nowledge</text>
+  </g>
 </svg>
