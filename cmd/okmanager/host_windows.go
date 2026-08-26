@@ -3,37 +3,99 @@
 package main
 
 // OkManager 窗口宿主（Windows）：确保 okd 在线后创建原生窗口并嵌入 WebView2，
-// 驻留消息循环至窗口关闭。窗口创建尺寸即主屏尺寸 + 立即最大化（或按
-// gui-state.json 恢复），内容加载前已完成，无"小窗口闪一下再最大化"。
+// 驻留消息循环至窗口关闭。不用 webview2.NewWithOptions——其内部"建窗→立即
+// SW_SHOW→才初始化 WebView2"会让用户先看到未最大化的白窗口再跳变（像瞬间打开
+// 两个页面）。这里自建窗口（初始不显示）+ 直接 edge.Chromium 嵌入 + 首次导航
+// 完成后才显示：第一帧即渲染好的页面，白屏与跳变全消。
 
 import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 	"unsafe"
 
-	webview2 "github.com/jchv/go-webview2"
+	edge "github.com/jchv/go-webview2/pkg/edge"
+	"golang.org/x/sys/windows"
 
 	"openknowledge/internal/daemon"
 	"openknowledge/internal/gui"
 	"openknowledge/internal/registry"
 )
 
+// 库的 internal/w32 不可 import（internal 包限制），所需 proc 与结构体在此自行声明。
 var (
-	hostUser32               = syscall.NewLazyDLL("user32.dll")
-	procHostShowWindow       = hostUser32.NewProc("ShowWindow")
-	procGetWindowPlacement   = hostUser32.NewProc("GetWindowPlacement")
-	procSetWindowPlacement   = hostUser32.NewProc("SetWindowPlacement")
-	procHostGetSystemMetrics = hostUser32.NewProc("GetSystemMetrics")
+	hostUser32                 = windows.NewLazySystemDLL("user32.dll")
+	procHostShowWindow         = hostUser32.NewProc("ShowWindow")
+	procHostUpdateWindow       = hostUser32.NewProc("UpdateWindow")
+	procGetWindowPlacement     = hostUser32.NewProc("GetWindowPlacement")
+	procSetWindowPlacement     = hostUser32.NewProc("SetWindowPlacement")
+	procHostGetSystemMetrics   = hostUser32.NewProc("GetSystemMetrics")
+	procRegisterClassExW       = hostUser32.NewProc("RegisterClassExW")
+	procCreateWindowExW        = hostUser32.NewProc("CreateWindowExW")
+	procDestroyWindow          = hostUser32.NewProc("DestroyWindow")
+	procDefWindowProcW         = hostUser32.NewProc("DefWindowProcW")
+	procGetMessageW            = hostUser32.NewProc("GetMessageW")
+	procTranslateMessage       = hostUser32.NewProc("TranslateMessage")
+	procDispatchMessageW       = hostUser32.NewProc("DispatchMessageW")
+	procPostQuitMessage        = hostUser32.NewProc("PostQuitMessage")
+	hostKernel32               = windows.NewLazySystemDLL("kernel32.dll")
+	procHostGetModuleHandleExW = hostKernel32.NewProc("GetModuleHandleExW")
 )
 
 const (
 	swShowNormal = 1
 	swMaximize   = 3
+
+	cwUseDefault       = 0x80000000
+	wsOverlappedWindow = 0xCF0000 // 不带 WS_VISIBLE：首帧前窗口不可见
+
+	wmDestroy       = 0x0002
+	wmMove          = 0x0003
+	wmSize          = 0x0005
+	wmClose         = 0x0010
+	wmGetMinMaxInfo = 0x0024
 )
+
+// 镜像 Win32 结构体（仅用到的字段完整保留布局）。
+type wndClassExW struct {
+	CbSize        uint32
+	Style         uint32
+	LpfnWndProc   uintptr
+	CnClsExtra    int32
+	CbWndExtra    int32
+	HInstance     windows.Handle
+	HIcon         windows.Handle
+	HCursor       windows.Handle
+	HbrBackground windows.Handle
+	LpszMenuName  *uint16
+	LpszClassName *uint16
+	HIconSm       windows.Handle
+}
+
+type point struct {
+	X, Y int32
+}
+
+type minMaxInfo struct {
+	PtReserved     point
+	PtMaxSize      point
+	PtMaxPosition  point
+	PtMinTrackSize point
+	PtMaxTrackSize point
+}
+
+type msg struct {
+	Hwnd     uintptr
+	Message  uint32
+	WParam   uintptr
+	LParam   uintptr
+	Time     uint32
+	Pt       point
+	LPrivate uint32
+}
 
 // windowPlacement 镜像 Win32 WINDOWPLACEMENT（仅用到的字段）。
 type windowPlacement struct {
@@ -93,6 +155,77 @@ func trackPlacement(hwnd uintptr, last *atomic.Value, stop <-chan struct{}) {
 	}
 }
 
+// hostCtx 是 hwnd 关联的窗口上下文（WndProc 经 hostContexts 查取，
+// 参照库 webview.go 的 windowContext 模式）。
+type hostCtx struct {
+	hwnd     uintptr
+	chromium *edge.Chromium
+	saved    *gui.WindowState // 有保存状态时显示走 SetWindowPlacement
+	showOnce sync.Once        // 显示动作幂等：导航回调与 5s 兜底谁先到谁执行
+}
+
+var (
+	hostContexts   = map[uintptr]*hostCtx{}
+	hostContextsMu sync.RWMutex
+)
+
+// show 首次显示窗口：有保存状态恢复 placement，无则直接最大化；随后聚焦 WebView2。
+func (c *hostCtx) show() {
+	if c.saved != nil {
+		wp := placementFromState(c.saved)
+		procSetWindowPlacement.Call(c.hwnd, uintptr(unsafe.Pointer(&wp)))
+	} else {
+		procHostShowWindow.Call(c.hwnd, swMaximize)
+	}
+	procHostUpdateWindow.Call(c.hwnd)
+	c.chromium.Focus()
+}
+
+func hostWndProc(hwnd, message, wp, lp uintptr) uintptr {
+	hostContextsMu.RLock()
+	c := hostContexts[hwnd]
+	hostContextsMu.RUnlock()
+	if c == nil {
+		r, _, _ := procDefWindowProcW.Call(hwnd, message, wp, lp)
+		return r
+	}
+	switch message {
+	case wmSize:
+		c.chromium.Resize()
+	case wmMove:
+		_ = c.chromium.NotifyParentWindowPositionChanged()
+	case wmClose:
+		procDestroyWindow.Call(hwnd)
+	case wmDestroy:
+		procPostQuitMessage.Call(0)
+	case wmGetMinMaxInfo:
+		mmi := *(**minMaxInfo)(unsafe.Pointer(&lp)) // lParam 即 *MINMAXINFO
+		mmi.PtMinTrackSize = point{X: 960, Y: 600}
+	default:
+		r, _, _ := procDefWindowProcW.Call(hwnd, message, wp, lp)
+		return r
+	}
+	return 0
+}
+
+var registerHostClassOnce sync.Once
+
+// registerHostClass 注册宿主窗口类（重复注册返回"类已存在"，无碍，仅注册一次）。
+func registerHostClass(className *uint16) {
+	registerHostClassOnce.Do(func() {
+		var hinstance windows.Handle
+		// GetModuleHandleExW(0, NULL, &hinstance)
+		procHostGetModuleHandleExW.Call(0, 0, uintptr(unsafe.Pointer(&hinstance)))
+		wc := wndClassExW{
+			CbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
+			HInstance:     hinstance,
+			LpszClassName: className,
+			LpfnWndProc:   windows.NewCallback(hostWndProc),
+		}
+		procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
+	})
+}
+
 func runHost(stdout, stderr io.Writer) int {
 	info, ok := daemon.EnsureCurrent()
 	if !ok { // daemon 正在后台拉起：与 daemon.OpenGUI 同款轮询（最长 3s）
@@ -107,42 +240,82 @@ func runHost(stdout, stderr io.Writer) int {
 	}
 
 	screenW, screenH := primaryScreenSize()
-	w := webview2.NewWithOptions(webview2.WebViewOptions{
-		Debug:     false,
-		DataPath:  filepath.Join(registry.Home(), "webview2-data"),
-		AutoFocus: true,
-		WindowOptions: webview2.WindowOptions{
-			Title:  gui.WindowTitle,
-			Width:  screenW,
-			Height: screenH,
-		},
-	})
-	if w == nil { // WebView2 初始化失败：直开浏览器（不经 OpenPreferred，防回退重入内嵌路径）
-		fmt.Fprintln(stderr, "WebView2 初始化失败，回退浏览器打开")
+	className, _ := windows.UTF16PtrFromString("OkManagerHost")
+	registerHostClass(className)
+	title, _ := windows.UTF16PtrFromString(gui.WindowTitle)
+	hwnd, _, _ := procCreateWindowExW.Call(
+		0,
+		uintptr(unsafe.Pointer(className)),
+		uintptr(unsafe.Pointer(title)),
+		wsOverlappedWindow, // 不带 WS_VISIBLE：导航完成前不显示
+		cwUseDefault, cwUseDefault,
+		uintptr(screenW), uintptr(screenH),
+		0, 0, 0, 0,
+	)
+	if hwnd == 0 {
+		fmt.Fprintln(stderr, "窗口创建失败，回退浏览器打开")
 		gui.OpenBrowser(info.URL() + "/#token=" + info.Token)
 		return 0
 	}
 
-	hwnd := uintptr(w.Window())
+	chromium := edge.NewChromium()
+	chromium.DataPath = filepath.Join(registry.Home(), "webview2-data")
+	ctx := &hostCtx{hwnd: hwnd, chromium: chromium}
 	if s, ok := gui.LoadWindowState(); ok {
-		wp := placementFromState(s)
-		procSetWindowPlacement.Call(hwnd, uintptr(unsafe.Pointer(&wp)))
-	} else {
-		procHostShowWindow.Call(hwnd, swMaximize) // 首启：内容加载前即最大化
+		ctx.saved = s
 	}
-	w.SetSize(960, 600, webview2.HintMin) // 最小尺寸
-	w.Init(gui.TokenInitScript(info.URL(), info.Token))
-	w.Navigate(info.URL() + "/")
+	hostContextsMu.Lock()
+	hostContexts[hwnd] = ctx
+	hostContextsMu.Unlock()
+
+	// 首次导航完成才显示窗口（此时页面已渲染，无白屏跳变）；
+	// 5s 兜底：okd 中途挂掉导致导航回调不到时也强制显示，防窗口永不出现。
+	chromium.NavigationCompletedCallback = func(_ *edge.ICoreWebView2, _ *edge.ICoreWebView2NavigationCompletedEventArgs) {
+		ctx.showOnce.Do(ctx.show)
+	}
+	go func() {
+		time.Sleep(5 * time.Second)
+		ctx.showOnce.Do(ctx.show)
+	}()
+
+	if !chromium.Embed(hwnd) { // WebView2 初始化失败：直开浏览器（不经 OpenPreferred，防回退重入内嵌路径）
+		fmt.Fprintln(stderr, "WebView2 初始化失败，回退浏览器打开")
+		hostContextsMu.Lock()
+		delete(hostContexts, hwnd)
+		hostContextsMu.Unlock()
+		procDestroyWindow.Call(hwnd)
+		gui.OpenBrowser(info.URL() + "/#token=" + info.Token)
+		return 0
+	}
+
+	if settings, err := chromium.GetSettings(); err == nil {
+		_ = settings.PutAreDefaultContextMenusEnabled(false)
+		_ = settings.PutAreDevToolsEnabled(false)
+	}
+	chromium.Init(gui.TokenInitScript(info.URL(), info.Token))
+	chromium.Resize()
+	chromium.Navigate(info.URL() + "/")
 
 	var last atomic.Value
 	stop := make(chan struct{})
 	go trackPlacement(hwnd, &last, stop)
 
-	w.Run()
+	var m msg
+	for { // 消息循环直至 WM_QUIT
+		r, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
+		if r == 0 || int32(r) == -1 {
+			break
+		}
+		procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
+		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
+	}
+
 	close(stop)
 	if v := last.Load(); v != nil {
 		_ = gui.SaveWindowState(v.(*gui.WindowState))
 	}
-	w.Destroy()
+	hostContextsMu.Lock()
+	delete(hostContexts, hwnd)
+	hostContextsMu.Unlock()
 	return 0
 }
