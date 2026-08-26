@@ -244,6 +244,8 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 			names = append(names, h.Filename)
 		}
 		hitsText.WriteString("\n")
+		// 注入流水：正常路径也留痕（GUI 日志页可见），格式与异常日志一致。
+		logErr("prompt inject: 注入 %d 条（%s）", len(names), strings.Join(names, "、"))
 		// 注入事件 + 会话挂账（采纳归因的数据源；原始大小写 basename）；
 		// fail-open：写失败仅记日志
 		if err := db.RecordEvents(index.EventInjected, names); err != nil {
