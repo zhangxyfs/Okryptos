@@ -71,6 +71,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("GET /api/logs", h.apiLogs)
 	api("GET /api/projects", h.apiProjects)
 	api("GET /api/entries", h.apiEntries)
+	api("GET /api/graph", h.apiGraph)
 	api("GET /api/entry", h.apiEntryGet)
 	api("POST /api/entry", h.apiEntryCreate)
 	api("PUT /api/entry", h.apiEntryUpdate)
@@ -709,6 +710,20 @@ func (h *Handler) apiEntries(w http.ResponseWriter, r *http.Request) {
 		return out[i].File < out[j].File
 	})
 	writeJSON(w, http.StatusOK, out)
+}
+
+// apiGraph GET /api/graph?project= —— 图谱页数据契约（docs/2026-08-27-gui-graph-page-requirements.md §2）
+func (h *Handler) apiGraph(w http.ResponseWriter, r *http.Request) {
+	st := resolveProject(w, r.URL.Query().Get("project"))
+	if st == nil {
+		return
+	}
+	entries, err := entry.Load(st.KnowledgeDir())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, buildGraph(entries))
 }
 
 func (h *Handler) apiEntryGet(w http.ResponseWriter, r *http.Request) {

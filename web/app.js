@@ -43,6 +43,12 @@ async function api(path, opts){
 const I18N = {
   zh: {
     manage:"管理", setup:"引导", prefs:"设置", logs:"日志", misc:"其他",
+    graph:"图谱", gPickProject:"项目", gSearch:"搜索条目标题 / tags…",
+    gEmpty:"暂无条目", gBack:"返回总览", gFlat:"平铺", gFold:"分层",
+    gLoading:"加载中…", gNoProject:"暂无项目",
+    gRelTitle:"关联条目（{n}）", gDegRow:"出度 {o} · 入度 {i} · 总连接 {d}",
+    gOutStruct:"出·结构", gOutRef:"出·引用", gInStruct:"入·结构", gInRef:"入·引用",
+    gLegendHint:"点击图例高亮/淡化类目", gLegendHintLayer:"点击图例展开/收起类目", gClosePanel:"关闭面板",
     treeCaption:"知识条目", filter:"过滤条目… / 命令（/type、/tag）", pickEntry:"← 从树中选择一条知识条目",
     evoSegHint:"演进历程尚未拆分版本段子条目——对 agent 说「更新 wiki」即可按新结构迁移（索引 + 版本段），老内容不会丢。",
     modified:"修改于",
@@ -179,6 +185,12 @@ const I18N = {
   },
   en: {
     manage:"Manage", setup:"Setup", prefs:"Settings", logs:"Logs", misc:"Misc",
+    graph:"Graph", gPickProject:"Project", gSearch:"Search title / tags…",
+    gEmpty:"No entries", gBack:"Overview", gFlat:"Flat", gFold:"Layered",
+    gLoading:"Loading…", gNoProject:"No project",
+    gRelTitle:"Related entries ({n})", gDegRow:"Out {o} · In {i} · Total {d}",
+    gOutStruct:"out·struct", gOutRef:"out·ref", gInStruct:"in·struct", gInRef:"in·ref",
+    gLegendHint:"Click a legend item to highlight/dim its category", gLegendHintLayer:"Click legend to expand/collapse a category", gClosePanel:"Close panel",
     treeCaption:"Entries", filter:"Filter entries… / commands (/type, /tag)", pickEntry:"← Select an entry from the tree",
     evoSegHint:"No version-segment sub-entries yet — ask your agent to \"update wiki\" to migrate to the new structure (index + segments). Existing content is preserved.",
     modified:"Modified",
@@ -334,9 +346,10 @@ const ICON = {
   panel:  svg('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>'),
   moon:   svg('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'),
   sun:    svg('<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'),
+  graph:  svg('<circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M8.5 7.5 15 16M9 6h6"/>'),
 };
 const MENUS = [
-  { key:"manage", ico:ICON.manage }, { key:"setup", ico:ICON.setup }, { key:"prefs", ico:ICON.prefs },
+  { key:"manage", ico:ICON.manage }, { key:"graph", ico:ICON.graph }, { key:"setup", ico:ICON.setup }, { key:"prefs", ico:ICON.prefs },
   { key:"logs", ico:ICON.logs }, { key:"misc", ico:ICON.misc },
 ];
 
@@ -2663,6 +2676,575 @@ function openLlmNeededModal(){
   document.body.appendChild(mask);
 }
 
+/* ================= 图谱页 ================= */
+/* 需求 docs/2026-08-27-gui-graph-page-requirements.md；引擎移植自
+   docs/prototypes/prototype-wiki-graph.html（物理参数逐字沿用）。
+   关键集成约束：GUI render() 是整页 DOM 重建——一切模拟/布局/视图状态
+   必须放模块级 gV，renderGraph 只按 gV 重建 DOM，坐标不丢。 */
+let GRAPH = null;        // {proj, data, err}；loadGraph 惰性加载
+let graphProj = "";      // 当前选中项目（页内独立，不同步管理页）
+let gV = null;           // 视图状态：模拟/布局/DOM 引用全在这里，扛整页 DOM 重建
+let gProjects = null;    // 项目下拉数据 [{name,last_update}]
+
+function loadGraph(){
+  if(!gProjects){
+    gProjects = [];
+    const p = graphProj;   // 快照：拉取期间用户已选项目则不覆盖其选择
+    api("/api/projects").then(ps=>{
+      gProjects = (ps||[]).slice().sort((a,b)=>(b.last_update||0)-(a.last_update||0));
+      if(!graphProj && graphProj===p && gProjects.length) graphProj = gProjects[0].name;
+      refreshGraph();
+    }).catch(()=>{ gProjects = []; });
+  }
+  GRAPH = lazyPage(GRAPH, { proj:graphProj, data:null }, refreshGraph);
+}
+function refreshGraph(){
+  if(!graphProj){ GRAPH = { proj:"", data:null }; menuRender("graph"); return; }
+  const p = graphProj;   // 快照：连切项目时丢弃过期响应，避免旧数据以新项目名落缓存
+  api("/api/graph?project="+encodeURIComponent(p))
+    .then(d=>{ if(p!==graphProj) return; GRAPH = { proj:p, data:d }; graphReset(p); })
+    .catch(e=>{ if(p!==graphProj) return; GRAPH = { proj:p, data:null, err:e.message };
+      // 停掉旧项目的 rAF/observer：错误态下旧布局无保留价值，否则 gFrame 页面守卫仍通过，
+      // 旧模拟在已 detach 的 DOM 上空转白烧 CPU
+      if(gV && gV.raf) cancelAnimationFrame(gV.raf);
+      if(gV && gV.ro) gV.ro.disconnect();
+      gV = null; })
+    .then(()=>menuRender("graph"));
+}
+function graphReset(proj){
+  if(gV && gV.raf) cancelAnimationFrame(gV.raf);
+  if(gV && gV.ro) gV.ro.disconnect();
+  gV = null;
+  const d = GRAPH && GRAPH.proj===proj ? GRAPH.data : null;
+  if(!d || !(d.nodes||[]).length) return;
+  (d.categories||[]).forEach((c,i)=> catColor[c] = PALETTE[i % PALETTE.length]);
+  gV = {
+    nodes: d.nodes.map(n=>({...n, x:0,y:0,vx:0,vy:0,pinned:false})),   // {...n} 拷贝，不污染 GRAPH.data 缓存
+    edges: d.edges||[], byId:{}, adj:{},
+    nodeEls:{}, labelEls:{}, edgeEls:[],
+    view:{x:0,y:0,k:1}, alpha:1,
+    dragNode:null, panning:false, panStart:null, moved:false,
+    layered:(d.nodes||[]).length > LAYER_THRESHOLD,  // Task 5：>400 条目自动分层（骨架常显+类目下钻）
+    expanded:new Set(),                // 分层模式已展开类目（Set<category>）；全量模式恒空
+    raf:null,
+    svg:null, world:null, tip:null, ro:null,  // DOM 引用随 renderGraph 整页重建替换
+    panel:null, panelBody:null,               // 详情面板 DOM（renderGraph 建，随整页重建替换）
+    catState:{}, query:"",                    // 图例类目开关 / 搜索词：过滤状态要扛整页重建，放 gV
+    W:0, H:0, cats:[], focus:{}, laidOut:false, // laidOut：已预跑+fitView，DOM 重建只按坐标重画
+    rand: mulberry32(42),              // 种子定死：同数据重进布局可复现
+  };
+  gV.cats = (d.categories && d.categories.length ? d.categories
+            : [...new Set(gV.nodes.map(n=>n.category))]).slice();
+  gV.nodes.forEach(n=>{ gV.byId[n.id]=n; gV.adj[n.id]=[]; });
+  gV.edges.forEach(e=>{ (gV.adj[e.source]||[]).push(e); (gV.adj[e.target]||[]).push(e); });
+}
+
+/* ---------- 引擎（移植自 docs/prototypes/prototype-wiki-graph.html，物理参数逐字沿用） ---------- */
+const PALETTE = ["#1f2937","#8b5cf6","#3b82f6","#10b981","#f59e0b","#ef4444",
+                 "#06b6d4","#ec4899","#84cc16","#f97316","#9ca3af"];
+const catColor = {};   // 按 GRAPH.data.categories 填色（graphReset 内）
+// 类目取色防御兜底：节点 category 不在 GRAPH.data.categories（异常数据）时回落固定灰，不得抛/染 undefined
+function gCatColor(c){ return catColor[c] || "#9ca3af"; }
+const G_NS = "http://www.w3.org/2000/svg";
+
+function gRadius(n){ return n.is_dir ? 13 : (n.deg >= 6 ? 13 : n.deg >= 3 ? 10 : 7); }
+
+/* ---------- 分层模式（设计 docs/2026-08-27-wiki-graph-layered-design.md） ---------- */
+const LAYER_THRESHOLD = 400;   // 条目数超过则自动进入分层模式（调试后可调）
+// 骨架 = is_dir 或 deg>=6（与 gRadius 大球档对齐）；分层模式下叶子不进 DOM、不参与物理
+function gIsSkeleton(n){ return n.is_dir || n.deg >= 6; }
+function gVisibleNodes(){
+  if(!gV.layered) return gV.nodes;
+  return gV.nodes.filter(n=> gIsSkeleton(n) || gV.expanded.has(n.category));
+}
+
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;
+  let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;
+  return((t^t>>>14)>>>0)/4294967296;}}
+
+/* 力导向物理参数（原型逐字） */
+const REP = 9000;          // 斥力强度
+const REP_CUT = 320;       // 斥力截断距离（跨簇不互斥）
+const LEN = {struct: 110, ref: 170};  // 弹簧原长
+const SPRING = 0.014;
+const GRAV = 0.004;        // 向心力
+const CLUSTER = 0.05;      // 同类目焦点聚拢
+
+// 每个类目一个环绕中心的焦点，节点被拉向自己类目的焦点 -> 类目成簇
+// （原型"目录"居中特判已删：后端 category 无此值，焦点环覆盖全部 categories）
+function gLayoutFoci(){
+  const catSize = {};
+  gV.nodes.forEach(n => catSize[n.category] = (catSize[n.category]||0)+1);
+  const ring = [...gV.cats].sort((a,b)=>(catSize[b]||0)-(catSize[a]||0));
+  const R = Math.min(gV.W,gV.H) * 0.40;
+  gV.focus = {};
+  ring.forEach((c,i) => {
+    const ang = i / ring.length * 2 * Math.PI - Math.PI/2;
+    gV.focus[c] = { x: gV.W/2 + R*Math.cos(ang), y: gV.H/2 + R*Math.sin(ang)*0.8 };
+  });
+}
+
+function gTick(){
+  const edges = gV.edges, byId = gV.byId, focus = gV.focus, rand = gV.rand;
+  const nodes = gVisibleNodes();   // 分层模式只模拟可见集（叶子不参与物理）；全量模式 = gV.nodes
+  const vis = {};                  // 可见 id 集（与 nodes 同趟构建），弹簧端点不可见时跳过
+  nodes.forEach(n => vis[n.id] = true);
+  gV.alpha *= 0.996;
+  const a = Math.max(gV.alpha, 0.02);
+  const cx = () => gV.W/2, cy = () => gV.H/2;
+
+  // 斥力 O(n^2)
+  for (let i=0;i<nodes.length;i++) {
+    const A = nodes[i];
+    for (let j=i+1;j<nodes.length;j++) {
+      const B = nodes[j];
+      let dx = A.x-B.x, dy = A.y-B.y;
+      let d2 = dx*dx+dy*dy; if (d2 < 1) { dx = rand()-0.5; dy = rand()-0.5; d2 = 1; }
+      if (d2 > REP_CUT*REP_CUT) continue;
+      const d = Math.sqrt(d2);
+      const f = REP * a / d2;
+      const fx = dx/d*f, fy = dy/d*f;
+      A.vx += fx; A.vy += fy; B.vx -= fx; B.vy -= fy;
+    }
+  }
+  // 弹簧
+  edges.forEach(e => {
+    if(!vis[e.source] || !vis[e.target]) return;   // 分层模式：端点不可见的边无作用力
+    const A = byId[e.source], B = byId[e.target];
+    const dx = B.x-A.x, dy = B.y-A.y;
+    const d = Math.max(Math.sqrt(dx*dx+dy*dy), 1);
+    const f = (d - LEN[e.kind]) * SPRING * a;
+    const fx = dx/d*f, fy = dy/d*f;
+    A.vx += fx; A.vy += fy; B.vx -= fx; B.vy -= fy;
+  });
+  // 向心 + 类目焦点聚拢（定位力，不随 alpha 衰减）+ 积分
+  nodes.forEach(n => {
+    n.vx += (cx()-n.x) * GRAV;
+    n.vy += (cy()-n.y) * GRAV;
+    const f = focus[n.category] || { x: cx(), y: cy() };   // 防御：category 无焦点（异常数据）回落画布中心
+    n.vx += (f.x-n.x) * CLUSTER;
+    n.vy += (f.y-n.y) * CLUSTER;
+    n.vx *= 0.82; n.vy *= 0.82;
+    if (!n.pinned) {
+      n.x += Math.max(-12, Math.min(12, n.vx));
+      n.y += Math.max(-12, Math.min(12, n.vy));
+    }
+  });
+  // 碰撞（半径不重叠）
+  for (let i=0;i<nodes.length;i++) {
+    const A = nodes[i];
+    for (let j=i+1;j<nodes.length;j++) {
+      const B = nodes[j];
+      const dx = B.x-A.x, dy = B.y-A.y;
+      const min = gRadius(A)+gRadius(B)+10;
+      const d2 = dx*dx+dy*dy;
+      if (d2 > 0 && d2 < min*min) {
+        const d = Math.sqrt(d2), push = (min-d)/2/d;
+        if (!A.pinned) { A.x -= dx*push; A.y -= dy*push; }
+        if (!B.pinned) { B.x += dx*push; B.y += dy*push; }
+      }
+    }
+  }
+}
+
+/* ---------- 视口变换 ---------- */
+function gApplyView(){
+  gV.world.setAttribute("transform",
+    `translate(${gV.view.x},${gV.view.y}) scale(${gV.view.k})`);
+}
+function gToWorld(px, py){
+  const r = gV.svg.getBoundingClientRect();
+  return { x:(px - r.left - gV.view.x)/gV.view.k, y:(py - r.top - gV.view.y)/gV.view.k };
+}
+function gRender(){
+  const byId = gV.byId;
+  gV.edges.forEach((e,i) => {
+    const l = gV.edgeEls[i];
+    if(!l) return;   // 分层模式：端点未全可见的边无元素（懒挂载空位）
+    const A = byId[e.source], B = byId[e.target];
+    l.setAttribute("x1",A.x); l.setAttribute("y1",A.y);
+    l.setAttribute("x2",B.x); l.setAttribute("y2",B.y);
+  });
+  gV.nodes.forEach(n => {
+    const g = gV.nodeEls[n.id];
+    if(!g) return;   // 分层模式：未展开叶子无元素
+    g.setAttribute("transform",`translate(${n.x},${n.y})`);
+    const lbl = gV.labelEls[n.id];
+    if (lbl) { lbl.setAttribute("x", n.x); lbl.setAttribute("y", n.y + gRadius(n) + 13); }
+  });
+}
+function gFrame(){
+  if(state.menu!=="graph" || !gV){   // 页面守卫：离开图谱页自动停帧，防 rAF 循环泄漏叠加
+    if(gV){ gV.raf = null; if(gV.ro){ gV.ro.disconnect(); gV.ro = null; } }
+    return;
+  }
+  gTick(); gRender();
+  gV.raf = requestAnimationFrame(gFrame);
+}
+
+/* 按 gV 重建舞台 DOM（renderGraph 整页重建后调用）：建 svg 三层 + 元素；
+   首建（!laidOut）随机布点 + 预跑 900 tick + fitView，复建只 gRender()+gApplyView() 不丢布局 */
+function gInitGraph(stage){
+  const svg = document.createElementNS(G_NS,"svg");
+  stage.appendChild(svg);
+  const tip = el("div","g-tip");
+  stage.appendChild(tip);
+  const world = document.createElementNS(G_NS,"g");
+  const gEdge = document.createElementNS(G_NS,"g");
+  const gNode = document.createElementNS(G_NS,"g");
+  const gText = document.createElementNS(G_NS,"g"); // 标签顶层，不被点/边遮挡
+  world.appendChild(gEdge); world.appendChild(gNode); world.appendChild(gText);
+  svg.appendChild(world);
+  gV.svg = svg; gV.world = world; gV.tip = tip;
+
+  const vset = {};   // 本帧可见 id 集（分层模式 = 骨架 + 已展开类目；全量模式 = 全部）
+  gVisibleNodes().forEach(n => vset[n.id] = true);
+  gV.edgeEls = gV.edges.map(e => {
+    if(!vset[e.source] || !vset[e.target]) return null;  // 边懒挂载：两端可见才建元素
+    const l = document.createElementNS(G_NS,"line");
+    l.setAttribute("class","edge" + (e.kind==="ref" ? " ref":""));
+    gEdge.appendChild(l); return l;
+  });
+  gV.nodeEls = {}; gV.labelEls = {};
+  gV.nodes.forEach(n => {
+    if(!vset[n.id]) return;   // 叶子懒挂载：不进 DOM（是完全不建元素，不是 dim）
+    const g = document.createElementNS(G_NS,"g");
+    g.setAttribute("class","node" + (n.is_dir ? " dir":""));
+    let shape;
+    if (n.is_dir) { // 菱形
+      shape = document.createElementNS(G_NS,"rect");
+      const r = gRadius(n);
+      shape.setAttribute("x",-r); shape.setAttribute("y",-r);
+      shape.setAttribute("width",2*r); shape.setAttribute("height",2*r);
+      shape.setAttribute("transform","rotate(45)");
+      shape.setAttribute("rx",3);
+    } else {
+      shape = document.createElementNS(G_NS,"circle");
+      shape.setAttribute("r", gRadius(n));
+    }
+    shape.setAttribute("fill", gCatColor(n.category));
+    g.appendChild(shape);
+    gNode.appendChild(g);
+    gV.nodeEls[n.id] = g;
+    if (n.is_dir || n.deg >= 3) { // 小节点不常显标签，hover 有 tooltip
+      const lbl = document.createElementNS(G_NS,"text");
+      lbl.setAttribute("class","lbl");
+      lbl.textContent = n.title.length > 18 ? n.title.slice(0,17) + "…" : n.title;
+      gText.appendChild(lbl);
+      gV.labelEls[n.id] = lbl;
+    }
+  });
+
+  gV.W = stage.clientWidth; gV.H = stage.clientHeight;
+  if(!gV.laidOut){
+    gV.nodes.forEach(n => {
+      n.x = gV.W/2 + (gV.rand()-0.5) * Math.min(gV.W,900);
+      n.y = gV.H/2 + (gV.rand()-0.5) * Math.min(gV.H,600);
+    });
+    gLayoutFoci();
+    // 先同步预跑收敛（初 Speed 快后衰减由 alpha 控制），不依赖 rAF 帧数
+    for (let i = 0; i < 900; i++) gTick();
+    // 自动适配视图：让整图居中且留边（分层模式只对可见集取景，未展开叶子不参与）
+    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    gVisibleNodes().forEach(n => { x0=Math.min(x0,n.x); y0=Math.min(y0,n.y);
+      x1=Math.max(x1,n.x); y1=Math.max(y1,n.y); });
+    const bw = Math.max(x1-x0,1), bh = Math.max(y1-y0,1);
+    const k = Math.max(0.25, Math.min(1.5, Math.min((gV.W-160)/bw, (gV.H-120)/bh)));
+    gV.view.k = k;
+    gV.view.x = (gV.W - bw*k)/2 - x0*k;
+    gV.view.y = (gV.H - bh*k)/2 - y0*k;
+    gV.laidOut = true;
+  }
+  gRender(); gApplyView();
+
+  /* ---------- 平移 / 缩放 / 拖拽（pointer 事件挂本帧 svg；DOM 重建时随旧元素一并销毁） ---------- */
+  svg.addEventListener("pointerdown", ev => {
+    gV.moved = false;
+    const g = ev.target.closest(".node");
+    if (g) {
+      const n = gV.nodes.find(n => gV.nodeEls[n.id] === g);
+      if (n) { gV.dragNode = n; n.pinned = true; gV.alpha = Math.max(gV.alpha, 0.25); }
+    } else {
+      gV.panning = true; svg.classList.add("panning");
+      gV.panStart = {x: ev.clientX, y: ev.clientY, vx: gV.view.x, vy: gV.view.y};
+    }
+    svg.setPointerCapture(ev.pointerId);
+  });
+  svg.addEventListener("pointermove", ev => {
+    if (gV.dragNode) {
+      gV.moved = true;
+      const p = gToWorld(ev.clientX, ev.clientY);
+      gV.dragNode.x = p.x; gV.dragNode.y = p.y;
+    } else if (gV.panning && gV.panStart) {
+      gV.moved = true;
+      gV.view.x = gV.panStart.vx + ev.clientX - gV.panStart.x;
+      gV.view.y = gV.panStart.vy + ev.clientY - gV.panStart.y;
+      gApplyView();
+    }
+    // tooltip
+    const g = ev.target.closest(".node");
+    if (g && !gV.dragNode) {
+      const n = gV.nodes.find(n => gV.nodeEls[n.id] === g);
+      gShowTip(n, ev.clientX, ev.clientY);
+      hotNode(n);
+    } else if (!gV.dragNode) { gHideTip(); hotNode(null); }
+  });
+  svg.addEventListener("pointerup", () => {
+    if (gV.dragNode) {
+      const n = gV.dragNode; gV.dragNode = null; n.pinned = false;
+      gV.alpha = Math.max(gV.alpha, 0.15); // 局部继续收敛
+      if (!gV.moved) gSelectNode(n);
+    }
+    gV.panning = false; svg.classList.remove("panning");
+  });
+  svg.addEventListener("wheel", ev => {
+    ev.preventDefault();
+    const r = svg.getBoundingClientRect();
+    const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+    const k2 = Math.max(0.25, Math.min(4, gV.view.k * (ev.deltaY < 0 ? 1.12 : 0.89)));
+    gV.view.x = mx - (mx - gV.view.x) * k2 / gV.view.k;
+    gV.view.y = my - (my - gV.view.y) * k2 / gV.view.k;
+    gV.view.k = k2; gApplyView();
+  }, {passive:false});
+
+  // 容器尺寸跟踪（原型 window resize 的 GUI 版，ResizeObserver 挂 .g-stage）
+  if(gV.ro) gV.ro.disconnect();
+  gV.ro = new ResizeObserver(()=>{
+    if(!gV || gV.svg!==svg) return;   // 旧 observer 滞后回调防串
+    gV.W = stage.clientWidth; gV.H = stage.clientHeight;
+    gLayoutFoci();
+  });
+  gV.ro.observe(stage);
+
+  if(!gV.raf) gV.raf = requestAnimationFrame(gFrame);
+}
+
+/* ---------- tooltip / 边高亮（fade 版：非邻居节点含标签淡化 .15） ---------- */
+function gShowTip(n, x, y){
+  if (!n) return gHideTip();
+  const tip = gV.tip;
+  tip.innerHTML = `<div class="t">${esc(n.title)}</div>` +
+    `<div class="s">${esc(n.type)}${n.summary ? " · " + esc(n.summary.split(/[；;]/)[0]) : ""}</div>`;
+  tip.style.display = "block";
+  const r = gV.svg.getBoundingClientRect();   // tip 绝对定位于 .g-stage 内，clientX 换算容器坐标
+  tip.style.left = Math.min(x - r.left + 14, r.width - 360) + "px";
+  tip.style.top = (y - r.top + 14) + "px";
+}
+function gHideTip(){ if(gV && gV.tip) gV.tip.style.display = "none"; }
+function hotNode(n){
+  const nb = {};
+  if (n) {
+    nb[n.id] = true;
+    (gV.adj[n.id]||[]).forEach(e => { nb[e.source] = true; nb[e.target] = true; });
+  }
+  gV.edges.forEach((e,i) => {
+    const l = gV.edgeEls[i];
+    if (l) l.classList.toggle("hot",
+      !!n && (e.source === n.id || e.target === n.id));
+  });
+  // 悬停时淡化非邻居节点（含标签），突出连通关系
+  gV.nodes.forEach(nd => {
+    const nel = gV.nodeEls[nd.id];
+    if (!nel) return;   // 分层模式：未展开叶子无元素
+    const f = !!n && !nb[nd.id];
+    nel.classList.toggle("fade", f);
+    const lbl = gV.labelEls[nd.id];
+    if (lbl) lbl.classList.toggle("fade", f);
+  });
+}
+
+/* ---------- 详情面板（原型 selectNode :367-385 移植；容器 .g-panel 由 renderGraph 创建） ---------- */
+const gRelClick = { last:null };   // 关联条目双击检测 holder（dblClick 用；原生 dblclick 全量重渲下不可靠，本仓沉淀坑）
+function gSelectNode(n){
+  if(!gV || !gV.panelBody) return;
+  const panelBody = gV.panelBody;
+  const out = gV.edges.filter(e => e.source === n.id);
+  const inc = gV.edges.filter(e => e.target === n.id);
+  const rel = [];
+  out.forEach(e => rel.push({n: gV.byId[e.target], k: t(e.kind==="struct"?"gOutStruct":"gOutRef")}));
+  inc.forEach(e => rel.push({n: gV.byId[e.source], k: t(e.kind==="struct"?"gInStruct":"gInRef")}));
+  const cc = gCatColor(n.category);
+  panelBody.innerHTML =
+    `<h2>${esc(n.title)}</h2>` +
+    `<div class="row"><span class="badge">${esc(n.type)}</span>` +
+    `<span class="badge" style="background:${cc}22;color:${cc}">${esc(n.category)}</span></div>` +
+    ((n.tags||[]).length ? `<div class="tags">${n.tags.map(x=>`<span>${esc(x)}</span>`).join("")}</div>` : "") +
+    (n.summary ? `<div class="summary">${esc(n.summary)}</div>` : "") +
+    `<div class="row">${t("gDegRow").replace("{o}",out.length).replace("{i}",inc.length).replace("{d}",n.deg)}</div>` +
+    `<h3>${t("gRelTitle").replace("{n}",rel.length)}</h3>` +
+    rel.map(r=>`<div class="rel" data-id="${esc(r.n.id)}">${esc(r.n.title)}<span class="k">${r.k}</span></div>`).join("");
+  panelBody.querySelectorAll(".rel").forEach(el=>{
+    el.onclick = ()=>{
+      if(!dblClick(gRelClick, el.dataset.id)){
+        // 单击：图内联动——选中对应节点并高亮邻居（不跳页）
+        const n2 = gV.byId[el.dataset.id];
+        if(n2){ hotNode(n2); gSelectNode(n2); }
+        return;
+      }
+      gJumpToManage(el.dataset.id);   // 双击：跳管理页（R4）
+    };
+  });
+  gV.panel.classList.add("open");
+}
+
+/* R4：双击关联条目 → 管理页打开该条目并树内定位。
+   顺序有讲究（jumpToEntry 的坑，api 探针已核）：
+   1) 先切 menu 再 jump——jumpToEntry 不切页，render 错页则滚动静默无效；
+   2) MGMT 未载先 loadManage()——MGMT 为 null 时 jumpToEntry 静默返回；
+   3) 缓存缺条目时 jumpToEntry 自己挂 pendingJump 重试（jumpToEntry 头部），
+      该重试只在 state.menu==="manage" 时不被守卫清掉（refreshManage 尾部）。 */
+function gJumpToManage(file){
+  // 管理页有未保存编辑草稿时先确认（jumpToEntry 内部那次 exitEditGuarded 幂等通过）；取消则不跳页
+  if(!exitEditGuarded()) return;
+  state.menu = "manage"; location.hash = "manage";
+  loadManage();
+  jumpToEntry(file, graphProj);
+}
+
+/* 搜索匹配谓词（title/tags/summary 包含，原型 applyFilters 同款语义；提取供搜索自动展开复用） */
+function gMatchQuery(n, q){
+  return n.title.toLowerCase().includes(q) ||
+         (n.tags||[]).some(x => x.toLowerCase().includes(q)) ||
+         (n.summary || "").toLowerCase().includes(q);
+}
+
+/* 搜索 + 图例过滤（原型 applyFilters :414-430 移植）：dim 语义照抄，读 gV.catState/gV.query；
+   分层模式追加：搜索命中未展开类目的叶子先自动展开其类目（整页重建后重放到此不再触发），
+   再走同一套 dim 高亮 */
+function gApplyFilters(){
+  if(!gV) return;
+  const visible = {}, q = gV.query;
+  if(gV.layered && q){
+    // 搜索命中未展开叶子 → 自动展开其类目（一次性收齐单次重建，避免逐类目多次 render）
+    const toExpand = new Set();
+    gV.nodes.forEach(n => {
+      if(gIsSkeleton(n) || gV.expanded.has(n.category)) return;
+      if(gMatchQuery(n, q)) toExpand.add(n.category);
+    });
+    if(toExpand.size){
+      toExpand.forEach(c => gV.expanded.add(c));
+      gV.alpha = Math.max(gV.alpha, 0.35);   // 与 gExpandCat 同款局部回热收敛
+      render();                              // 重建路径 renderGraph 末尾会重放本函数
+      return;
+    }
+  }
+  gV.nodes.forEach(n => {
+    let v = gV.catState[n.category] !== false;
+    if (v && q) v = gMatchQuery(n, q);
+    visible[n.id] = v;
+    const nel = gV.nodeEls[n.id];
+    if (nel) nel.classList.toggle("dim", !v);   // 分层模式：未展开叶子无元素，跳过
+    const lbl = gV.labelEls[n.id];
+    if (lbl) lbl.classList.toggle("dim", !v);
+  });
+  gV.edges.forEach((e,i) => {
+    const l = gV.edgeEls[i];
+    if (l) l.classList.toggle("dim", !(visible[e.source] && visible[e.target]));
+  });
+}
+
+/* ---------- 分层下钻（gV.layered 时图例点击/「返回总览」走这里；
+   展开=建 DOM + alpha 回热 .35 局部收敛；收起=摘 DOM 但保留 n.x/n.y，再展开不重排） ---------- */
+function gExpandCat(cat){
+  gV.expanded.add(cat);
+  gV.alpha = Math.max(gV.alpha, 0.35);   // 局部回热收敛（沿用拖拽回热机制）
+  render();                              // 整页重建 → gInitGraph 懒挂载新成员
+  if(!gV.raf) gV.raf = requestAnimationFrame(gFrame);
+}
+function gCollapseCat(cat){ gV.expanded.delete(cat); render(); }
+function gBackToOverview(){ gV.expanded.clear(); render(); }
+
+/* 工具栏（项目下拉）+ 舞台（svg 引擎 / 无项目 / 错误 / 加载中 / 空数据） */
+function renderGraph(main){
+  const wrap = el("div","g-wrap");
+  const bar = el("div","g-bar");
+  const sel = el("select","g-proj");
+  sel.title = t("gPickProject");
+  (gProjects||[]).forEach(p=>{
+    const o = el("option"); o.value = p.name; o.textContent = p.name;
+    if(p.name===graphProj) o.selected = true;
+    sel.appendChild(o);
+  });
+  sel.onchange = ()=>{ graphProj = sel.value; GRAPH = null; gV = null; loadGraph(); render(); };
+  bar.appendChild(sel);
+  // 搜索框（原型 :394-398 移植）：词挂 gV.query 扛整页重建；input 只走 gApplyFilters 不重渲，焦点不丢
+  const search = el("input","g-search");
+  search.placeholder = t("gSearch");
+  search.value = gV ? gV.query : "";
+  search.addEventListener("input", ev=>{
+    if(!gV) return;
+    gV.query = ev.target.value.trim().toLowerCase();
+    gApplyFilters();
+  });
+  bar.appendChild(search);
+  // 分层模式「返回总览」：仅在已展开类目时出现（展开/收起都走整页重建，显隐随重建刷新）
+  if(gV && gV.layered && gV.expanded.size > 0){
+    const back = el("button","g-back");
+    back.textContent = t("gBack");
+    back.onclick = gBackToOverview;
+    bar.appendChild(back);
+  }
+  wrap.appendChild(bar);
+  const stage = el("div","g-stage");
+  if(!graphProj){
+    const em = el("div","g-empty"); em.textContent = t("gNoProject");
+    stage.appendChild(em);
+  }else if(GRAPH && GRAPH.err){
+    const em = el("div","g-empty"); em.textContent = t("gEmpty")+" · "+GRAPH.err;
+    stage.appendChild(em);
+  }else if(!GRAPH || !GRAPH.data){
+    const em = el("div","g-empty"); em.textContent = t("gLoading");
+    stage.appendChild(em);
+  }else if(!(GRAPH.data.nodes||[]).length){
+    const em = el("div","g-empty"); em.textContent = t("gEmpty");
+    stage.appendChild(em);
+  }else{
+    if(!gV) graphReset(graphProj);   // 兜底：正常路径 refreshGraph 已建 gV
+    if(gV){
+      gInitGraph(stage);
+      // 详情面板（原型 #panel :76 移植，fixed 改 absolute、父容器 .g-stage）
+      const panel = el("div","g-panel");
+      const close = el("button","g-close");
+      close.textContent = "×"; close.title = t("gClosePanel");
+      close.onclick = ()=>panel.classList.remove("open");
+      panel.appendChild(close);
+      const panelBody = el("div","g-panel-body");
+      panel.appendChild(panelBody);
+      stage.appendChild(panel);
+      gV.panel = panel; gV.panelBody = panelBody;
+      // 图例（原型 :388-406 移植）：catState 挂 gV 扛整页重建；
+      // 点击按分层分流——layered 时展开/收起类目（挂载语义），否则保持 dim 语义
+      const legend = el("div","g-legend");
+      gV.cats.forEach(c=>{
+        if(!gV.nodes.some(n=>n.category===c)) return;
+        if(!(c in gV.catState)) gV.catState[c] = true;
+        const on = gV.layered ? gV.expanded.has(c) : gV.catState[c] !== false;
+        const d = el("div","item"+(on?"":" off"));
+        const dot = el("span","dot"); dot.style.background = gCatColor(c);
+        const txt = el("span");
+        txt.textContent = c + "（" + gV.nodes.filter(n=>n.category===c).length + "）";
+        d.appendChild(dot); d.appendChild(txt);
+        d.onclick = ()=>{
+          if(gV.layered){
+            gV.expanded.has(c) ? gCollapseCat(c) : gExpandCat(c);
+          } else {
+            gV.catState[c] = !gV.catState[c];           // 全量模式保持 dim 语义
+            d.classList.toggle("off", !gV.catState[c]);
+            gApplyFilters();
+          }
+        };
+        legend.appendChild(d);
+      });
+      const hint = el("div","hint"); hint.textContent = t(gV.layered ? "gLegendHintLayer" : "gLegendHint");
+      legend.appendChild(hint);
+      stage.appendChild(legend);
+      gApplyFilters();   // 整页重建后 nodeEls 全新：按 catState/query 重放 dim 状态
+    }
+  }
+  wrap.appendChild(stage);
+  main.appendChild(wrap);
+}
+
 /* ================= 设置页 ================= */
 /* 八卡照抄原型 renderPrefs（docs/prototypes/prototype-manager-v2.html:801-979），mock 换真。
    初始聚合拉取：status 先行（取项目名 + hooksTimeout/disabled），随后 embedding/llm 两件与
@@ -4025,6 +4607,7 @@ function renderBody(app){
       if(m.key==="misc" && MISC) refreshMisc();
       if(m.key==="setup" && SETUP) refreshSetup();   // 引导页：重拉 agent 检测/接入状态
       if(m.key==="manage" && MGMT) refreshManage();
+      if(m.key==="graph" && GRAPH) refreshGraph();
       render();
     };
     side.appendChild(b);
@@ -4043,6 +4626,10 @@ function renderBody(app){
   if(state.menu==="manage"){
     loadManage();
     renderManageLayout(main);   // 需求 4：三栏目（树/详情/终端）按槽位配置渲染
+  }
+  else if(state.menu==="graph"){
+    loadGraph();
+    renderGraph(main);
   }
   else if(state.menu==="logs"){
     main.appendChild(renderLogs());
