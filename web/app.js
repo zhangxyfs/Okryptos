@@ -2719,7 +2719,9 @@ function graphReset(proj){
     nodeEls:{}, labelEls:{}, edgeEls:[],
     view:{x:0,y:0,k:1}, alpha:1,
     dragNode:null, panning:false, panStart:null, moved:false,
-    expanded:null, raf:null,           // Task 5 用 expanded；本步恒 null = 全量模式
+    layered:(d.nodes||[]).length > LAYER_THRESHOLD,  // Task 5：>400 条目自动分层（骨架常显+类目下钻）
+    expanded:new Set(),                // 分层模式已展开类目（Set<category>）；全量模式恒空
+    raf:null,
     svg:null, world:null, tip:null, ro:null,  // DOM 引用随 renderGraph 整页重建替换
     panel:null, panelBody:null,               // 详情面板 DOM（renderGraph 建，随整页重建替换）
     catState:{}, query:"",                    // 图例类目开关 / 搜索词：过滤状态要扛整页重建，放 gV
@@ -2741,6 +2743,15 @@ function gCatColor(c){ return catColor[c] || "#9ca3af"; }
 const G_NS = "http://www.w3.org/2000/svg";
 
 function gRadius(n){ return n.is_dir ? 13 : (n.deg >= 6 ? 13 : n.deg >= 3 ? 10 : 7); }
+
+/* ---------- 分层模式（设计 docs/2026-08-27-wiki-graph-layered-design.md） ---------- */
+const LAYER_THRESHOLD = 400;   // 条目数超过则自动进入分层模式（调试后可调）
+// 骨架 = is_dir 或 deg>=6（与 gRadius 大球档对齐）；分层模式下叶子不进 DOM、不参与物理
+function gIsSkeleton(n){ return n.is_dir || n.deg >= 6; }
+function gVisibleNodes(){
+  if(!gV.layered) return gV.nodes;
+  return gV.nodes.filter(n=> gIsSkeleton(n) || gV.expanded.has(n.category));
+}
 
 function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;
   let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;
@@ -2769,7 +2780,10 @@ function gLayoutFoci(){
 }
 
 function gTick(){
-  const nodes = gV.nodes, edges = gV.edges, byId = gV.byId, focus = gV.focus, rand = gV.rand;
+  const edges = gV.edges, byId = gV.byId, focus = gV.focus, rand = gV.rand;
+  const nodes = gVisibleNodes();   // 分层模式只模拟可见集（叶子不参与物理）；全量模式 = gV.nodes
+  const vis = {};                  // 可见 id 集（与 nodes 同趟构建），弹簧端点不可见时跳过
+  nodes.forEach(n => vis[n.id] = true);
   gV.alpha *= 0.996;
   const a = Math.max(gV.alpha, 0.02);
   const cx = () => gV.W/2, cy = () => gV.H/2;
@@ -2790,6 +2804,7 @@ function gTick(){
   }
   // 弹簧
   edges.forEach(e => {
+    if(!vis[e.source] || !vis[e.target]) return;   // 分层模式：端点不可见的边无作用力
     const A = byId[e.source], B = byId[e.target];
     const dx = B.x-A.x, dy = B.y-A.y;
     const d = Math.max(Math.sqrt(dx*dx+dy*dy), 1);
@@ -2839,12 +2854,16 @@ function gToWorld(px, py){
 function gRender(){
   const byId = gV.byId;
   gV.edges.forEach((e,i) => {
-    const A = byId[e.source], B = byId[e.target], l = gV.edgeEls[i];
+    const l = gV.edgeEls[i];
+    if(!l) return;   // 分层模式：端点未全可见的边无元素（懒挂载空位）
+    const A = byId[e.source], B = byId[e.target];
     l.setAttribute("x1",A.x); l.setAttribute("y1",A.y);
     l.setAttribute("x2",B.x); l.setAttribute("y2",B.y);
   });
   gV.nodes.forEach(n => {
-    gV.nodeEls[n.id].setAttribute("transform",`translate(${n.x},${n.y})`);
+    const g = gV.nodeEls[n.id];
+    if(!g) return;   // 分层模式：未展开叶子无元素
+    g.setAttribute("transform",`translate(${n.x},${n.y})`);
     const lbl = gV.labelEls[n.id];
     if (lbl) { lbl.setAttribute("x", n.x); lbl.setAttribute("y", n.y + gRadius(n) + 13); }
   });
@@ -2873,13 +2892,17 @@ function gInitGraph(stage){
   svg.appendChild(world);
   gV.svg = svg; gV.world = world; gV.tip = tip;
 
+  const vset = {};   // 本帧可见 id 集（分层模式 = 骨架 + 已展开类目；全量模式 = 全部）
+  gVisibleNodes().forEach(n => vset[n.id] = true);
   gV.edgeEls = gV.edges.map(e => {
+    if(!vset[e.source] || !vset[e.target]) return null;  // 边懒挂载：两端可见才建元素
     const l = document.createElementNS(G_NS,"line");
     l.setAttribute("class","edge" + (e.kind==="ref" ? " ref":""));
     gEdge.appendChild(l); return l;
   });
   gV.nodeEls = {}; gV.labelEls = {};
   gV.nodes.forEach(n => {
+    if(!vset[n.id]) return;   // 叶子懒挂载：不进 DOM（是完全不建元素，不是 dim）
     const g = document.createElementNS(G_NS,"g");
     g.setAttribute("class","node" + (n.is_dir ? " dir":""));
     let shape;
@@ -2916,9 +2939,9 @@ function gInitGraph(stage){
     gLayoutFoci();
     // 先同步预跑收敛（初 Speed 快后衰减由 alpha 控制），不依赖 rAF 帧数
     for (let i = 0; i < 900; i++) gTick();
-    // 自动适配视图：让整图居中且留边
+    // 自动适配视图：让整图居中且留边（分层模式只对可见集取景，未展开叶子不参与）
     let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-    gV.nodes.forEach(n => { x0=Math.min(x0,n.x); y0=Math.min(y0,n.y);
+    gVisibleNodes().forEach(n => { x0=Math.min(x0,n.x); y0=Math.min(y0,n.y);
       x1=Math.max(x1,n.x); y1=Math.max(y1,n.y); });
     const bw = Math.max(x1-x0,1), bh = Math.max(y1-y0,1);
     const k = Math.max(0.25, Math.min(1.5, Math.min((gV.W-160)/bw, (gV.H-120)/bh)));
@@ -3010,13 +3033,16 @@ function hotNode(n){
     (gV.adj[n.id]||[]).forEach(e => { nb[e.source] = true; nb[e.target] = true; });
   }
   gV.edges.forEach((e,i) => {
-    gV.edgeEls[i].classList.toggle("hot",
+    const l = gV.edgeEls[i];
+    if (l) l.classList.toggle("hot",
       !!n && (e.source === n.id || e.target === n.id));
   });
   // 悬停时淡化非邻居节点（含标签），突出连通关系
   gV.nodes.forEach(nd => {
+    const nel = gV.nodeEls[nd.id];
+    if (!nel) return;   // 分层模式：未展开叶子无元素
     const f = !!n && !nb[nd.id];
-    gV.nodeEls[nd.id].classList.toggle("fade", f);
+    nel.classList.toggle("fade", f);
     const lbl = gV.labelEls[nd.id];
     if (lbl) lbl.classList.toggle("fade", f);
   });
@@ -3070,26 +3096,58 @@ function gJumpToManage(file){
   jumpToEntry(file, graphProj);
 }
 
+/* 搜索匹配谓词（title/tags/summary 包含，原型 applyFilters 同款语义；提取供搜索自动展开复用） */
+function gMatchQuery(n, q){
+  return n.title.toLowerCase().includes(q) ||
+         (n.tags||[]).some(x => x.toLowerCase().includes(q)) ||
+         (n.summary || "").toLowerCase().includes(q);
+}
+
 /* 搜索 + 图例过滤（原型 applyFilters :414-430 移植）：dim 语义照抄，读 gV.catState/gV.query；
-   分层模式（骨架/下钻）的分流是 Task 5，此处保持全量 dim */
+   分层模式追加：搜索命中未展开类目的叶子先自动展开其类目（整页重建后重放到此不再触发），
+   再走同一套 dim 高亮 */
 function gApplyFilters(){
   if(!gV) return;
   const visible = {}, q = gV.query;
+  if(gV.layered && q){
+    // 搜索命中未展开叶子 → 自动展开其类目（一次性收齐单次重建，避免逐类目多次 render）
+    const toExpand = new Set();
+    gV.nodes.forEach(n => {
+      if(gIsSkeleton(n) || gV.expanded.has(n.category)) return;
+      if(gMatchQuery(n, q)) toExpand.add(n.category);
+    });
+    if(toExpand.size){
+      toExpand.forEach(c => gV.expanded.add(c));
+      gV.alpha = Math.max(gV.alpha, 0.35);   // 与 gExpandCat 同款局部回热收敛
+      render();                              // 重建路径 renderGraph 末尾会重放本函数
+      return;
+    }
+  }
   gV.nodes.forEach(n => {
     let v = gV.catState[n.category] !== false;
-    if (v && q) {
-      v = n.title.toLowerCase().includes(q) ||
-          (n.tags||[]).some(x => x.toLowerCase().includes(q)) ||
-          (n.summary || "").toLowerCase().includes(q);
-    }
+    if (v && q) v = gMatchQuery(n, q);
     visible[n.id] = v;
-    gV.nodeEls[n.id].classList.toggle("dim", !v);
+    const nel = gV.nodeEls[n.id];
+    if (nel) nel.classList.toggle("dim", !v);   // 分层模式：未展开叶子无元素，跳过
     const lbl = gV.labelEls[n.id];
     if (lbl) lbl.classList.toggle("dim", !v);
   });
-  gV.edges.forEach((e,i) =>
-    gV.edgeEls[i].classList.toggle("dim", !(visible[e.source] && visible[e.target])));
+  gV.edges.forEach((e,i) => {
+    const l = gV.edgeEls[i];
+    if (l) l.classList.toggle("dim", !(visible[e.source] && visible[e.target]));
+  });
 }
+
+/* ---------- 分层下钻（gV.layered 时图例点击/「返回总览」走这里；
+   展开=建 DOM + alpha 回热 .35 局部收敛；收起=摘 DOM 但保留 n.x/n.y，再展开不重排） ---------- */
+function gExpandCat(cat){
+  gV.expanded.add(cat);
+  gV.alpha = Math.max(gV.alpha, 0.35);   // 局部回热收敛（沿用拖拽回热机制）
+  render();                              // 整页重建 → gInitGraph 懒挂载新成员
+  if(!gV.raf) gV.raf = requestAnimationFrame(gFrame);
+}
+function gCollapseCat(cat){ gV.expanded.delete(cat); render(); }
+function gBackToOverview(){ gV.expanded.clear(); render(); }
 
 /* 工具栏（项目下拉）+ 舞台（svg 引擎 / 无项目 / 错误 / 加载中 / 空数据） */
 function renderGraph(main){
@@ -3114,6 +3172,13 @@ function renderGraph(main){
     gApplyFilters();
   });
   bar.appendChild(search);
+  // 分层模式「返回总览」：仅在已展开类目时出现（展开/收起都走整页重建，显隐随重建刷新）
+  if(gV && gV.layered && gV.expanded.size > 0){
+    const back = el("button","g-back");
+    back.textContent = t("gBack");
+    back.onclick = gBackToOverview;
+    bar.appendChild(back);
+  }
   wrap.appendChild(bar);
   const stage = el("div","g-stage");
   if(!graphProj){
@@ -3142,20 +3207,26 @@ function renderGraph(main){
       panel.appendChild(panelBody);
       stage.appendChild(panel);
       gV.panel = panel; gV.panelBody = panelBody;
-      // 图例（原型 :388-406 移植）：catState 挂 gV 扛整页重建，点击只 dim 不隐藏（Task 5 才分流分层）
+      // 图例（原型 :388-406 移植）：catState 挂 gV 扛整页重建；
+      // 点击按分层分流——layered 时展开/收起类目（挂载语义），否则保持 dim 语义
       const legend = el("div","g-legend");
       gV.cats.forEach(c=>{
         if(!gV.nodes.some(n=>n.category===c)) return;
         if(!(c in gV.catState)) gV.catState[c] = true;
-        const d = el("div","item"+(gV.catState[c]===false?" off":""));
+        const on = gV.layered ? gV.expanded.has(c) : gV.catState[c] !== false;
+        const d = el("div","item"+(on?"":" off"));
         const dot = el("span","dot"); dot.style.background = gCatColor(c);
         const txt = el("span");
         txt.textContent = c + "（" + gV.nodes.filter(n=>n.category===c).length + "）";
         d.appendChild(dot); d.appendChild(txt);
         d.onclick = ()=>{
-          gV.catState[c] = !gV.catState[c];
-          d.classList.toggle("off", !gV.catState[c]);
-          gApplyFilters();
+          if(gV.layered){
+            gV.expanded.has(c) ? gCollapseCat(c) : gExpandCat(c);
+          } else {
+            gV.catState[c] = !gV.catState[c];           // 全量模式保持 dim 语义
+            d.classList.toggle("off", !gV.catState[c]);
+            gApplyFilters();
+          }
         };
         legend.appendChild(d);
       });

@@ -573,3 +573,7 @@ textarea.ef-body { flex:1; min-height:0; resize:none; font:13px/1.7 Consolas,"Ca
 .g-search { height:30px; padding:0 10px; border:1px solid #d1d5db; border-radius:6px;
   font-size:13px; outline:none; width:220px; }
 .g-search:focus { border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,.15); }
+/* 分层模式「返回总览」按钮（.g-bar 内，仅 layered 且已展开类目时渲染） */
+.g-back { height:30px; padding:0 12px; border:1px solid #d1d5db; border-radius:6px;
+  background:#fff; font-size:13px; color:#374151; cursor:pointer; flex:none; }
+.g-back:hover { background:#f3f4f6; }
