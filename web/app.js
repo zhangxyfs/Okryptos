@@ -2681,9 +2681,10 @@ let gProjects = null;    // 项目下拉数据 [{name,last_update}]
 function loadGraph(){
   if(!gProjects){
     gProjects = [];
+    const p = graphProj;   // 快照：拉取期间用户已选项目则不覆盖其选择
     api("/api/projects").then(ps=>{
       gProjects = (ps||[]).slice().sort((a,b)=>(b.last_update||0)-(a.last_update||0));
-      if(!graphProj && gProjects.length) graphProj = gProjects[0].name;
+      if(!graphProj && graphProj===p && gProjects.length) graphProj = gProjects[0].name;
       refreshGraph();
     }).catch(()=>{ gProjects = []; });
   }
@@ -2691,9 +2692,10 @@ function loadGraph(){
 }
 function refreshGraph(){
   if(!graphProj){ GRAPH = { proj:"", data:null }; menuRender("graph"); return; }
-  api("/api/graph?project="+encodeURIComponent(graphProj))
-    .then(d=>{ GRAPH = { proj:graphProj, data:d }; graphReset(graphProj); })
-    .catch(e=>{ GRAPH = { proj:graphProj, data:null, err:e.message }; })
+  const p = graphProj;   // 快照：连切项目时丢弃过期响应，避免旧数据以新项目名落缓存
+  api("/api/graph?project="+encodeURIComponent(p))
+    .then(d=>{ if(p!==graphProj) return; GRAPH = { proj:p, data:d }; graphReset(p); })
+    .catch(e=>{ if(p!==graphProj) return; GRAPH = { proj:p, data:null, err:e.message }; })
     .then(()=>menuRender("graph"));
 }
 function graphReset(proj){ gV = null; /* Task 3 填充：按 GRAPH.data 初始化视图状态 */ }
@@ -2713,7 +2715,10 @@ function renderGraph(main){
   bar.appendChild(sel);
   wrap.appendChild(bar);
   const stage = el("div","g-stage");
-  if(GRAPH && GRAPH.err){
+  if(!graphProj){
+    const em = el("div","g-empty"); em.textContent = t("gEmpty");
+    stage.appendChild(em);
+  }else if(GRAPH && GRAPH.err){
     const em = el("div","g-empty"); em.textContent = t("gEmpty")+" · "+GRAPH.err;
     stage.appendChild(em);
   }else if(GRAPH && GRAPH.data && !(GRAPH.data.nodes||[]).length){
