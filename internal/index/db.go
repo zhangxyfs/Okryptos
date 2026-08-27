@@ -277,3 +277,23 @@ func decodeVector(b []byte) []float32 {
 	}
 	return v
 }
+
+// AllVectors 读出 vectors 表全部向量（filename → 解码后的向量），供图谱语义边等
+// 全量配对计算使用；无向量的条目不在 map 里。
+func (db *DB) AllVectors() (map[string][]float32, error) {
+	rows, err := db.sql.Query(`SELECT filename, blob FROM vectors`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]float32{}
+	for rows.Next() {
+		var name string
+		var blob []byte
+		if err := rows.Scan(&name, &blob); err != nil {
+			return nil, err
+		}
+		out[name] = decodeVector(blob)
+	}
+	return out, rows.Err()
+}

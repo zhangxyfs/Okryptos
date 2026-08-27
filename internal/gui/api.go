@@ -723,7 +723,18 @@ func (h *Handler) apiGraph(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, buildGraph(entries))
+	// sem 边向量：索引库缺失/打不开/读失败一律 fail-open（vecs=nil，图退化为
+	// ref/struct 边）；先 stat 避免 GET 顺手建库（同 apiEmbeddingGet 先例）。
+	var vecs map[string][]float32
+	if _, err := os.Stat(st.KbPath()); err == nil {
+		if db, err := index.Open(st.KbPath()); err == nil {
+			if v, err := db.AllVectors(); err == nil {
+				vecs = v
+			}
+			_ = db.Close()
+		}
+	}
+	writeJSON(w, http.StatusOK, buildGraph(entries, vecs))
 }
 
 func (h *Handler) apiEntryGet(w http.ResponseWriter, r *http.Request) {

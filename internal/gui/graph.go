@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 
+	"openknowledge/internal/embed"
 	"openknowledge/internal/entry"
 )
 
@@ -60,8 +61,9 @@ func hasTag(e *entry.Entry, tag string) bool {
 
 // buildGraph 由条目集构建图谱页数据：节点 id 为文件名；ref 边来自正文
 // markdown 链接命中，struct 边把 wiki 条目挂到 架构总览/演进历程 目录节点
-// （对齐前端 refSubGroups 标题约定）；deg 为每条边两端各 +1。
-func buildGraph(entries []*entry.Entry) graphData {
+// （对齐前端 refSubGroups 标题约定），sem 边来自向量余弦近邻（vecs 为 nil 时跳过）；
+// deg 为每条边两端各 +1。
+func buildGraph(entries []*entry.Entry, vecs map[string][]float32) graphData {
 	nodes := make([]graphNode, 0, len(entries))
 	idx := map[string]int{}
 	files := map[string]bool{}
@@ -100,6 +102,52 @@ func buildGraph(entries []*entry.Entry) graphData {
 				add("演进历程.md", f, "struct")
 			} else {
 				add("架构总览.md", f, "struct")
+			}
+		}
+	}
+	// sem 通道：每条目取余弦 ≥0.75 的前 3 近邻；配对按文件名升序定向（source<target），
+	// A→B 与 B→A 经 add 的 key 去重只留一条。n>2000 跳过（O(n²×dim) 护栏，静默）。
+	const (
+		semFloor = 0.75
+		semTopK  = 3
+		semMaxN  = 2000
+	)
+	if n := len(vecs); n > 0 && n <= semMaxN {
+		names := make([]string, 0, n)
+		for name := range vecs {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		type sim struct {
+			name string
+			cos  float64
+		}
+		for i, a := range names {
+			var sims []sim
+			for j, b := range names {
+				if i == j {
+					continue
+				}
+				if cos := embed.Cosine(vecs[a], vecs[b]); cos >= semFloor {
+					sims = append(sims, sim{b, cos})
+				}
+			}
+			// 相似度降序，并列按文件名升序（确定性）
+			sort.Slice(sims, func(x, y int) bool {
+				if sims[x].cos != sims[y].cos {
+					return sims[x].cos > sims[y].cos
+				}
+				return sims[x].name < sims[y].name
+			})
+			if len(sims) > semTopK {
+				sims = sims[:semTopK]
+			}
+			for _, s := range sims {
+				src, tgt := a, s.name
+				if src > tgt {
+					src, tgt = tgt, src
+				}
+				add(src, tgt, "sem")
 			}
 		}
 	}

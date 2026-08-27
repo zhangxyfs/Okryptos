@@ -1,11 +1,17 @@
 package gui
 
 import (
+	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"openknowledge/internal/index"
 )
 
 type graphTestPayload struct {
@@ -103,5 +109,130 @@ func TestGraphGuards(t *testing.T) {
 	}
 	if s, _ := do(t, "GET", srv.URL+"/api/graph?project=nope", testToken, nil); s != 404 {
 		t.Errorf("bad project status=%d want 404", s)
+	}
+}
+
+// writeGraphVectors 往项目索引库 vectors 表直写测试向量（参 internal/cli/propose_test.go
+// 的 raw 开库做法）；先 index.Open 建库保证 schema 与生产一致。
+func writeGraphVectors(t *testing.T, okHome, project string, vecs map[string][]float32) {
+	t.Helper()
+	kb := filepath.Join(okHome, "projects", project, "kb.db")
+	db, err := index.Open(kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	for name, v := range vecs {
+		b := make([]byte, 4*len(v))
+		for i, f := range v {
+			binary.LittleEndian.PutUint32(b[i*4:], math.Float32bits(f))
+		}
+		if _, err := raw.Exec(`INSERT OR REPLACE INTO vectors(filename,dim,blob) VALUES(?,?,?)`,
+			name, len(v), b); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// semEdgeCount 统计给定无序文件对之间的 sem 边条数（配对去重后应恰为 1）。
+func semEdgeCount(g graphTestPayload, a, b string) int {
+	n := 0
+	for _, e := range g.Edges {
+		if e.Kind != "sem" {
+			continue
+		}
+		if (e.Source == a && e.Target == b) || (e.Source == b && e.Target == a) {
+			n++
+		}
+	}
+	return n
+}
+
+func TestGraphSemanticEdges(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "p")
+
+	writeGraphEntry(t, okHome, "p", "甲.md", "甲", "note", nil, "正文甲")
+	writeGraphEntry(t, okHome, "p", "乙.md", "乙", "note", nil, "正文乙")
+	writeGraphEntry(t, okHome, "p", "丙.md", "丙", "note", nil, "正文丙")
+	writeGraphEntry(t, okHome, "p", "丁.md", "丁", "note", nil, "正文丁")
+	// 甲/乙同向（cosine=1），丙与甲乙正交（cosine=0 < 0.75），丁无向量
+	writeGraphVectors(t, okHome, "p", map[string][]float32{
+		"甲.md": {1, 0, 0},
+		"乙.md": {1, 0, 0},
+		"丙.md": {0, 1, 0},
+	})
+
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	status, body := do(t, "GET", srv.URL+"/api/graph?project=p", testToken, nil)
+	if status != 200 {
+		t.Fatalf("status=%d body=%s", status, body)
+	}
+	var g graphTestPayload
+	if err := json.Unmarshal(body, &g); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if n := semEdgeCount(g, "甲.md", "乙.md"); n != 1 {
+		t.Errorf("甲乙 sem 边条数=%d want 1, edges=%+v", n, g.Edges)
+	}
+	if n := semEdgeCount(g, "甲.md", "丙.md"); n != 0 {
+		t.Errorf("甲丙 cosine=0 不应有 sem 边, edges=%+v", g.Edges)
+	}
+	// 丁无向量 → 无任何 sem 边；deg 也不受 sem 影响
+	deg := map[string]int{}
+	for _, n := range g.Nodes {
+		deg[n.ID] = n.Deg
+	}
+	if deg["丁.md"] != 0 {
+		t.Errorf("丁 deg=%d want 0", deg["丁.md"])
+	}
+	// sem 边计入 deg：甲/乙各 +1（无 ref/struct 边干扰）
+	if deg["甲.md"] != 1 || deg["乙.md"] != 1 {
+		t.Errorf("deg 未计入 sem 边: %v", deg)
+	}
+	// 配对去重定向：sem 边 source < target（文件名升序）
+	for _, e := range g.Edges {
+		if e.Kind == "sem" && e.Source >= e.Target {
+			t.Errorf("sem 边应 source<target: %+v", e)
+		}
+	}
+}
+
+func TestGraphNoVectors(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "p")
+	writeGraphEntry(t, okHome, "p", "甲.md", "甲", "note", nil, "正文甲")
+	writeGraphEntry(t, okHome, "p", "乙.md", "乙", "note", nil, "正文乙")
+
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	status, body := do(t, "GET", srv.URL+"/api/graph?project=p", testToken, nil)
+	if status != 200 {
+		t.Fatalf("status=%d body=%s", status, body)
+	}
+	var g graphTestPayload
+	if err := json.Unmarshal(body, &g); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if len(g.Nodes) != 2 {
+		t.Fatalf("nodes=%d want 2", len(g.Nodes))
+	}
+	for _, e := range g.Edges {
+		if e.Kind == "sem" {
+			t.Errorf("无索引库不应有 sem 边: %+v", e)
+		}
+	}
+	for _, n := range g.Nodes {
+		if n.Deg != 0 {
+			t.Errorf("无向量 deg 应为 0: %+v", n)
+		}
 	}
 }
