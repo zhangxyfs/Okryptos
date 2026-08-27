@@ -526,6 +526,7 @@ textarea.ef-body { flex:1; min-height:0; resize:none; font:13px/1.7 Consolas,"Ca
 /* 图谱引擎（图谱画布视觉与原型一致优先，内部色值照抄原型不转变量） */
 .g-stage .edge { stroke:#cbd5e1; stroke-width:1.2; }
 .g-stage .edge.ref { stroke:#93c5fd; stroke-dasharray:5 4; stroke-width:1; }
+.g-stage .edge.sem { stroke:#86c5a5; stroke-dasharray:2 3; stroke-width:1; opacity:.8; }
 .g-stage .edge.hot { stroke:#f59e0b; stroke-width:2.6; stroke-dasharray:none; }
 .g-stage .node { cursor:pointer; }
 .g-stage .node circle, .g-stage .node rect { stroke:#ffffff; stroke-width:1.5; }

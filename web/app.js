@@ -2765,7 +2765,7 @@ function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;
 /* 力导向物理参数（原型逐字） */
 const REP = 9000;          // 斥力强度
 const REP_CUT = 320;       // 斥力截断距离（跨簇不互斥）
-const LEN = {struct: 110, ref: 170};  // 弹簧原长
+const LEN = {struct: 110, ref: 170, sem: 150};  // 弹簧原长（sem=语义相似边；缺 kind 会 NaN 崩物理，新增边型必须登记）
 const SPRING = 0.014;
 const GRAV = 0.004;        // 向心力
 const CLUSTER = 0.05;      // 同类目焦点聚拢
@@ -2790,7 +2790,7 @@ function gTick(){
   const vis = {};                  // 可见 id 集（与 nodes 同趟构建），弹簧端点不可见时跳过
   nodes.forEach(n => vis[n.id] = true);
   gV.alpha *= 0.996;
-  const a = Math.max(gV.alpha, 0.02);
+  const a = Math.max(gV.alpha, 0);   // 无永动地板：alpha 自由衰减；静止终点在 gFrame 冷却冻结，死区只消收尾微抖
   const cx = () => gV.W/2, cy = () => gV.H/2;
 
   // 斥力 O(n^2)
@@ -2825,6 +2825,8 @@ function gTick(){
     n.vx += (f.x-n.x) * CLUSTER;
     n.vy += (f.y-n.y) * CLUSTER;
     n.vx *= 0.82; n.vy *= 0.82;
+    if (Math.abs(n.vx) < 0.02) n.vx = 0;   // 速度死区：亚像素速度清零，消平衡态微抖
+    if (Math.abs(n.vy) < 0.02) n.vy = 0;
     if (!n.pinned) {
       n.x += Math.max(-12, Math.min(12, n.vx));
       n.y += Math.max(-12, Math.min(12, n.vy));
@@ -2879,7 +2881,11 @@ function gFrame(){
     return;
   }
   gTick(); gRender();
-  gV.raf = requestAnimationFrame(gFrame);
+  // 冷却冻结：alpha 衰减到旧地板值（0.02）即停帧静止——只归零地板不够，向心/聚拢
+  // 是不随 alpha 衰减的定位力，碰撞又直改位置，三者构成极限环永不收敛（实测 45px/帧）。
+  // 停帧后由回热处重启：拖拽 pointerdown、gExpandCat、gInitGraph（render/RO 路径）。
+  if(gV.alpha > 0.02 || gV.dragNode) gV.raf = requestAnimationFrame(gFrame);
+  else gV.raf = null;
 }
 
 /* 首布局：随机布点 + 900 tick 预跑 + fitView（gInitGraph 首建与 RO 零尺寸兜底共用） */
@@ -2923,7 +2929,7 @@ function gInitGraph(stage){
   gV.edgeEls = gV.edges.map(e => {
     if(!vset[e.source] || !vset[e.target]) return null;  // 边懒挂载：两端可见才建元素
     const l = document.createElementNS(G_NS,"line");
-    l.setAttribute("class","edge" + (e.kind==="ref" ? " ref":""));
+    l.setAttribute("class","edge" + (e.kind!=="struct" ? " "+e.kind : ""));   // ref/sem 各挂样式类，struct 默认
     gEdge.appendChild(l); return l;
   });
   gV.nodeEls = {}; gV.labelEls = {};
@@ -2966,7 +2972,8 @@ function gInitGraph(stage){
     const g = ev.target.closest(".node");
     if (g) {
       const n = gV.nodes.find(n => gV.nodeEls[n.id] === g);
-      if (n) { gV.dragNode = n; n.pinned = true; gV.alpha = Math.max(gV.alpha, 0.25); }
+      if (n) { gV.dragNode = n; n.pinned = true; gV.alpha = Math.max(gV.alpha, 0.25);
+        if(!gV.raf) gV.raf = requestAnimationFrame(gFrame); }   // 冷却冻结态回热重启渲染循环
     } else {
       gV.panning = true; svg.classList.add("panning");
       gV.panStart = {x: ev.clientX, y: ev.clientY, vx: gV.view.x, vy: gV.view.y};
