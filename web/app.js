@@ -43,6 +43,8 @@ async function api(path, opts){
 const I18N = {
   zh: {
     manage:"管理", setup:"引导", prefs:"设置", logs:"日志", misc:"其他",
+    graph:"图谱", gPickProject:"项目", gSearch:"搜索条目标题 / tags…",
+    gEmpty:"暂无条目", gBack:"返回总览", gFlat:"平铺", gFold:"分层",
     treeCaption:"知识条目", filter:"过滤条目… / 命令（/type、/tag）", pickEntry:"← 从树中选择一条知识条目",
     evoSegHint:"演进历程尚未拆分版本段子条目——对 agent 说「更新 wiki」即可按新结构迁移（索引 + 版本段），老内容不会丢。",
     modified:"修改于",
@@ -179,6 +181,8 @@ const I18N = {
   },
   en: {
     manage:"Manage", setup:"Setup", prefs:"Settings", logs:"Logs", misc:"Misc",
+    graph:"Graph", gPickProject:"Project", gSearch:"Search title / tags…",
+    gEmpty:"No entries", gBack:"Overview", gFlat:"Flat", gFold:"Layered",
     treeCaption:"Entries", filter:"Filter entries… / commands (/type, /tag)", pickEntry:"← Select an entry from the tree",
     evoSegHint:"No version-segment sub-entries yet — ask your agent to \"update wiki\" to migrate to the new structure (index + segments). Existing content is preserved.",
     modified:"Modified",
@@ -334,9 +338,10 @@ const ICON = {
   panel:  svg('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>'),
   moon:   svg('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'),
   sun:    svg('<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'),
+  graph:  svg('<circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M8.5 7.5 15 16M9 6h6"/>'),
 };
 const MENUS = [
-  { key:"manage", ico:ICON.manage }, { key:"setup", ico:ICON.setup }, { key:"prefs", ico:ICON.prefs },
+  { key:"manage", ico:ICON.manage }, { key:"graph", ico:ICON.graph }, { key:"setup", ico:ICON.setup }, { key:"prefs", ico:ICON.prefs },
   { key:"logs", ico:ICON.logs }, { key:"misc", ico:ICON.misc },
 ];
 
@@ -2663,6 +2668,62 @@ function openLlmNeededModal(){
   document.body.appendChild(mask);
 }
 
+/* ================= 图谱页 ================= */
+/* 需求 docs/2026-08-27-gui-graph-page-requirements.md；引擎移植自
+   docs/prototypes/prototype-wiki-graph.html（物理参数逐字沿用）。
+   关键集成约束：GUI render() 是整页 DOM 重建——一切模拟/布局/视图状态
+   必须放模块级 gV，renderGraph 只按 gV 重建 DOM，坐标不丢。 */
+let GRAPH = null;        // {proj, data, err}；loadGraph 惰性加载
+let graphProj = "";      // 当前选中项目（页内独立，不同步管理页）
+let gV = null;           // 视图状态（Task 3 填充：nodes/edges/byId/view/expanded/...）
+let gProjects = null;    // 项目下拉数据 [{name,last_update}]
+
+function loadGraph(){
+  if(!gProjects){
+    gProjects = [];
+    api("/api/projects").then(ps=>{
+      gProjects = (ps||[]).slice().sort((a,b)=>(b.last_update||0)-(a.last_update||0));
+      if(!graphProj && gProjects.length) graphProj = gProjects[0].name;
+      refreshGraph();
+    }).catch(()=>{ gProjects = []; });
+  }
+  GRAPH = lazyPage(GRAPH, { proj:graphProj, data:null }, refreshGraph);
+}
+function refreshGraph(){
+  if(!graphProj){ GRAPH = { proj:"", data:null }; menuRender("graph"); return; }
+  api("/api/graph?project="+encodeURIComponent(graphProj))
+    .then(d=>{ GRAPH = { proj:graphProj, data:d }; graphReset(graphProj); })
+    .catch(e=>{ GRAPH = { proj:graphProj, data:null, err:e.message }; })
+    .then(()=>menuRender("graph"));
+}
+function graphReset(proj){ gV = null; /* Task 3 填充：按 GRAPH.data 初始化视图状态 */ }
+
+/* 骨架：工具栏（项目下拉）+ 舞台（空态/错误态）；引擎（SVG/力导向）由 Task 3 填充 */
+function renderGraph(main){
+  const wrap = el("div","g-wrap");
+  const bar = el("div","g-bar");
+  const sel = el("select","g-proj");
+  sel.title = t("gPickProject");
+  (gProjects||[]).forEach(p=>{
+    const o = el("option"); o.value = p.name; o.textContent = p.name;
+    if(p.name===graphProj) o.selected = true;
+    sel.appendChild(o);
+  });
+  sel.onchange = ()=>{ graphProj = sel.value; GRAPH = null; gV = null; loadGraph(); render(); };
+  bar.appendChild(sel);
+  wrap.appendChild(bar);
+  const stage = el("div","g-stage");
+  if(GRAPH && GRAPH.err){
+    const em = el("div","g-empty"); em.textContent = t("gEmpty")+" · "+GRAPH.err;
+    stage.appendChild(em);
+  }else if(GRAPH && GRAPH.data && !(GRAPH.data.nodes||[]).length){
+    const em = el("div","g-empty"); em.textContent = t("gEmpty");
+    stage.appendChild(em);
+  }
+  wrap.appendChild(stage);
+  main.appendChild(wrap);
+}
+
 /* ================= 设置页 ================= */
 /* 八卡照抄原型 renderPrefs（docs/prototypes/prototype-manager-v2.html:801-979），mock 换真。
    初始聚合拉取：status 先行（取项目名 + hooksTimeout/disabled），随后 embedding/llm 两件与
@@ -4025,6 +4086,7 @@ function renderBody(app){
       if(m.key==="misc" && MISC) refreshMisc();
       if(m.key==="setup" && SETUP) refreshSetup();   // 引导页：重拉 agent 检测/接入状态
       if(m.key==="manage" && MGMT) refreshManage();
+      if(m.key==="graph" && GRAPH) refreshGraph();
       render();
     };
     side.appendChild(b);
@@ -4043,6 +4105,10 @@ function renderBody(app){
   if(state.menu==="manage"){
     loadManage();
     renderManageLayout(main);   // 需求 4：三栏目（树/详情/终端）按槽位配置渲染
+  }
+  else if(state.menu==="graph"){
+    loadGraph();
+    renderGraph(main);
   }
   else if(state.menu==="logs"){
     main.appendChild(renderLogs());
