@@ -540,3 +540,36 @@ textarea.ef-body { flex:1; min-height:0; resize:none; font:13px/1.7 Consolas,"Ca
   max-width:340px; display:none; box-shadow:0 4px 12px rgba(0,0,0,.2); line-height:1.5; }
 .g-tip .t { font-weight:600; }
 .g-tip .s { color:#d1d5db; }
+/* 图谱详情面板（原型 :27-46 移植，fixed 改 absolute；h3/g-close/hint 三条简报清单漏列，照原型补） */
+.g-panel { position:absolute; top:0; right:0; bottom:0; width:320px; z-index:15;
+  background:#fff; border-left:1px solid #e5e7eb; padding:18px;
+  overflow-y:auto; transform:translateX(100%); transition:transform .18s ease; }
+.g-panel.open { transform:translateX(0); }
+.g-panel * { word-break:break-all; }
+.g-panel h2 { font-size:16px; margin-bottom:8px; line-height:1.4; }
+.g-panel .row { font-size:12px; color:#6b7280; margin-bottom:6px; }
+.g-panel .badge { display:inline-block; background:#eef2ff; color:#4338ca;
+  border-radius:4px; padding:1px 7px; font-size:11px; margin-right:4px; }
+.g-panel .tags span { display:inline-block; background:#f3f4f6; border:1px solid #e5e7eb;
+  border-radius:10px; padding:1px 8px; font-size:11px; color:#4b5563; margin:2px 3px 2px 0; }
+.g-panel .summary { font-size:13px; color:#374151; line-height:1.6;
+  background:#f9fafb; border-radius:8px; padding:10px; margin:10px 0; }
+.g-panel h3 { font-size:12px; color:#6b7280; margin:12px 0 6px;
+  text-transform:uppercase; letter-spacing:.04em; }
+.g-panel .rel { font-size:13px; padding:4px 6px; border-radius:5px; cursor:pointer; }
+.g-panel .rel:hover { background:#eff6ff; color:#1d4ed8; }
+.g-panel .rel .k { font-size:10px; color:#9ca3af; margin-left:6px; }
+.g-close { position:absolute; top:10px; right:12px; border:none; background:none;
+  font-size:18px; color:#9ca3af; cursor:pointer; }
+.g-legend { position:absolute; top:10px; left:10px; z-index:15; background:#fff;
+  border:1px solid #e5e7eb; border-radius:10px; padding:10px 12px;
+  box-shadow:0 2px 8px rgba(0,0,0,.06); font-size:12px; max-width:180px; }
+.g-legend .item { display:flex; align-items:center; gap:8px; padding:3px 4px;
+  border-radius:5px; cursor:pointer; user-select:none; }
+.g-legend .item:hover { background:#f3f4f6; }
+.g-legend .item.off { opacity:.35; }
+.g-legend .dot { width:10px; height:10px; border-radius:50%; flex:none; }
+.g-legend .hint { color:#9ca3af; font-size:11px; margin-top:6px; }
+.g-search { height:30px; padding:0 10px; border:1px solid #d1d5db; border-radius:6px;
+  font-size:13px; outline:none; width:220px; }
+.g-search:focus { border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,.15); }
