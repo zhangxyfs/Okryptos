@@ -33,7 +33,7 @@ type graphData struct {
 
 var mdLinkRe = regexp.MustCompile(`\]\(([^)\s]+\.md)\)`)
 
-// graphCategory 与前端 catKeyOf（web/app.js:1942）同优先级。
+// graphCategory 与前端 catKeyOf（web/app.js 的 catKeyOf）同优先级。
 func graphCategory(e *entry.Entry) string {
 	switch {
 	case e.Archived:

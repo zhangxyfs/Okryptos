@@ -190,7 +190,7 @@ const I18N = {
     gLoading:"Loading…", gNoProject:"No project",
     gRelTitle:"Related entries ({n})", gDegRow:"Out {o} · In {i} · Total {d}",
     gOutStruct:"out·struct", gOutRef:"out·ref", gInStruct:"in·struct", gInRef:"in·ref",
-    gLegendHint:"Click a legend item to highlight/dim its category", gLegendHintLayer:"Click legend to expand/collapse", gClosePanel:"Close panel",
+    gLegendHint:"Click a legend item to highlight/dim its category", gLegendHintLayer:"Click legend to expand/collapse a category", gClosePanel:"Close panel",
     treeCaption:"Entries", filter:"Filter entries… / commands (/type, /tag)", pickEntry:"← Select an entry from the tree",
     evoSegHint:"No version-segment sub-entries yet — ask your agent to \"update wiki\" to migrate to the new structure (index + segments). Existing content is preserved.",
     modified:"Modified",
@@ -2703,7 +2703,12 @@ function refreshGraph(){
   const p = graphProj;   // 快照：连切项目时丢弃过期响应，避免旧数据以新项目名落缓存
   api("/api/graph?project="+encodeURIComponent(p))
     .then(d=>{ if(p!==graphProj) return; GRAPH = { proj:p, data:d }; graphReset(p); })
-    .catch(e=>{ if(p!==graphProj) return; GRAPH = { proj:p, data:null, err:e.message }; })
+    .catch(e=>{ if(p!==graphProj) return; GRAPH = { proj:p, data:null, err:e.message };
+      // 停掉旧项目的 rAF/observer：错误态下旧布局无保留价值，否则 gFrame 页面守卫仍通过，
+      // 旧模拟在已 detach 的 DOM 上空转白烧 CPU
+      if(gV && gV.raf) cancelAnimationFrame(gV.raf);
+      if(gV && gV.ro) gV.ro.disconnect();
+      gV = null; })
     .then(()=>menuRender("graph"));
 }
 function graphReset(proj){
