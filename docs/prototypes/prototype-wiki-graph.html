@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>OpenKnowledge Wiki 图谱（原型）</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; overflow:hidden; background:#f3f4f6;
+    font-family:"Segoe UI","Microsoft YaHei",sans-serif; color:#1f2937; }
+  #topbar { position:fixed; top:0; left:0; right:0; height:48px; z-index:20;
+    background:#ffffff; border-bottom:1px solid #e5e7eb; display:flex;
+    align-items:center; gap:16px; padding:0 16px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  #topbar h1 { font-size:15px; font-weight:600; white-space:nowrap; }
+  #stats { font-size:12px; color:#6b7280; white-space:nowrap; }
+  #search { margin-left:auto; width:260px; height:30px; padding:0 10px;
+    border:1px solid #d1d5db; border-radius:6px; font-size:13px; outline:none; }
+  #search:focus { border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,.15); }
+  #legend { position:fixed; top:58px; left:12px; z-index:15; background:#ffffff;
+    border:1px solid #e5e7eb; border-radius:10px; padding:10px 12px;
+    box-shadow:0 2px 8px rgba(0,0,0,.06); font-size:12px; max-width:180px; }
+  #legend .item { display:flex; align-items:center; gap:8px; padding:3px 4px;
+    border-radius:5px; cursor:pointer; user-select:none; }
+  #legend .item:hover { background:#f3f4f6; }
+  #legend .item.off { opacity:.35; }
+  #legend .dot { width:10px; height:10px; border-radius:50%; flex:none; }
+  #legend .hint { color:#9ca3af; font-size:11px; margin-top:6px; }
+  #panel { position:fixed; top:48px; right:0; bottom:0; width:320px; z-index:15;
+    background:#ffffff; border-left:1px solid #e5e7eb; padding:18px;
+    overflow-y:auto; transform:translateX(100%); transition:transform .18s ease; }
+  #panel.open { transform:translateX(0); }
+  #panel * { word-break:break-all; }
+  #panel h2 { font-size:16px; margin-bottom:8px; line-height:1.4; }
+  #panel .row { font-size:12px; color:#6b7280; margin-bottom:6px; }
+  #panel .badge { display:inline-block; background:#eef2ff; color:#4338ca;
+    border-radius:4px; padding:1px 7px; font-size:11px; margin-right:4px; }
+  #panel .tags span { display:inline-block; background:#f3f4f6; border:1px solid #e5e7eb;
+    border-radius:10px; padding:1px 8px; font-size:11px; color:#4b5563; margin:2px 3px 2px 0; }
+  #panel .summary { font-size:13px; color:#374151; line-height:1.6;
+    background:#f9fafb; border-radius:8px; padding:10px; margin:10px 0; }
+  #panel h3 { font-size:12px; color:#6b7280; margin:12px 0 6px;
+    text-transform:uppercase; letter-spacing:.04em; }
+  #panel .rel { font-size:13px; padding:4px 6px; border-radius:5px; cursor:pointer; }
+  #panel .rel:hover { background:#eff6ff; color:#1d4ed8; }
+  #panel .rel .k { font-size:10px; color:#9ca3af; margin-left:6px; }
+  #close { position:absolute; top:10px; right:12px; border:none; background:none;
+    font-size:18px; color:#9ca3af; cursor:pointer; }
+  #tooltip { position:fixed; z-index:30; pointer-events:none; background:#111827;
+    color:#f9fafb; font-size:12px; border-radius:6px; padding:6px 10px;
+    max-width:340px; display:none; box-shadow:0 4px 12px rgba(0,0,0,.2); line-height:1.5; }
+  #tooltip .t { font-weight:600; }
+  #tooltip .s { color:#d1d5db; }
+  #stage { position:fixed; top:48px; left:0; right:0; bottom:0; cursor:grab;
+    width:100vw; height:calc(100vh - 48px); display:block;
+    user-select:none; -webkit-user-select:none; }
+  #stage.panning { cursor:grabbing; }
+  .edge { stroke:#cbd5e1; stroke-width:1.2; }
+  .edge.ref { stroke:#93c5fd; stroke-dasharray:5 4; stroke-width:1; }
+  .edge.hot { stroke:#f59e0b; stroke-width:2.6; stroke-dasharray:none; }
+  .node { cursor:pointer; }
+  .node circle, .node rect { stroke:#ffffff; stroke-width:1.5; }
+  .node.dir rect { stroke:#1f2937; stroke-width:2.2; }
+  .node text, .lbl { font-size:11px; fill:#374151; text-anchor:middle;
+    paint-order:stroke; stroke:#f3f4f6; stroke-width:3px; pointer-events:none; }
+  .dim { opacity:.12; }
+  .fade { opacity:.15; }
+  .node, .lbl { transition:opacity .15s ease; }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <h1>OpenKnowledge Wiki 图谱（原型）</h1>
+  <span id="stats"></span>
+  <input id="search" placeholder="搜索条目标题 / tags…">
+</div>
+<div id="legend"></div>
+<div id="panel"><button id="close">×</button><div id="panelBody"></div></div>
+<div id="tooltip"></div>
+<svg id="stage"></svg>
+<script>
+"use strict";
+const DATA = {"nodes": [{"id": "Bun.spawn-无内建-timeout：opencode-插件须手动-kill-防挂死", "title": "Bun.spawn 无内建 timeout：opencode 插件须手动 kill 防挂死", "type": "note", "tags": ["agentx", "opencode", "bun"], "summary": "Bun.spawn 无内建 timeout：opencode 插件须手动 kill 防挂死", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "CLI-命令面与项目路由", "title": "CLI 命令面与项目路由", "type": "reference", "tags": ["wiki", "cli"], "summary": "main.go 纯路由 + registry 最长前缀匹配；新增 ok archive 归档命令与 ok index 归档候选报告", "category": "cli/daemon", "isDir": false, "deg": 2}, {"id": "CodePilot-shadow-HOME-会让-ok-hook-静默失效——数据根解析必须免疫环境重定向", "title": "CodePilot shadow HOME 会让 ok hook 静默失效——数据根解析必须免疫环境重定向", "type": "pitfall", "tags": ["agentx", "hook"], "summary": "CodePilot shadow HOME 会让 ok hook 静默失效——数据根解析必须免疫环境重定向", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "Codex-hooks-三重坑：特性默认关信任过期静默跳过Windows-引号-bug（含哈希公式与版本矩阵）", "title": "Codex hooks 三重坑：特性默认关/信任过期静默跳过/Windows 引号 bug（含哈希公式与版本矩阵）", "type": "pitfall", "tags": ["codex", "hooks", "windows", "信任门", "上游bug"], "summary": "Codex hooks 三重坑：特性默认关/信任过期静默跳过/Windows 引号 bug（含哈希公式与版本矩阵）", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "DeepSeek-Harness-本地插件必须-file-URL-挂载：vendored-loader-直接-import(name)，Windows-盘符路径报-ERR_UNSUPPORTED_ESM_URL_SCHEME", "title": "DeepSeek Harness 本地插件必须 file:// URL 挂载：vendored loader 直接 import(name)，Windows 盘符路径报 ERR_UNSUPPORTED_ESM_URL_SCHEME", "type": "pitfall", "tags": ["dsh", "agentx", "cordis", "windows", "本地插件"], "summary": "DeepSeek Harness 本地插件必须 file:// URL 挂载：vendored loader 直接 import(name)，Windows 盘符路径报 ERR_UNSUPPORTED_ESM_URL_SCHEME", "category": "agentx/sidecar", "isDir": false, "deg": 1}, {"id": "GUI-假功能按钮必须有可见反馈，原型评审要追问按钮真实能力", "title": "GUI 假功能按钮必须有可见反馈，原型评审要追问按钮真实能力", "type": "pitfall", "tags": ["gui", "原型", "反馈"], "summary": "GUI 假功能按钮必须有可见反馈，原型评审要追问按钮真实能力", "category": "gui", "isDir": false, "deg": 0}, {"id": "GUI-开关类设置用勾选+保存按钮两段式，不用-change-即存", "title": "GUI 开关类设置用勾选+保存按钮两段式，不用 change 即存", "type": "note", "tags": ["gui", "交互约定"], "summary": "引导页开关统一勾选+保存按钮两段式（首例泛化门控），即存模式误触无反悔", "category": "gui", "isDir": false, "deg": 0}, {"id": "GUI-终端面板与栏目布局", "title": "GUI 终端面板与栏目布局", "type": "reference", "tags": ["wiki", "gui"], "summary": "管理页第三栏目 chat 式 CLI：11 条白名单经 /api/terminal/exec 子进程执行；界面设置弹窗配三栏目位置 localStorage 持久化", "category": "gui", "isDir": false, "deg": 2}, {"id": "GiteaGitHub-wiki-仓须先初始化才能-push", "title": "Gitea/GitHub wiki 仓须先初始化才能 push", "type": "pitfall", "tags": ["wiki", "发布", "git"], "summary": "Gitea/GitHub wiki 仓须先初始化才能 push", "category": "沉淀/分发", "isDir": false, "deg": 0}, {"id": "LLM-生成调用两坑：超时按场景区分-+-temperature-缺省不传", "title": "LLM 生成调用两坑：超时按场景区分 + temperature 缺省不传", "type": "pitfall", "tags": ["llm", "优化", "超时", "temperature"], "summary": "LLM 生成调用两坑：超时按场景区分 + temperature 缺省不传", "category": "其他经验", "isDir": false, "deg": 0}, {"id": "MCP-server-实现路径（未来-hook-less-agent-预案）", "title": "MCP server 实现路径（未来 hook-less agent 预案）", "type": "reference", "tags": ["mcp", "agentx"], "summary": "MCP server 实现路径（未来 hook-less agent 预案）", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "Qoder-hooks-双坑：hooksConfig.enabled-默认关闭-+-Windows-cmd-s-剥引号（含-bundle-实证）", "title": "Qoder hooks 双坑：hooksConfig.enabled 默认关闭 + Windows cmd /s 剥引号（含 bundle 实证）", "type": "pitfall", "tags": ["qoder", "hooks", "静默不派发", "windows", "适配器"], "summary": "Qoder hooks 双坑：hooksConfig.enabled 默认关闭 + Windows cmd /s 剥引号（含 bundle 实证）", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "README-版本徽标会漂移：bump-时须跑-scriptssync-version.sh", "title": "README 版本徽标会漂移：bump 时须跑 scripts/sync-version.sh", "type": "pitfall", "tags": ["发布", "版本号", "README", "徽标"], "summary": "版本徽标/引用会漂移（README + 官网 site）：bump 时须跑 scripts/sync-version.sh；pre-push 钩子已兜底", "category": "发布/构建", "isDir": false, "deg": 0}, {"id": "Reasonix-manifest-必须与实际订阅一致，HooksInstalled-要校验契约全字段", "title": "Reasonix manifest 必须与实际订阅一致，HooksInstalled 要校验契约全字段", "type": "pitfall", "tags": ["reasonix", "sidecar", "manifest", "intercepts", "自愈", "r2评审"], "summary": "Reasonix manifest 必须与实际订阅一致，HooksInstalled 要校验契约全字段", "category": "agentx/sidecar", "isDir": false, "deg": 1}, {"id": "Reasonix-sidecar", "title": "Reasonix sidecar", "type": "reference", "tags": ["wiki", "reasonix"], "summary": "Extension Protocol sidecar：input.receive 注入+enforce 三档、tool.after 追踪；信任门登记；err=nil 才算 fail-open", "category": "agentx/sidecar", "isDir": false, "deg": 5}, {"id": "Reasonix-扩展-SDK：拦截器-err-非-nil-会吞掉-Continue", "title": "Reasonix 扩展 SDK：拦截器 err 非 nil 会吞掉 Continue", "type": "pitfall", "tags": ["reasonix", "sidecar", "fail-open", "扩展协议"], "summary": "Reasonix 扩展 SDK：拦截器 err 非 nil 会吞掉 Continue", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "Release-正文与-changelog-不硬折行", "title": "Release 正文与 changelog 不硬折行", "type": "rule", "tags": ["发布", "排版", "约定"], "summary": "Release 正文与 changelog 不硬折行", "category": "发布/构建", "isDir": false, "deg": 1}, {"id": "SKILL.md-正文在触发前不可见——行为触发条件必须写进-description", "title": "SKILL.md 正文在触发前不可见——行为触发条件必须写进 description", "type": "pitfall", "tags": ["技能", "触发", "可见性", "沉淀"], "summary": "SKILL.md 正文在触发前不可见——行为触发条件必须写进 description", "category": "沉淀/分发", "isDir": false, "deg": 0}, {"id": "SQLite-写事务内禁止网络调用：embedding-移出事务每批小事务", "title": "SQLite 写事务内禁止网络调用：embedding 移出事务每批小事务", "type": "pitfall", "tags": ["sqlite", "事务", "embedding", "索引", "并发"], "summary": "SQLite 写事务内禁止网络调用：embedding 移出事务每批小事务", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "SQLite-读写并发致整轮注入静默跳过：开-WAL-+-NORMAL", "title": "SQLite 读写并发致整轮注入静默跳过：开 WAL + NORMAL", "type": "pitfall", "tags": ["sqlite", "WAL", "并发", "注入", "busy_timeout"], "summary": "SQLite 读写并发致整轮注入静默跳过：开 WAL + NORMAL", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "Sync-的-mtime-秒级粒度：同秒改写判未变化，工具写回须-os.Chtimes-推进一秒", "title": "Sync 的 mtime 秒级粒度：同秒改写判未变化，工具写回须 os.Chtimes 推进一秒", "type": "pitfall", "tags": ["sync", "mtime", "索引", "测试"], "summary": "Sync 的 mtime 秒级粒度：同秒改写判未变化，工具写回须 os.Chtimes 推进一秒", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "Web-GUI", "title": "Web GUI", "type": "reference", "tags": ["wiki", "gui"], "summary": "五页配置中心：管理树 wiki 目录化/类目分组+搜索命令+终端栏目+界面设置/引导/设置八卡/日志/其他；token fragment 注入与 Host/Origin 加固", "category": "gui", "isDir": false, "deg": 6}, {"id": "Windows-宿主交叉构建-Linux-包：chmod-静默无效，权限位必须显式钉", "title": "Windows 宿主交叉构建 Linux 包：chmod 静默无效，权限位必须显式钉", "type": "pitfall", "tags": ["构建", "跨平台", "发布", "权限位"], "summary": "Windows git-bash noacl 挂载下 chmod 静默失效，tar/nfpm 继承 0644；两段式 tar --mode 钉权限 + verify 断言 mode", "category": "发布/构建", "isDir": false, "deg": 0}, {"id": "agentx-新适配器：全仓注册表遍历测试必须补新-agent-home-隔离", "title": "agentx 新适配器：全仓注册表遍历测试必须补新 agent home 隔离", "type": "pitfall", "tags": ["agentx", "测试", "隔离", "多agent"], "summary": "agentx 新适配器：全仓注册表遍历测试必须补新 agent home 隔离", "category": "agentx/sidecar", "isDir": false, "deg": 1}, {"id": "agentx-测试夹具曾是-Windows-only：Linux-跑-go-test-整包红（已修，记平台双态约定）", "title": "agentx 测试夹具曾是 Windows-only：Linux 跑 go test 整包红（已修，记平台双态约定）", "type": "pitfall", "tags": ["agentx", "测试", "linux", "wsl", "平台分叉"], "summary": "agentx 测试夹具曾是 Windows-only：Linux 跑 go test 整包红（已修，记平台双态约定）", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "daemon-进程模型", "title": "daemon 进程模型", "type": "reference", "tags": ["wiki", "daemon"], "summary": "okd 独立常驻进程：hook 转发 daemon、写入收敛、CLI 兼容转发换算、托盘内嵌、sidecar 托管、token fragment 与 Host/Origin 安全加固", "category": "cli/daemon", "isDir": false, "deg": 3}, {"id": "embedding-多服务与本地模型", "title": "embedding 多服务与本地模型", "type": "reference", "tags": ["wiki", "embedding"], "summary": "v2.14.0 embedding profiles 三形态（openai/ollama/builtin）：下载器/llama.cpp sidecar/模型身份守卫/GUI 多服务管理", "category": "embedding", "isDir": false, "deg": 5}, {"id": "go-test-污染真实-DSH-插件：hookrxext-TestMain-漏隔离-OK_DSH_HOME", "title": "go test 污染真实 DSH 插件：hook/rxext TestMain 漏隔离 OK_DSH_HOME", "type": "pitfall", "tags": ["dsh", "agentx", "测试", "隔离", "hooks"], "summary": "go test 污染真实 DSH 插件：hook/rxext TestMain 漏隔离 OK_DSH_HOME", "category": "agentx/sidecar", "isDir": false, "deg": 1}, {"id": "go-test-输出接管道吞退出码：红测试仍被放行提交", "title": "go test 输出接管道吞退出码：红测试仍被放行提交", "type": "pitfall", "tags": ["测试", "shell", "退出码", "提交", "pipefail"], "summary": "go test 输出接管道吞退出码：红测试仍被放行提交", "category": "测试", "isDir": false, "deg": 1}, {"id": "heredoc-写-Go-代码反斜杠被折叠-+-内嵌-JSON-载荷要双层转义（%q-范式）", "title": "heredoc 写 Go 代码反斜杠被折叠 + 内嵌 JSON 载荷要双层转义（%q 范式）", "type": "pitfall", "tags": ["测试", "转义", "heredoc", "json", "agent", "工具链"], "summary": "heredoc 写 Go 代码反斜杠被折叠 + 内嵌 JSON 载荷要双层转义（%q 范式）", "category": "测试", "isDir": false, "deg": 0}, {"id": "hook-注入与强制检查链路", "title": "hook 注入与强制检查链路", "type": "reference", "tags": ["wiki", "hook"], "summary": "段序固定（检索块沉底）+查询净化 CleanQuery+entry_max_tokens 单条预算；泛化门控短路；采纳闭环+跨轮冷却；双协议输出", "category": "检索/存储", "isDir": false, "deg": 7}, {"id": "hook-集成测试直接调核心函数，拦不住派发层-matcher-断链（read-工具零派发实证）", "title": "hook 集成测试直接调核心函数，拦不住派发层 matcher 断链（read 工具零派发实证）", "type": "pitfall", "tags": ["agentx", "hooks", "测试", "派发层", "反馈闭环"], "summary": "hook 集成测试直接调核心函数，拦不住派发层 matcher 断链（read 工具零派发实证）", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "mandatory-注入治理：预算护栏只告警不截断，粘性指针随泛化门控", "title": "mandatory 注入治理：预算护栏只告警不截断，粘性指针随泛化门控", "type": "note", "tags": ["hook", "设计裁决"], "summary": "mandatory_max_tokens 默认 2000 超限告警不截断；门控轮跳过粘性指针但基础注入不可省", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "ok-add---file-只收纯正文：传带-front-matter-的文件会层层嵌套", "title": "ok add --file 只收纯正文：传带 front matter 的文件会层层嵌套", "type": "pitfall", "tags": ["cli", "ok-add", "front-matter"], "summary": "ok add --file 只收纯正文：传带 front matter 的文件会层层嵌套", "category": "cli/daemon", "isDir": false, "deg": 0}, {"id": "opencode-写盘工具按模型互斥：gpt-系只有-apply_patch", "title": "opencode 写盘工具按模型互斥：gpt 系只有 apply_patch", "type": "pitfall", "tags": ["agentx", "opencode", "post-tool"], "summary": "opencode 写盘工具按模型互斥：gpt 系只有 apply_patch", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "opencode-桌面端跑在-ElectronNode：插件禁用-bun-模块", "title": "opencode 桌面端跑在 Electron/Node：插件禁用 bun 模块", "type": "pitfall", "tags": ["agentx", "opencode", "桌面端", "插件"], "summary": "opencode 桌面端跑在 Electron/Node：插件禁用 bun 模块", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "opencode-自建-part-的-id-必须-prt-前缀，否则-prompt_async-Die-卡死会话", "title": "opencode 自建 part 的 id 必须 prt 前缀，否则 prompt_async Die 卡死会话", "type": "pitfall", "tags": ["agentx", "opencode", "插件"], "summary": "opencode 自建 part 的 id 必须 prt 前缀，否则 prompt_async Die 卡死会话", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "setup-与技能分发", "title": "setup 与技能分发", "type": "reference", "tags": ["wiki", "setup"], "summary": "技能分发（propose/wiki 转 go:embed）+embedding+超时落盘；opencode 入共享技能目录与 hooks 写盘面", "category": "沉淀/分发", "isDir": false, "deg": 1}, {"id": "sync-version.sh-winres-段-sed-分隔符与分组-alternation-冲突：需更新时同步静默中断", "title": "sync-version.sh winres 段 sed 分隔符与分组 alternation 冲突：需更新时同步静默中断", "type": "pitfall", "tags": ["发布", "版本号", "sed", "winres"], "summary": "sync-version.sh winres 段 sed 分隔符与分组 alternation 冲突：需更新时同步静默中断", "category": "发布/构建", "isDir": false, "deg": 0}, {"id": "二进制拆分后daemon内注册命令必须换算CLI入口-存量形态要兼容转发", "title": "二进制拆分后daemon内注册命令必须换算CLI入口-存量形态要兼容转发", "type": "pitfall", "tags": ["agentx", "hooks", "gui-split", "okd", "注册", "兼容", "os.Executable"], "summary": "二进制拆分后daemon内注册命令必须换算CLI入口-存量形态要兼容转发", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "会话状态文件多进程读改写竞态：必须锁内重放+原子落盘", "title": "会话状态文件多进程读改写竞态：必须锁内重放+原子落盘", "type": "pitfall", "tags": ["state", "并发", "hook", "原子写"], "summary": "会话状态文件多进程读改写竞态：必须锁内重放+原子落盘", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "会话状态类新特性的-spec-必须列重置面清单", "title": "会话状态类新特性的 spec 必须列重置面清单", "type": "pitfall", "tags": ["设计", "spec", "SDD"], "summary": "会话状态类新特性的 spec 必须列重置面清单", "category": "沉淀/分发", "isDir": false, "deg": 1}, {"id": "全局配置保存必须锁内原子写：整档重编码丢注释是取舍，裸读改写丢更新是坑", "title": "全局配置保存必须锁内原子写：整档重编码丢注释是取舍，裸读改写丢更新是坑", "type": "pitfall", "tags": ["配置", "并发"], "summary": "config.yaml 写路径收口 updateGlobalConfig（锁内读-改-原子写）；裸读改写丢更新，重编码丢注释为已声明取舍", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "全量重渲前端双坑：原生-dblclick-失效走时间戳检测，反馈自消定时器只摘节点", "title": "全量重渲前端双坑：原生 dblclick 失效走时间戳检测，反馈自消定时器只摘节点", "type": "pitfall", "tags": ["gui", "前端", "双击", "重渲", "定时器"], "summary": "全量重渲前端双坑：原生 dblclick 失效走时间戳检测，反馈自消定时器只摘节点", "category": "gui", "isDir": false, "deg": 0}, {"id": "分批写入中途失败必须回滚本轮部分写：部分写+状态机判定=永久停摆", "title": "分批写入中途失败必须回滚本轮部分写：部分写+状态机判定=永久停摆", "type": "pitfall", "tags": ["embedding", "index", "事务", "回滚", "r2评审"], "summary": "分批写入中途失败必须回滚本轮部分写：部分写+状态机判定=永久停摆", "category": "embedding", "isDir": false, "deg": 0}, {"id": "发布流程双坑：winres.json-版本资源漂移-+-Windows-上-bash-解析到-WSL-存根（go-缺失）", "title": "发布流程双坑：winres.json 版本资源漂移 + Windows 上 bash 解析到 WSL 存根（go 缺失）", "type": "pitfall", "tags": ["发布", "版本号", "构建", "winres", "wsl", "bash"], "summary": "发布流程双坑：winres.json 版本资源漂移 + Windows 上 bash 解析到 WSL 存根（go 缺失）", "category": "发布/构建", "isDir": false, "deg": 0}, {"id": "复制函数丢锁包裹是系统性漏锁模式：新写入口三问，宿主-settings-也要-WithFileLock", "title": "复制函数丢锁包裹是系统性漏锁模式：新写入口三问，宿主 settings 也要 WithFileLock", "type": "pitfall", "tags": ["锁", "并发", "agentx", "settings", "gui", "r2评审"], "summary": "复制函数丢锁包裹是系统性漏锁模式：新写入口三问，宿主 settings 也要 WithFileLock", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "外部记忆系统调研与借鉴路线", "title": "外部记忆系统调研与借鉴路线", "type": "reference", "tags": ["wiki", "调研"], "summary": "OpenViking/OpenMemory/Acontext/TencentDB 四份调研的收敛结论、不借鉴清单与借鉴优先级", "category": "沉淀/分发", "isDir": false, "deg": 0}, {"id": "多-Agent支持（agentx）", "title": "多-Agent支持（agentx）", "type": "reference", "tags": ["wiki", "agentx"], "summary": "适配器注册表统一驱动 CLI/GUI/自愈：十个适配器配置与插件写盘，reasonix 走 sidecar；HooksInstalled 统一 currentCLIExe 换算", "category": "agentx/sidecar", "isDir": false, "deg": 3}, {"id": "多入口数据校验必须下沉共享层——GUI-加固、CLI-裸奔是系统性漏洞模式", "title": "多入口数据校验必须下沉共享层——GUI 加固、CLI 裸奔是系统性漏洞模式", "type": "pitfall", "tags": ["校验", "cli", "gui", "registry", "导入"], "summary": "多入口数据校验必须下沉共享层——GUI 加固、CLI 裸奔是系统性漏洞模式", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "安装器与发布", "title": "安装器与发布", "type": "reference", "tags": ["wiki", "安装器"], "summary": "Inno Setup 中文安装包 + Linux tar.gz/deb；版本号 iss 单一事实源；v2.17 起 scripts/publish-release.py 双仓发布；release 标题=纯版本号、正文四节", "category": "发布/构建", "isDir": false, "deg": 4}, {"id": "手动跑-setupE2E-必须导出全部-agent-home-隔离变量", "title": "手动跑 setup/E2E 必须导出全部 agent home 隔离变量", "type": "pitfall", "tags": ["agentx", "测试隔离", "E2E"], "summary": "手动跑 init/setup/E2E 必须导出全部 agent home 隔离变量（EnsureHooks/InstallSkills/WriteAutostart 遍历全部已检测 agent 不看 --agent）；2026-08-19 增补 13 个变量全清单", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "推理模型优化调用三坑：reasoning-共享-max_tokens-预算-+-答案吐错槽位-+-截断双信号判定", "title": "推理模型优化调用三坑：reasoning 共享 max_tokens 预算 + 答案吐错槽位 + 截断双信号判定", "type": "pitfall", "tags": ["llm", "优化", "推理模型", "max_tokens", "截断", "reasoning_content"], "summary": "推理模型优化调用三坑：reasoning 共享 max_tokens 预算 + 答案吐错槽位 + 截断双信号判定", "category": "其他经验", "isDir": false, "deg": 0}, {"id": "文件锁抢占阈值三约束：大于慢临界区耗时、与等锁超时解耦、抢占必记日志", "title": "文件锁抢占阈值三约束：大于慢临界区耗时、与等锁超时解耦、抢占必记日志", "type": "pitfall", "tags": ["fsx", "锁", "并发", "抢占", "r2评审"], "summary": "文件锁抢占阈值三约束：大于慢临界区耗时、与等锁超时解耦、抢占必记日志", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "文件锁语义按数据强弱分级：fail-open-仅限会话锁，stale-抢占-rename-then-delete", "title": "文件锁语义按数据强弱分级：fail-open 仅限会话锁，stale 抢占 rename-then-delete", "type": "pitfall", "tags": ["并发", "文件锁", "fsx", "registry", "fail-open"], "summary": "文件锁语义按数据强弱分级：fail-open 仅限会话锁，stale 抢占 rename-then-delete", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "新事件源接入先问触发时机：宿主合成回合会把回合计数漂移成输入次数", "title": "新事件源接入先问触发时机：宿主合成回合会把回合计数漂移成输入次数", "type": "pitfall", "tags": ["reasonix", "hook", "回合计数", "合成回合", "auto沉淀", "r2评审"], "summary": "新事件源接入先问触发时机：宿主合成回合会把回合计数漂移成输入次数", "category": "agentx/sidecar", "isDir": false, "deg": 0}, {"id": "新功能新增落盘文件时，必须同步检查-backup-导出白名单", "title": "新功能新增落盘文件时，必须同步检查 backup 导出白名单", "type": "pitfall", "tags": ["备份", "导出", "导入", "白名单", "wiki"], "summary": "新功能新增落盘文件时，必须同步检查 backup 导出白名单", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "本地调试裸-go-build-不同步-distweb：二进制新页面旧（GUI-改动看不到）", "title": "本地调试裸 go build 不同步 dist/web：二进制新页面旧（GUI 改动看不到）", "type": "pitfall", "tags": ["构建", "GUI", "web", "调试"], "summary": "本地调试裸 go build 不同步 dist/web：二进制新页面旧（GUI 改动看不到）", "category": "发布/构建", "isDir": false, "deg": 0}, {"id": "本机-HTTP-服务安全三件套：token-不内嵌无鉴权页-+-Host-校验防-rebinding-+-密钥回查钉死已存-URL", "title": "本机 HTTP 服务安全三件套：token 不内嵌无鉴权页 + Host 校验防 rebinding + 密钥回查钉死已存 URL", "type": "pitfall", "tags": ["安全", "http", "daemon", "token", "dns-rebinding", "密钥外传"], "summary": "本机 HTTP 服务安全三件套：token 不内嵌无鉴权页 + Host 校验防 rebinding + 密钥回查钉死已存 URL", "category": "cli/daemon", "isDir": false, "deg": 0}, {"id": "条目模型与存储布局", "title": "条目模型与存储布局", "type": "reference", "tags": ["wiki", "存储"], "summary": "一文件一条目；archived 全口径含 GUI 归档入口；kb.db 四表 WAL；fsx 锁+BumpMtime+全局配置锁内原子写纪律；项目级 config.toml 覆盖；数据根免疫 HOME 重定向", "category": "检索/存储", "isDir": false, "deg": 2}, {"id": "构建双路径漂移：iss-打-dist-暂存区，build.py-漏拷-changelogs", "title": "构建双路径漂移：iss 打 dist 暂存区，build.py 漏拷 changelogs", "type": "pitfall", "tags": ["构建", "安装器", "发布", "changelog"], "summary": "构建双路径漂移：iss 打 dist 暂存区，build.py 漏拷 changelogs", "category": "发布/构建", "isDir": false, "deg": 0}, {"id": "架构总览", "title": "架构总览", "type": "reference", "tags": ["wiki", "架构"], "summary": "目录地图：一行一主题域（cli/daemon/gui/agentx/sidecar/检索与注入/embedding/存储/沉淀与分发/发布）+ 条目指针；三 exe 形态；fail-open 与写入收敛", "category": "目录", "isDir": true, "deg": 17}, {"id": "检索注入自污染：harness-噪声块能把-FTS向量命中率打到零", "title": "检索注入自污染：harness 噪声块能把 FTS/向量命中率打到零", "type": "pitfall", "tags": ["检索", "注入", "自污染", "调研借鉴"], "summary": "检索注入自污染：harness 噪声块能把 FTS/向量命中率打到零", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "沉淀门控太严比太松更伤：46%-覆盖率教训与低门槛原则", "title": "沉淀门控太严比太松更伤：46% 覆盖率教训与低门槛原则", "type": "note", "tags": ["沉淀", "门控", "提示词", "调研借鉴"], "summary": "沉淀门控太严比太松更伤：46% 覆盖率教训与低门槛原则", "category": "沉淀/分发", "isDir": false, "deg": 0}, {"id": "注入测试断言别盯条目标题：首轮基础注入的-INDEX-恒含全部标题", "title": "注入测试断言别盯条目标题：首轮基础注入的 INDEX 恒含全部标题", "type": "pitfall", "tags": ["测试", "hook", "注入", "INDEX"], "summary": "注入测试断言别盯条目标题：首轮基础注入的 INDEX 恒含全部标题", "category": "测试", "isDir": false, "deg": 0}, {"id": "注册表裸读改写丢项目：写路径必须走-registry.Update", "title": "注册表裸读改写丢项目：写路径必须走 registry.Update", "type": "pitfall", "tags": ["registry", "并发", "文件锁", "fsx"], "summary": "注册表裸读改写丢项目：写路径必须走 registry.Update", "category": "cli/daemon", "isDir": false, "deg": 0}, {"id": "混合检索与-SQLite-索引", "title": "混合检索与 SQLite 索引", "type": "reference", "tags": ["wiki", "检索"], "summary": "CJK 二元组+按通道准入+RRF/时效/反馈+冷却排除；WAL；mandatory 滤归档、wiki 精确匹配；INDEX 渲染治理", "category": "检索/存储", "isDir": false, "deg": 5}, {"id": "混合检索两处准入缺陷：负余弦否决关键词命中+top_n截断先于分支过滤", "title": "混合检索两处准入缺陷：负余弦否决关键词命中+top_n截断先于分支过滤", "type": "pitfall", "tags": ["检索", "准入", "分支", "top_n"], "summary": "混合检索两处准入缺陷：负余弦否决关键词命中+top_n截断先于分支过滤", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "混合检索准入必须按通道独立判定：同域语料余弦基线会顶穿总分阈值", "title": "混合检索准入必须按通道独立判定：同域语料余弦基线会顶穿总分阈值", "type": "pitfall", "tags": ["检索", "混合检索", "阈值"], "summary": "混合检索准入必须按通道独立判定：同域语料余弦基线会顶穿总分阈值", "category": "检索/存储", "isDir": false, "deg": 2}, {"id": "演进历程", "title": "演进历程", "type": "reference", "tags": ["wiki", "历史"], "summary": "里程碑索引：v1.0 骨架 → v2.15 十适配器 → v2.18 并发加固 → v2.21 三 exe 五页化 → v2.22 wiki 目录化、调研借鉴与 R2 评审修复；本条目只留目录", "category": "目录", "isDir": true, "deg": 10}, {"id": "演进历程（v1.0~v1.3-骨架与-SQLite-索引）", "title": "演进历程（v1.0~v1.3 骨架与 SQLite 索引）", "type": "reference", "tags": ["wiki", "历史"], "summary": "registry 路由/frontmatter 条目/混合检索/四类 hook 骨架 → setup 向导与全局配置链 → FTS5+向量进 SQLite 退役文件扫描", "category": "演进历程", "isDir": false, "deg": 1}, {"id": "演进历程（v2.0~v2.2-Web-GUI、daemon-与项目-wiki）", "title": "演进历程（v2.0~v2.2 Web GUI、daemon 与项目 wiki）", "type": "reference", "tags": ["wiki", "历史"], "summary": "token 认证 Web GUI 与 Inno 安装器 → propose 沉淀与常驻 daemon（内嵌托盘）→ 项目 wiki 游标/Wiki 目录/落后提醒 → 运维化批次", "category": "演进历程", "isDir": false, "deg": 2}, {"id": "演进历程（v2.10~v2.15-Linux-发布线、适配器二期与-embedding）", "title": "演进历程（v2.10~v2.15 Linux 发布线、适配器二期与 embedding）", "type": "reference", "tags": ["wiki", "历史"], "summary": "Linux tar.gz/deb 双产物 → opencode/claude/codex/qoder/qoder-ide/dsh 六个适配器 → embedding 多服务 profiles 与本地模型 sidecar", "category": "演进历程", "isDir": false, "deg": 2}, {"id": "演进历程（v2.16~v2.18-检索准入与索引治理）", "title": "演进历程（v2.16~v2.18 检索准入与索引治理）", "type": "reference", "tags": ["wiki", "历史"], "summary": "min_score/min_gap 通道准入与 SemanticFloor → 泛化门控/RRF/时效/采纳反馈四特性 → INDEX 预算感知渲染与归档生命周期 → SQLite WAL 并发加固与 fsx 锁原语", "category": "演进历程", "isDir": false, "deg": 1}, {"id": "演进历程（v2.19-起-AI-优化、跨轮冷却与-GUI-三-exe-化）", "title": "演进历程（v2.19 起 AI 优化、跨轮冷却与 GUI 三 exe 化）", "type": "reference", "tags": ["wiki", "历史"], "summary": "条目 AI 优化 → 跨轮冷却 → 推理模型加固 → wiki 基线继承 → 三 exe 五页化 → 管理页终端面板 → wiki 目录化+评审修复 → 外部调研借鉴第一批 → R2 评审 53 项修复 → v2.22.3 树点击修复", "category": "演进历程", "isDir": false, "deg": 2}, {"id": "演进历程（v2.3~v2.9-多-Agent-一期与分支感知）", "title": "演进历程（v2.3~v2.9 多 Agent 一期与分支感知）", "type": "reference", "tags": ["wiki", "历史"], "summary": "agentx 适配器注册表与 kimi/pi/zcode/reasonix 接入 → hooks 超时治理 → changelog 弹窗 → wiki 分支感知/差异条目 → born 双徽标溯源 → 删除项目知识库", "category": "演进历程", "isDir": false, "deg": 2}, {"id": "系统托盘", "title": "系统托盘", "type": "reference", "tags": ["wiki", "托盘"], "summary": "okd 内嵌 Win32 托盘：右键菜单版本+退出、双击聚焦唯一 GUI、三 exe 各自 winres 图标", "category": "cli/daemon", "isDir": false, "deg": 2}, {"id": "约定：新需求定稿后主动提示沉淀", "title": "约定：新需求定稿后主动提示沉淀", "type": "rule", "tags": ["约定", "沉淀"], "summary": "新功能/新需求/架构变化定稿后主动提醒沉淀：结构型进 wiki、经验型进 propose 草稿，不等用户开口", "category": "沉淀/分发", "isDir": false, "deg": 0}, {"id": "经验沉淀机制", "title": "经验沉淀机制", "type": "reference", "tags": ["wiki", "沉淀"], "summary": "草稿二分保检索质量；turn_interval 默认 3；propose 提示词纪律（第三人称/作用域/查重）与同域候选提示；结构型分流 wiki", "category": "沉淀/分发", "isDir": false, "deg": 4}, {"id": "行为变化类新测试必须先验证对旧代码变红（非判别性测试）", "title": "行为变化类新测试必须先验证对旧代码变红（非判别性测试）", "type": "pitfall", "tags": ["测试", "TDD"], "summary": "行为变化类新测试必须先验证对旧代码变红（非判别性测试）", "category": "测试", "isDir": false, "deg": 2}, {"id": "规格写字符代码写-len()-是字节：中文场景限额差-3-倍", "title": "规格写字符代码写 len() 是字节：中文场景限额差 3 倍", "type": "pitfall", "tags": ["go", "校验", "中文", "规格"], "summary": "规格写字符代码写 len() 是字节：中文场景限额差 3 倍", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "诊断-hook-派发别用-stop_count：propose-无-enforce-早退不计数；ZCode-Stop-派发活探针实证正常", "title": "诊断 hook 派发别用 stop_count：propose 无 enforce 早退不计数；ZCode Stop 派发活探针实证正常", "type": "pitfall", "tags": ["hook", "诊断", "zcode", "stop", "capture", "实证", "注入"], "summary": "诊断 hook 派发别用 stop_count：propose 无 enforce 早退不计数；ZCode Stop 派发活探针实证正常", "category": "检索/存储", "isDir": false, "deg": 0}, {"id": "跨轮注入冷却", "title": "跨轮注入冷却", "type": "reference", "tags": ["wiki", "检索"], "summary": "v2.20.0 已发布：session 台账+prompt 轮时钟（门控轮也计）；排除下推 top_n 截断前不占名额；归因窗口含冷却期；压缩事件连台账重置；GUI 引导页可配 dedup_turns（默认 3、0=关闭）", "category": "检索/存储", "isDir": false, "deg": 9}, {"id": "重建式更新必须继承旧对象的生命周期字段（GUI-编辑曾静默转正草稿）", "title": "重建式更新必须继承旧对象的生命周期字段（GUI 编辑曾静默转正草稿）", "type": "pitfall", "tags": ["gui", "条目模型", "生命周期", "回归"], "summary": "重建式更新必须继承旧对象的生命周期字段（GUI 编辑曾静默转正草稿）", "category": "gui", "isDir": false, "deg": 0}, {"id": "项目-wiki-功能", "title": "项目 wiki 功能", "type": "reference", "tags": ["wiki"], "summary": "技能驱动：v2.6 分支感知 → v2.7 分支差异 → v2.8 合并谱系+born；v2.21 基线读时继承（inherited），展示层定稿变体 A 内联徽标", "category": "沉淀/分发", "isDir": false, "deg": 5}, {"id": "默认行为变化的兼容扫荡必须含-cmdok-e2e-层", "title": "默认行为变化的兼容扫荡必须含 cmd/ok e2e 层", "type": "pitfall", "tags": ["测试", "E2E", "SDD"], "summary": "默认行为变化的兼容扫荡必须含 cmd/ok e2e 层", "category": "测试", "isDir": false, "deg": 1}], "edges": [{"source": "架构总览", "target": "CLI-命令面与项目路由", "kind": "struct"}, {"source": "架构总览", "target": "daemon-进程模型", "kind": "struct"}, {"source": "架构总览", "target": "系统托盘", "kind": "struct"}, {"source": "架构总览", "target": "Web-GUI", "kind": "struct"}, {"source": "架构总览", "target": "GUI-终端面板与栏目布局", "kind": "struct"}, {"source": "架构总览", "target": "多-Agent支持（agentx）", "kind": "struct"}, {"source": "架构总览", "target": "Reasonix-sidecar", "kind": "struct"}, {"source": "架构总览", "target": "混合检索与-SQLite-索引", "kind": "struct"}, {"source": "架构总览", "target": "hook-注入与强制检查链路", "kind": "struct"}, {"source": "架构总览", "target": "跨轮注入冷却", "kind": "struct"}, {"source": "架构总览", "target": "embedding-多服务与本地模型", "kind": "struct"}, {"source": "架构总览", "target": "条目模型与存储布局", "kind": "struct"}, {"source": "架构总览", "target": "经验沉淀机制", "kind": "struct"}, {"source": "架构总览", "target": "项目-wiki-功能", "kind": "struct"}, {"source": "架构总览", "target": "setup-与技能分发", "kind": "struct"}, {"source": "架构总览", "target": "安装器与发布", "kind": "struct"}, {"source": "架构总览", "target": "演进历程", "kind": "struct"}, {"source": "演进历程", "target": "演进历程（v1.0~v1.3-骨架与-SQLite-索引）", "kind": "struct"}, {"source": "演进历程", "target": "演进历程（v2.0~v2.2-Web-GUI、daemon-与项目-wiki）", "kind": "struct"}, {"source": "演进历程", "target": "演进历程（v2.10~v2.15-Linux-发布线、适配器二期与-embedding）", "kind": "struct"}, {"source": "演进历程", "target": "演进历程（v2.16~v2.18-检索准入与索引治理）", "kind": "struct"}, {"source": "演进历程", "target": "演进历程（v2.19-起-AI-优化、跨轮冷却与-GUI-三-exe-化）", "kind": "struct"}, {"source": "演进历程", "target": "演进历程（v2.3~v2.9-多-Agent-一期与分支感知）", "kind": "struct"}, {"source": "CLI-命令面与项目路由", "target": "项目-wiki-功能", "kind": "ref"}, {"source": "DeepSeek-Harness-本地插件必须-file-URL-挂载：vendored-loader-直接-import(name)，Windows-盘符路径报-ERR_UNSUPPORTED_ESM_URL_SCHEME", "target": "多-Agent支持（agentx）", "kind": "ref"}, {"source": "Reasonix-manifest-必须与实际订阅一致，HooksInstalled-要校验契约全字段", "target": "Reasonix-sidecar", "kind": "ref"}, {"source": "Release-正文与-changelog-不硬折行", "target": "安装器与发布", "kind": "ref"}, {"source": "Web-GUI", "target": "GUI-终端面板与栏目布局", "kind": "ref"}, {"source": "Web-GUI", "target": "跨轮注入冷却", "kind": "ref"}, {"source": "daemon-进程模型", "target": "混合检索与-SQLite-索引", "kind": "ref"}, {"source": "embedding-多服务与本地模型", "target": "安装器与发布", "kind": "ref"}, {"source": "go-test-污染真实-DSH-插件：hookrxext-TestMain-漏隔离-OK_DSH_HOME", "target": "agentx-新适配器：全仓注册表遍历测试必须补新-agent-home-隔离", "kind": "ref"}, {"source": "go-test-输出接管道吞退出码：红测试仍被放行提交", "target": "行为变化类新测试必须先验证对旧代码变红（非判别性测试）", "kind": "ref"}, {"source": "hook-注入与强制检查链路", "target": "Reasonix-sidecar", "kind": "ref"}, {"source": "hook-注入与强制检查链路", "target": "混合检索与-SQLite-索引", "kind": "ref"}, {"source": "hook-注入与强制检查链路", "target": "经验沉淀机制", "kind": "ref"}, {"source": "hook-注入与强制检查链路", "target": "跨轮注入冷却", "kind": "ref"}, {"source": "hook-注入与强制检查链路", "target": "项目-wiki-功能", "kind": "ref"}, {"source": "会话状态类新特性的-spec-必须列重置面清单", "target": "跨轮注入冷却", "kind": "ref"}, {"source": "多-Agent支持（agentx）", "target": "Reasonix-sidecar", "kind": "ref"}, {"source": "安装器与发布", "target": "embedding-多服务与本地模型", "kind": "ref"}, {"source": "条目模型与存储布局", "target": "混合检索与-SQLite-索引", "kind": "ref"}, {"source": "混合检索与-SQLite-索引", "target": "跨轮注入冷却", "kind": "ref"}, {"source": "混合检索准入必须按通道独立判定：同域语料余弦基线会顶穿总分阈值", "target": "Web-GUI", "kind": "ref"}, {"source": "混合检索准入必须按通道独立判定：同域语料余弦基线会顶穿总分阈值", "target": "经验沉淀机制", "kind": "ref"}, {"source": "演进历程", "target": "Web-GUI", "kind": "ref"}, {"source": "演进历程", "target": "embedding-多服务与本地模型", "kind": "ref"}, {"source": "演进历程", "target": "跨轮注入冷却", "kind": "ref"}, {"source": "演进历程（v2.0~v2.2-Web-GUI、daemon-与项目-wiki）", "target": "Web-GUI", "kind": "ref"}, {"source": "演进历程（v2.10~v2.15-Linux-发布线、适配器二期与-embedding）", "target": "embedding-多服务与本地模型", "kind": "ref"}, {"source": "演进历程（v2.19-起-AI-优化、跨轮冷却与-GUI-三-exe-化）", "target": "跨轮注入冷却", "kind": "ref"}, {"source": "演进历程（v2.3~v2.9-多-Agent-一期与分支感知）", "target": "Reasonix-sidecar", "kind": "ref"}, {"source": "系统托盘", "target": "daemon-进程模型", "kind": "ref"}, {"source": "经验沉淀机制", "target": "项目-wiki-功能", "kind": "ref"}, {"source": "行为变化类新测试必须先验证对旧代码变红（非判别性测试）", "target": "跨轮注入冷却", "kind": "ref"}, {"source": "项目-wiki-功能", "target": "hook-注入与强制检查链路", "kind": "ref"}, {"source": "默认行为变化的兼容扫荡必须含-cmdok-e2e-层", "target": "跨轮注入冷却", "kind": "ref"}], "categories": ["目录", "演进历程", "cli/daemon", "gui", "agentx/sidecar", "检索/存储", "embedding", "沉淀/分发", "发布/构建", "测试", "其他经验"]};
+const nodes = DATA.nodes, edges = DATA.edges;
+const byId = {}; nodes.forEach(n => byId[n.id] = n);
+
+// ---------- 配色 ----------
+const PALETTE = ["#1f2937","#8b5cf6","#3b82f6","#10b981","#f59e0b","#ef4444",
+                 "#06b6d4","#ec4899","#84cc16","#f97316","#9ca3af"];
+const catColor = {};
+DATA.categories.forEach((c,i) => catColor[c] = PALETTE[i % PALETTE.length]);
+
+// ---------- 统计 ----------
+document.getElementById("stats").textContent =
+  `节点 ${nodes.length} · 边 ${edges.length}（结构 ${edges.filter(e=>e.kind==="struct").length} / 引用 ${edges.filter(e=>e.kind==="ref").length}）`;
+
+// ---------- 邻接 ----------
+const adj = {}; nodes.forEach(n => adj[n.id] = []);
+edges.forEach(e => { adj[e.source].push(e); adj[e.target].push(e); });
+
+// ---------- SVG ----------
+const svg = document.getElementById("stage");
+const NS = "http://www.w3.org/2000/svg";
+const gWorld = document.createElementNS(NS,"g");
+const gEdge = document.createElementNS(NS,"g");
+const gNode = document.createElementNS(NS,"g");
+const gText = document.createElementNS(NS,"g"); // 标签顶层，不被点/边遮挡
+gWorld.appendChild(gEdge); gWorld.appendChild(gNode); gWorld.appendChild(gText);
+svg.appendChild(gWorld);
+
+function radius(n){ return n.isDir ? 13 : (n.deg >= 6 ? 13 : n.deg >= 3 ? 10 : 7); }
+
+const edgeEls = edges.map(e => {
+  const l = document.createElementNS(NS,"line");
+  l.setAttribute("class","edge" + (e.kind==="ref" ? " ref":""));
+  gEdge.appendChild(l); return l;
+});
+const nodeEls = {}, labelEls = {};
+nodes.forEach(n => {
+  const g = document.createElementNS(NS,"g");
+  g.setAttribute("class","node" + (n.isDir ? " dir":""));
+  let shape;
+  if (n.isDir) { // 菱形
+    shape = document.createElementNS(NS,"rect");
+    const r = radius(n);
+    shape.setAttribute("x",-r); shape.setAttribute("y",-r);
+    shape.setAttribute("width",2*r); shape.setAttribute("height",2*r);
+    shape.setAttribute("transform","rotate(45)");
+    shape.setAttribute("rx",3);
+  } else {
+    shape = document.createElementNS(NS,"circle");
+    shape.setAttribute("r", radius(n));
+  }
+  shape.setAttribute("fill", catColor[n.category]);
+  g.appendChild(shape);
+  gNode.appendChild(g);
+  nodeEls[n.id] = g;
+  if (n.isDir || n.deg >= 3) { // 小节点不常显标签，hover 有 tooltip
+    const t = document.createElementNS(NS,"text");
+    t.setAttribute("class","lbl");
+    t.textContent = n.title.length > 18 ? n.title.slice(0,17) + "…" : n.title;
+    gText.appendChild(t);
+    labelEls[n.id] = t;
+  }
+});
+
+// ---------- 力导向布局 ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;
+  let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;
+  return((t^t>>>14)>>>0)/4294967296;}}
+const rand = mulberry32(42);
+
+let W = innerWidth, H = innerHeight - 48;
+const cx = () => W/2, cy = () => H/2;
+nodes.forEach(n => {
+  n.x = cx() + (rand()-0.5) * Math.min(W,900);
+  n.y = cy() + (rand()-0.5) * Math.min(H,600);
+  n.vx = 0; n.vy = 0;
+});
+
+const REP = 9000;          // 斥力强度
+const REP_CUT = 320;       // 斥力截断距离（跨簇不互斥）
+const LEN = {struct: 110, ref: 170};  // 弹簧原长
+const SPRING = 0.014;
+const GRAV = 0.004;        // 向心力
+const CLUSTER = 0.05;      // 同类目焦点聚拢
+let alpha = 1;
+const cats = [...new Set(nodes.map(n=>n.category))];
+// 每个类目一个环绕中心的焦点，节点被拉向自己类目的焦点 -> 类目成簇
+const catSize = {};
+nodes.forEach(n => catSize[n.category] = (catSize[n.category]||0)+1);
+const catsSorted = [...cats].sort((a,b)=>catSize[b]-catSize[a]);
+const focus = {};
+function layoutFoci(){
+  const R = Math.min(W,H) * 0.40;
+  const ring = catsSorted.filter(c => c !== "目录");
+  focus["目录"] = { x: cx(), y: cy() }; // 目录节点居中
+  ring.forEach((c,i) => {
+    const ang = i / ring.length * 2 * Math.PI - Math.PI/2;
+    focus[c] = { x: cx() + R*Math.cos(ang), y: cy() + R*Math.sin(ang)*0.8 };
+  });
+}
+layoutFoci();
+
+function tick() {
+  alpha *= 0.996;
+  const a = Math.max(alpha, 0.02);
+
+  // 斥力 O(n^2)
+  for (let i=0;i<nodes.length;i++) {
+    const A = nodes[i];
+    for (let j=i+1;j<nodes.length;j++) {
+      const B = nodes[j];
+      let dx = A.x-B.x, dy = A.y-B.y;
+      let d2 = dx*dx+dy*dy; if (d2 < 1) { dx = rand()-0.5; dy = rand()-0.5; d2 = 1; }
+      if (d2 > REP_CUT*REP_CUT) continue;
+      const d = Math.sqrt(d2);
+      const f = REP * a / d2;
+      const fx = dx/d*f, fy = dy/d*f;
+      A.vx += fx; A.vy += fy; B.vx -= fx; B.vy -= fy;
+    }
+  }
+  // 弹簧
+  edges.forEach(e => {
+    const A = byId[e.source], B = byId[e.target];
+    const dx = B.x-A.x, dy = B.y-A.y;
+    const d = Math.max(Math.sqrt(dx*dx+dy*dy), 1);
+    const f = (d - LEN[e.kind]) * SPRING * a;
+    const fx = dx/d*f, fy = dy/d*f;
+    A.vx += fx; A.vy += fy; B.vx -= fx; B.vy -= fy;
+  });
+  // 向心 + 类目焦点聚拢（定位力，不随 alpha 衰减）+ 积分
+  nodes.forEach(n => {
+    n.vx += (cx()-n.x) * GRAV;
+    n.vy += (cy()-n.y) * GRAV;
+    const f = focus[n.category];
+    n.vx += (f.x-n.x) * CLUSTER;
+    n.vy += (f.y-n.y) * CLUSTER;
+    n.vx *= 0.82; n.vy *= 0.82;
+    if (!n.pinned) {
+      n.x += Math.max(-12, Math.min(12, n.vx));
+      n.y += Math.max(-12, Math.min(12, n.vy));
+    }
+  });
+  // 碰撞（半径不重叠）
+  for (let i=0;i<nodes.length;i++) {
+    const A = nodes[i];
+    for (let j=i+1;j<nodes.length;j++) {
+      const B = nodes[j];
+      const dx = B.x-A.x, dy = B.y-A.y;
+      const min = radius(A)+radius(B)+10;
+      const d2 = dx*dx+dy*dy;
+      if (d2 > 0 && d2 < min*min) {
+        const d = Math.sqrt(d2), push = (min-d)/2/d;
+        if (!A.pinned) { A.x -= dx*push; A.y -= dy*push; }
+        if (!B.pinned) { B.x += dx*push; B.y += dy*push; }
+      }
+    }
+  }
+}
+
+// ---------- 视口变换 ----------
+let view = {x:0, y:0, k:1};
+function applyView(){
+  gWorld.setAttribute("transform",
+    `translate(${view.x},${view.y}) scale(${view.k})`);
+}
+function render(){
+  edges.forEach((e,i) => {
+    const A = byId[e.source], B = byId[e.target], l = edgeEls[i];
+    l.setAttribute("x1",A.x); l.setAttribute("y1",A.y);
+    l.setAttribute("x2",B.x); l.setAttribute("y2",B.y);
+  });
+  nodes.forEach(n => {
+    nodeEls[n.id].setAttribute("transform",`translate(${n.x},${n.y})`);
+    const t = labelEls[n.id];
+    if (t) { t.setAttribute("x", n.x); t.setAttribute("y", n.y + radius(n) + 13); }
+  });
+}
+function frame(){ tick(); render(); requestAnimationFrame(frame); }
+// 先同步预跑收敛（初 Speed 快后衰减由 alpha 控制），不依赖 rAF 帧数
+for (let i = 0; i < 900; i++) tick();
+// 自动适配视图：让整图居中且留边
+(function fitView(){
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  nodes.forEach(n => { x0=Math.min(x0,n.x); y0=Math.min(y0,n.y);
+    x1=Math.max(x1,n.x); y1=Math.max(y1,n.y); });
+  const bw = Math.max(x1-x0,1), bh = Math.max(y1-y0,1);
+  const k = Math.max(0.25, Math.min(1.5, Math.min((W-160)/bw, (H-120)/bh)));
+  view.k = k;
+  view.x = (W - bw*k)/2 - x0*k;
+  view.y = (H - bh*k)/2 - y0*k;
+})();
+applyView(); requestAnimationFrame(frame);
+
+addEventListener("resize", () => { W = innerWidth; H = innerHeight - 48; layoutFoci(); });
+
+// ---------- 平移 / 缩放 / 拖拽 ----------
+let panning = false, panStart = null, dragNode = null, moved = false;
+function toWorld(px, py){
+  const r = svg.getBoundingClientRect();
+  return { x:(px - r.left - view.x)/view.k, y:(py - r.top - view.y)/view.k };
+}
+svg.addEventListener("pointerdown", ev => {
+  moved = false;
+  const g = ev.target.closest(".node");
+  if (g) {
+    const n = nodes.find(n => nodeEls[n.id] === g);
+    if (n) { dragNode = n; n.pinned = true; alpha = Math.max(alpha, 0.25); }
+  } else {
+    panning = true; svg.classList.add("panning");
+    panStart = {x: ev.clientX, y: ev.clientY, vx: view.x, vy: view.y};
+  }
+  svg.setPointerCapture(ev.pointerId);
+});
+svg.addEventListener("pointermove", ev => {
+  if (dragNode) {
+    moved = true;
+    const p = toWorld(ev.clientX, ev.clientY);
+    dragNode.x = p.x; dragNode.y = p.y;
+  } else if (panning && panStart) {
+    moved = true;
+    view.x = panStart.vx + ev.clientX - panStart.x;
+    view.y = panStart.vy + ev.clientY - panStart.y;
+    applyView();
+  }
+  // tooltip
+  const g = ev.target.closest(".node");
+  if (g && !dragNode) {
+    const n = nodes.find(n => nodeEls[n.id] === g);
+    showTip(n, ev.clientX, ev.clientY);
+    hotEdges(n);
+  } else if (!dragNode) { hideTip(); hotEdges(null); }
+});
+svg.addEventListener("pointerup", ev => {
+  if (dragNode) {
+    const n = dragNode; dragNode = null; n.pinned = false;
+    alpha = Math.max(alpha, 0.15); // 局部继续收敛
+    if (!moved) selectNode(n);
+  }
+  panning = false; svg.classList.remove("panning");
+});
+svg.addEventListener("wheel", ev => {
+  ev.preventDefault();
+  const r = svg.getBoundingClientRect();
+  const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+  const k2 = Math.max(0.25, Math.min(4, view.k * (ev.deltaY < 0 ? 1.12 : 0.89)));
+  view.x = mx - (mx - view.x) * k2 / view.k;
+  view.y = my - (my - view.y) * k2 / view.k;
+  view.k = k2; applyView();
+}, {passive:false});
+
+// ---------- tooltip / 边高亮 ----------
+const tip = document.getElementById("tooltip");
+function showTip(n, x, y){
+  if (!n) return hideTip();
+  tip.innerHTML = `<div class="t">${esc(n.title)}</div>` +
+    `<div class="s">${esc(n.type)}${n.summary ? " · " + esc(n.summary.split(/[；;]/)[0]) : ""}</div>`;
+  tip.style.display = "block";
+  tip.style.left = Math.min(x + 14, innerWidth - 360) + "px";
+  tip.style.top = (y + 14) + "px";
+}
+function hideTip(){ tip.style.display = "none"; }
+function hotEdges(n){
+  const nb = {};
+  if (n) {
+    nb[n.id] = true;
+    adj[n.id].forEach(e => { nb[e.source] = true; nb[e.target] = true; });
+  }
+  edges.forEach((e,i) => {
+    edgeEls[i].classList.toggle("hot",
+      !!n && (e.source === n.id || e.target === n.id));
+  });
+  // 悬停时淡化非邻居节点（含标签），突出连通关系
+  nodes.forEach(nd => {
+    const f = !!n && !nb[nd.id];
+    nodeEls[nd.id].classList.toggle("fade", f);
+    const t = labelEls[nd.id];
+    if (t) t.classList.toggle("fade", f);
+  });
+}
+function esc(s){ return String(s).replace(/[&<>"]/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+// ---------- 详情面板 ----------
+const panel = document.getElementById("panel");
+const panelBody = document.getElementById("panelBody");
+document.getElementById("close").onclick = () => panel.classList.remove("open");
+function selectNode(n){
+  const out = edges.filter(e => e.source === n.id);
+  const inc = edges.filter(e => e.target === n.id);
+  const rel = [];
+  out.forEach(e => rel.push({n: byId[e.target], k: "出·" + (e.kind==="struct"?"结构":"引用")}));
+  inc.forEach(e => rel.push({n: byId[e.source], k: "入·" + (e.kind==="struct"?"结构":"引用")}));
+  panelBody.innerHTML =
+    `<h2>${esc(n.title)}</h2>` +
+    `<div class="row"><span class="badge">${esc(n.type)}</span>` +
+    `<span class="badge" style="background:${catColor[n.category]}22;color:${catColor[n.category]}">${esc(n.category)}</span></div>` +
+    (n.tags.length ? `<div class="tags">${n.tags.map(t=>`<span>${esc(t)}</span>`).join("")}</div>` : "") +
+    (n.summary ? `<div class="summary">${esc(n.summary)}</div>` : "") +
+    `<div class="row">出度 ${out.length} · 入度 ${inc.length} · 总连接 ${n.deg}</div>` +
+    `<h3>关联条目（${rel.length}）</h3>` +
+    rel.map((r,i) => `<div class="rel" data-id="${esc(r.n.id)}">${esc(r.n.title)}<span class="k">${r.k}</span></div>`).join("");
+  panelBody.querySelectorAll(".rel").forEach(el =>
+    el.onclick = () => selectNode(byId[el.dataset.id]));
+  panel.classList.add("open");
+}
+
+// ---------- 图例 ----------
+const legend = document.getElementById("legend");
+const catState = {};
+DATA.categories.forEach(c => {
+  if (!nodes.some(n => n.category === c)) return;
+  catState[c] = true;
+  const d = document.createElement("div");
+  d.className = "item"; d.dataset.cat = c;
+  d.innerHTML = `<span class="dot" style="background:${catColor[c]}"></span>` +
+    `<span>${esc(c)}（${nodes.filter(n=>n.category===c).length}）</span>`;
+  d.onclick = () => {
+    catState[c] = !catState[c];
+    d.classList.toggle("off", !catState[c]);
+    applyFilters();
+  };
+  legend.appendChild(d);
+});
+const hint = document.createElement("div");
+hint.className = "hint"; hint.textContent = "点击图例高亮/淡化类目";
+legend.appendChild(hint);
+
+// ---------- 搜索 + 过滤 ----------
+let query = "";
+document.getElementById("search").addEventListener("input", ev => {
+  query = ev.target.value.trim().toLowerCase();
+  applyFilters();
+});
+function applyFilters(){
+  const visible = {};
+  nodes.forEach(n => {
+    let v = catState[n.category] !== false;
+    if (v && query) {
+      v = n.title.toLowerCase().includes(query) ||
+          n.tags.some(t => t.toLowerCase().includes(query)) ||
+          (n.summary || "").toLowerCase().includes(query);
+    }
+    visible[n.id] = v;
+    nodeEls[n.id].classList.toggle("dim", !v);
+    const t = labelEls[n.id];
+    if (t) t.classList.toggle("dim", !v);
+  });
+  edges.forEach((e,i) =>
+    edgeEls[i].classList.toggle("dim", !(visible[e.source] && visible[e.target])));
+}
+</script>
+</body>
+</html>
