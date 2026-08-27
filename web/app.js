@@ -2882,6 +2882,27 @@ function gFrame(){
   gV.raf = requestAnimationFrame(gFrame);
 }
 
+/* 首布局：随机布点 + 900 tick 预跑 + fitView（gInitGraph 首建与 RO 零尺寸兜底共用） */
+function gFirstLayout(){
+  gV.nodes.forEach(n => {
+    n.x = gV.W/2 + (gV.rand()-0.5) * Math.min(gV.W,900);
+    n.y = gV.H/2 + (gV.rand()-0.5) * Math.min(gV.H,600);
+  });
+  gLayoutFoci();
+  // 先同步预跑收敛（初 Speed 快后衰减由 alpha 控制），不依赖 rAF 帧数
+  for (let i = 0; i < 900; i++) gTick();
+  // 自动适配视图：让整图居中且留边（分层模式只对可见集取景，未展开叶子不参与）
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  gVisibleNodes().forEach(n => { x0=Math.min(x0,n.x); y0=Math.min(y0,n.y);
+    x1=Math.max(x1,n.x); y1=Math.max(y1,n.y); });
+  const bw = Math.max(x1-x0,1), bh = Math.max(y1-y0,1);
+  const k = Math.max(0.25, Math.min(1.5, Math.min((gV.W-160)/bw, (gV.H-120)/bh)));
+  gV.view.k = k;
+  gV.view.x = (gV.W - bw*k)/2 - x0*k;
+  gV.view.y = (gV.H - bh*k)/2 - y0*k;
+  gV.laidOut = true;
+}
+
 /* 按 gV 重建舞台 DOM（renderGraph 整页重建后调用）：建 svg 三层 + 元素；
    首建（!laidOut）随机布点 + 预跑 900 tick + fitView，复建只 gRender()+gApplyView() 不丢布局 */
 function gInitGraph(stage){
@@ -2936,25 +2957,7 @@ function gInitGraph(stage){
   });
 
   gV.W = stage.clientWidth; gV.H = stage.clientHeight;
-  if(!gV.laidOut){
-    gV.nodes.forEach(n => {
-      n.x = gV.W/2 + (gV.rand()-0.5) * Math.min(gV.W,900);
-      n.y = gV.H/2 + (gV.rand()-0.5) * Math.min(gV.H,600);
-    });
-    gLayoutFoci();
-    // 先同步预跑收敛（初 Speed 快后衰减由 alpha 控制），不依赖 rAF 帧数
-    for (let i = 0; i < 900; i++) gTick();
-    // 自动适配视图：让整图居中且留边（分层模式只对可见集取景，未展开叶子不参与）
-    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-    gVisibleNodes().forEach(n => { x0=Math.min(x0,n.x); y0=Math.min(y0,n.y);
-      x1=Math.max(x1,n.x); y1=Math.max(y1,n.y); });
-    const bw = Math.max(x1-x0,1), bh = Math.max(y1-y0,1);
-    const k = Math.max(0.25, Math.min(1.5, Math.min((gV.W-160)/bw, (gV.H-120)/bh)));
-    gV.view.k = k;
-    gV.view.x = (gV.W - bw*k)/2 - x0*k;
-    gV.view.y = (gV.H - bh*k)/2 - y0*k;
-    gV.laidOut = true;
-  }
+  if(!gV.laidOut) gFirstLayout();
   gRender(); gApplyView();
 
   /* ---------- 平移 / 缩放 / 拖拽（pointer 事件挂本帧 svg；DOM 重建时随旧元素一并销毁） ---------- */
@@ -3012,7 +3015,12 @@ function gInitGraph(stage){
   gV.ro = new ResizeObserver(()=>{
     if(!gV || gV.svg!==svg) return;   // 旧 observer 滞后回调防串
     gV.W = stage.clientWidth; gV.H = stage.clientHeight;
-    gLayoutFoci();
+    if(!gV.laidOut && gV.W>0 && gV.H>0){
+      // 兜底：init 时 stage 未测到尺寸（正常流程 renderGraph 先挂载不会走到），尺寸就位后补做首布局
+      gFirstLayout(); gRender(); gApplyView();
+    } else {
+      gLayoutFoci();
+    }
   });
   gV.ro.observe(stage);
 
@@ -3186,6 +3194,8 @@ function renderGraph(main){
   }
   wrap.appendChild(bar);
   const stage = el("div","g-stage");
+  wrap.appendChild(stage);
+  main.appendChild(wrap);   // 先挂载再初始化：gInitGraph 要读 stage.clientWidth/clientHeight，detached 时恒为 0
   if(!graphProj){
     const em = el("div","g-empty"); em.textContent = t("gNoProject");
     stage.appendChild(em);
@@ -3241,8 +3251,6 @@ function renderGraph(main){
       gApplyFilters();   // 整页重建后 nodeEls 全新：按 catState/query 重放 dim 状态
     }
   }
-  wrap.appendChild(stage);
-  main.appendChild(wrap);
 }
 
 /* ================= 设置页 ================= */
