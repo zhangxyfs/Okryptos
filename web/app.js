@@ -48,7 +48,7 @@ const I18N = {
     gLoading:"加载中…", gNoProject:"暂无项目",
     gRelTitle:"关联条目（{n}）", gDegRow:"出度 {o} · 入度 {i} · 总连接 {d}",
     gOutStruct:"出·结构", gOutRef:"出·引用", gInStruct:"入·结构", gInRef:"入·引用",
-    gLegendHint:"点击图例高亮/淡化类目", gClosePanel:"关闭面板",
+    gLegendHint:"点击图例高亮/淡化类目", gLegendHintLayer:"点击图例展开/收起类目", gClosePanel:"关闭面板",
     treeCaption:"知识条目", filter:"过滤条目… / 命令（/type、/tag）", pickEntry:"← 从树中选择一条知识条目",
     evoSegHint:"演进历程尚未拆分版本段子条目——对 agent 说「更新 wiki」即可按新结构迁移（索引 + 版本段），老内容不会丢。",
     modified:"修改于",
@@ -190,7 +190,7 @@ const I18N = {
     gLoading:"Loading…", gNoProject:"No project",
     gRelTitle:"Related entries ({n})", gDegRow:"Out {o} · In {i} · Total {d}",
     gOutStruct:"out·struct", gOutRef:"out·ref", gInStruct:"in·struct", gInRef:"in·ref",
-    gLegendHint:"Click a legend item to highlight/dim its category", gClosePanel:"Close panel",
+    gLegendHint:"Click a legend item to highlight/dim its category", gLegendHintLayer:"Click legend to expand/collapse", gClosePanel:"Close panel",
     treeCaption:"Entries", filter:"Filter entries… / commands (/type, /tag)", pickEntry:"← Select an entry from the tree",
     evoSegHint:"No version-segment sub-entries yet — ask your agent to \"update wiki\" to migrate to the new structure (index + segments). Existing content is preserved.",
     modified:"Modified",
@@ -3230,7 +3230,7 @@ function renderGraph(main){
         };
         legend.appendChild(d);
       });
-      const hint = el("div","hint"); hint.textContent = t("gLegendHint");
+      const hint = el("div","hint"); hint.textContent = t(gV.layered ? "gLegendHintLayer" : "gLegendHint");
       legend.appendChild(hint);
       stage.appendChild(legend);
       gApplyFilters();   // 整页重建后 nodeEls 全新：按 catState/query 重放 dim 状态
