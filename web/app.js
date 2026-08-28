@@ -2735,6 +2735,12 @@ function graphReset(proj){
     panel:null, panelBody:null,               // 详情面板 DOM（renderGraph 建，随整页重建替换）
     catState:{}, query:"",                    // 图例类目开关 / 搜索词：过滤状态要扛整页重建，放 gV
     W:0, H:0, cats:[], anchors:[], anchorOf:{}, laidOut:false, // laidOut：已预跑+fitView，DOM 重建只按坐标重画
+    // 收敛重取景（armed→lerp→done 状态机，本 gV 生命周期只触发一次；graphReset 随 gV 重建重置）：
+    // refitQuiet=连续静帧计数；refitLast=帧首差分基线 {id:[x,y]} 与 refitT0=展示档起点墙钟
+    // （均 gFirstLayout 末初始化）；refitFrom/To/T=lerp 起讫与帧序；
+    // viewTouched=用户拖/平移/滚轮过（gTouchView 置位，放弃自动重取景）
+    refitStage:"armed", refitQuiet:0, refitLast:null, refitT0:0, refitFrom:null, refitTo:null, refitT:0,
+    viewTouched:false,
     rand: mulberry32(42),              // 种子定死：同数据重进布局可复现
   };
   gV.cats = (d.categories && d.categories.length ? d.categories
@@ -2794,11 +2800,41 @@ const SPEED_SCALE = 0.5;   // 展示档积分速度缩放（原型阻尼 0.82 �
 const DRIFT_AMP = 2.0;     // 微漂移轨道幅值（px）
 const DRIFT_F1 = 0.031;    // 微漂移 x 向正弦频率（rad/帧；周期 ≈3.4s@60fps）
 const DRIFT_F2 = 0.047;    // 微漂移 y 向余弦频率（与 x 异频，合成轨迹是有界利萨如慢漂而非往返线段）
+/* 收敛重取景（2026-08-28 破墙选项 a：fitView 按预跑末大 bbox 取景偏小、展示期收缩吃掉覆盖率——
+   密度报告实测 91 库覆盖仅 ~30%）：展示档收敛后按当前坐标重跑 fitView 一次（k 上限 3.0 不变）。
+   判据取先到者：连续 REFIT_QUIET 帧全节点基座单帧位移 <REFIT_EPS，或展示档满 REFIT_WAIT_MS。
+   差分必须测帧首撤漂移后的基座坐标——微漂移层单帧 ~0.09px 会淹没 0.05 判据。
+   兜底时长依据（离线仿真收缩轨迹，重取景报告附图）：91 库展示档 bbox 前 ~11s 收缩 25%
+   （maxD 峰值 0.17 远超 EPS，quiet 在 ~14s 前不可达），其后才稳定——~3s 档会按未稳态 bbox
+   把 k 算小（实测仅 +8%），故兜底取 12s 让取景落在稳态上（验收 ≥40% 的物理前提） */
+const REFIT_QUIET = 90;    // 收敛判据：连续静帧数
+const REFIT_EPS = 0.05;    // 收敛判据：单帧位移阈值（px/帧，基座口径）
+const REFIT_WAIT_MS = 12000;  // 兜底：展示档满 ~12s（≈720 帧@60fps）先到先触发
+const REFIT_LERP = 30;     // 重取景 view 线性过渡帧数（≈0.5s，防瞬跳）
 
 /* 双锚目标点刷新：钉在画布中心左右 ±CENTER_ANCHOR_GAP（gFirstLayout 首布局与 RO resize 共用）。
    anchors 为空（项目无 wiki 目录条目）时自然跳过，布局退化为纯向心+边弹簧 */
 function gLayoutFoci(){
   gV.anchors.forEach(a => { a.tx = gV.W/2 + a.side*CENTER_ANCHOR_GAP; a.ty = gV.H/2; });
+}
+
+/* 按可见集当前坐标算 fitView 目标视图（gFirstLayout 首取景与展示档收敛重取景共用）：
+   整图居中留边；k 钳 [0.25,3.0]（密度调参解锁的上限，小世界 bbox 可放大填空；下钳不变） */
+function gFitViewTarget(){
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  gVisibleNodes().forEach(n => { x0=Math.min(x0,n.x); y0=Math.min(y0,n.y);
+    x1=Math.max(x1,n.x); y1=Math.max(y1,n.y); });
+  const bw = Math.max(x1-x0,1), bh = Math.max(y1-y0,1);
+  const k = Math.max(0.25, Math.min(3.0, Math.min((gV.W-160)/bw, (gV.H-120)/bh)));
+  return { k, x:(gV.W - bw*k)/2 - x0*k, y:(gV.H - bh*k)/2 - y0*k };
+}
+
+/* 用户动过视图/节点布局（拖拽节点、平移、滚轮缩放）统一入口：置 viewTouched，
+   本 gV 生命周期放弃自动重取景；lerp 进行中则就地中止（保持当前插值，用户操作优先）。
+   悬停/点击选中不算（view 与 bbox 均未变） */
+function gTouchView(){
+  gV.viewTouched = true;
+  if (gV.refitStage === "lerp") gV.refitStage = "done";
 }
 
 function gTick(){
@@ -2810,6 +2846,26 @@ function gTick(){
   // 帧首撤上帧微漂移（与帧尾"加"配对）：物理/碰撞全程只见基座坐标，密集碰撞笼吃不到漂移层；
   // 预跑期 driftX/Y 恒 0，本趟天然空转（见 DRIFT_* 常量块注释）
   nodes.forEach(n => { n.x -= n.driftX; n.y -= n.driftY; n.driftX = 0; n.driftY = 0; });
+  // 收敛重取景判据（仅展示帧；此刻坐标=基座，差分即上帧物理+碰撞净位移——微漂移层已撤，
+  // 不会被 ~0.09px/帧的漂移位移淹没 0.05 判据）：连续 REFIT_QUIET 静帧或满 REFIT_WAIT_MS 先到者
+  // 触发一次；viewTouched（用户拖/平移/滚轮过）则置 done 放弃，本 gV 不再自动重取景
+  if (gV.laidOut && gV.refitStage === "armed") {
+    let maxD = 0;
+    nodes.forEach(n => {
+      const p = gV.refitLast[n.id];
+      if (p) { const d = Math.hypot(n.x-p[0], n.y-p[1]); if (d > maxD) maxD = d; }
+      gV.refitLast[n.id] = [n.x, n.y];
+    });
+    gV.refitQuiet = maxD < REFIT_EPS ? gV.refitQuiet + 1 : 0;
+    if (gV.refitQuiet >= REFIT_QUIET || performance.now() - gV.refitT0 >= REFIT_WAIT_MS) {
+      if (gV.viewTouched) { gV.refitStage = "done"; }
+      else {
+        gV.refitFrom = { x:gV.view.x, y:gV.view.y, k:gV.view.k };
+        gV.refitTo = gFitViewTarget();   // 基座坐标取景（漂移层 ±2px 不进 bbox）
+        gV.refitT = 0; gV.refitStage = "lerp";
+      }
+    }
+  }
   gV.alpha *= 0.996;
   const a = Math.max(gV.alpha, 0);   // alpha 地板 0（a3f928a）：斥力/弹簧随 alpha 自由衰减；
                                      // 永动由不随 alpha 衰减的定位力（向心/双锚）与碰撞维持，死区只消收尾微抖
@@ -2885,6 +2941,17 @@ function gTick(){
       n.x += dx; n.y += dy; n.driftX = dx; n.driftY = dy;
     });
   }
+  // 重取景 lerp 推进（REFIT_LERP 帧线性过渡，防瞬跳；每帧 apply 才见得到 view 变化——
+  // 常态下 gApplyView 只在 pan/wheel/取景时调，不在帧循环里）；用户交互中止见 gTouchView
+  if (gV.refitStage === "lerp") {
+    gV.refitT++;
+    const t = Math.min(gV.refitT / REFIT_LERP, 1);
+    gV.view.k = gV.refitFrom.k + (gV.refitTo.k - gV.refitFrom.k) * t;
+    gV.view.x = gV.refitFrom.x + (gV.refitTo.x - gV.refitFrom.x) * t;
+    gV.view.y = gV.refitFrom.y + (gV.refitTo.y - gV.refitFrom.y) * t;
+    gApplyView();
+    if (gV.refitT >= REFIT_LERP) gV.refitStage = "done";
+  }
 }
 
 /* ---------- 视口变换 ---------- */
@@ -2935,16 +3002,14 @@ function gFirstLayout(){
   for (let i = 0; i < 900; i++) gTick();
   gV.maxStep = MAX_STEP; gV.speed = SPEED_SCALE;   // 预跑结束切展示档：慢速漂移
   gVisibleNodes().forEach(n => n.placed = true);   // 预跑收敛过的节点标记已布点（分层展开布点判据）
-  // 自动适配视图：让整图居中且留边（分层模式只对可见集取景，未展开叶子不参与）
-  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-  gVisibleNodes().forEach(n => { x0=Math.min(x0,n.x); y0=Math.min(y0,n.y);
-    x1=Math.max(x1,n.x); y1=Math.max(y1,n.y); });
-  const bw = Math.max(x1-x0,1), bh = Math.max(y1-y0,1);
-  const k = Math.max(0.25, Math.min(3.0, Math.min((gV.W-160)/bw, (gV.H-120)/bh)));   // 密度调参：放大上限 1.5→3.0（小世界 bbox 不再被卡死，可放大填空）
-  gV.view.k = k;
-  gV.view.x = (gV.W - bw*k)/2 - x0*k;
-  gV.view.y = (gV.H - bh*k)/2 - y0*k;
+  // 首取景（与展示档收敛重取景共用 gFitViewTarget；分层模式只对可见集取景，未展开叶子不参与）
+  const fv = gFitViewTarget();
+  gV.view.k = fv.k; gV.view.x = fv.x; gV.view.y = fv.y;
   gV.laidOut = true;
+  // 重取景帧首差分基线与展示档起点墙钟（gTick 判据块逐帧更新基线；预跑坐标即展示档首帧参照）
+  gV.refitLast = {};
+  gV.nodes.forEach(n => { gV.refitLast[n.id] = [n.x, n.y]; });
+  gV.refitT0 = performance.now();
 }
 
 /* 按 gV 重建舞台 DOM（renderGraph 整页重建后调用）：建 svg 三层 + 元素；
@@ -3019,11 +3084,11 @@ function gInitGraph(stage){
   });
   svg.addEventListener("pointermove", ev => {
     if (gV.dragNode) {
-      gV.moved = true;
+      gV.moved = true; gTouchView();   // 拖拽节点=动布局：放弃自动重取景（防覆盖用户摆放）
       const p = gToWorld(ev.clientX, ev.clientY);
       gV.dragNode.x = p.x; gV.dragNode.y = p.y;
     } else if (gV.panning && gV.panStart) {
-      gV.moved = true;
+      gV.moved = true; gTouchView();   // 平移=动 view
       gV.view.x = gV.panStart.vx + ev.clientX - gV.panStart.x;
       gV.view.y = gV.panStart.vy + ev.clientY - gV.panStart.y;
       gApplyView();
@@ -3046,6 +3111,7 @@ function gInitGraph(stage){
   });
   svg.addEventListener("wheel", ev => {
     ev.preventDefault();
+    gTouchView();                      // 滚轮缩放=动 view
     const r = svg.getBoundingClientRect();
     const mx = ev.clientX - r.left, my = ev.clientY - r.top;
     const k2 = Math.max(0.25, Math.min(4, gV.view.k * (ev.deltaY < 0 ? 1.12 : 0.89)));
