@@ -17,12 +17,12 @@
 - 慢速漂移：展示期位移钳 ±1.5px/帧 + 积分速度 ×0.5 档（实施时实测微调）；预跑 900 tick 仍用原速度；**不冻结**——用户明确否决静止。
 - 必须保留：b1718c4 的 refreshGraph 失败分支停 rAF/断 observer（错误分支资源回收，与冻结之争无关）；alpha 地板 0 与速度死区 0.02（a3f928a 已改，不回归）。
 - 既有行为不回归：user-select:none、悬停 fade、分层模式（>400）、R4 双击跳转、sem 边样式（.edge.sem）。
-- a3f928a（前端 sem 样式+冻结）尚未独立评审——Task B 评审时并入核对（sem:150 弹簧、边 class 挂法 kind!=="struct"、冻结回退点）。
+- a3f928a（前端 sem 样式+冻结）尚未独立评审——Task 2 评审时并入核对（sem:150 弹簧、边 class 挂法 kind!=="struct"、冻结回退点）。
 - 提交纪律：工作区有他人 WIP，git add 只收本任务文件/hunk（diff→awk→git apply --cached）。
 
 ---
 
-### Task A: 后端 sem 阈值动态校准
+### Task 1: 后端 sem 阈值动态校准
 
 **Files:**
 - Modify: `internal/gui/graph.go`（sem 通道，:115-150 附近）
@@ -62,7 +62,7 @@ git commit -m "feat(gui): 图谱 sem 阈值动态校准——目标平均度≈1
 
 ---
 
-### Task B: 前端中心双锚布局 + 慢速漂移
+### Task 2: 前端中心双锚布局 + 慢速漂移
 
 **Files:**
 - Modify: `web/app.js`（图谱页区段：gLayoutFoci :2784-2788、gTick :2799+、gFrame :2847 附近、gInitGraph :2892+、graphReset；均以锚点为准，行号可能漂移）
@@ -105,14 +105,14 @@ git commit -m "feat(gui): 图谱中心双锚辐射布局——删类目焦点环
 
 ---
 
-### Task C: 收口——a3f928a 复审、文档、知识库、测试包
+### Task 3: 收口——a3f928a 复审、文档、知识库、测试包
 
 **Files:**
 - Modify: `docs/2026-08-27-gui-graph-page-requirements.md`（验收记录追加改版段）
 - Modify: `docs/changelogs/2.22.3.md`（图谱条目补改版口径，只收自己 hunk）
 - 知识库《GUI 图谱页》（ok add --force，控制器执行或指导）
 
-- [ ] **Step 1: a3f928a 并入复审**——确认 sem:150/边 class 挂法/alpha 地板/死区在 Task B 回退冻结后仍正确（评审在 Task B 评审中已完成则只记录结论）。
+- [ ] **Step 1: a3f928a 并入复审**——确认 sem:150/边 class 挂法/alpha 地板/死区在 Task B 回退冻结后仍正确（评审在 Task 2 评审中已完成则只记录结论）。
 - [ ] **Step 2: 全量验证** `go test ./internal/gui/ -count=1` 绿、`node --check` 过、`go build ./...` 过。
 - [ ] **Step 3: 文档**：需求文档验收记录追加（改版三项 + CDP 数据）；changelog 图谱条目补"中心辐射布局/语义边动态阈值/慢速漂移"口径（他人 hunk 不碰）。
 - [ ] **Step 4: Commit**
@@ -126,6 +126,6 @@ git commit -m "docs: 图谱中心辐射改版验收记录 + changelog"
 
 ## Self-Review 记录
 
-- Spec 覆盖：动态阈值→Task A；中心双锚+慢速漂移→Task B；收口（复审/文档/wiki/测试包）→Task C。
-- 命名一致性：semThreshold/CENTER_ANCHOR_GAP/MAX_STEP/SPEED_SCALE 仅 Task A/B 内部，无跨任务依赖。
+- Spec 覆盖：动态阈值→Task 1；中心双锚+慢速漂移→Task 2；收口（复审/文档/wiki/测试包）→Task 3。
+- 命名一致性：semThreshold/CENTER_ANCHOR_GAP/MAX_STEP/SPEED_SCALE 仅 Task 1/2 内部，无跨任务依赖。
 - 已知取舍：冻结回退是用户明确裁决（不要静止）；b1718c4 错误分支回收与冻结无关须保留；无双锚项目退化为向心+边弹簧（合理形态）；CLUSTER 删除后纯孤立节点靠斥力+向心平衡在外围（用户认可"没关系就靠边"）。
