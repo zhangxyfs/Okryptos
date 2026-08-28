@@ -428,8 +428,10 @@ body.tree-resizing { cursor:col-resize; user-select:none; }
 .pcard .pdesc { color:var(--muted); font-size:12.5px; margin-bottom:12px; }
 .prow { display:flex; align-items:center; gap:10px; margin:8px 0; flex-wrap:wrap; }
 .prow .k { width:140px; color:var(--muted); font-size:13px; flex:none; }
+.prow .muted { color:var(--muted); font-size:13px; flex:none; }
 .pinput, .pselect { padding:5px 10px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--fg); font-size:13px; }
 .pinput:focus, .pselect:focus { outline:none; border-color:var(--primary); }
+.pinput:disabled { opacity:.55; cursor:not-allowed; }
 .pfoot { margin-top:12px; display:flex; align-items:center; gap:10px; }
 /* 反馈小字：设置卡页脚与其他页卡右端共用（.pfoot .fb2 为同一规则的历史写法，保留兼容） */
 .fb2, .pfoot .fb2 { font-size:12px; color:var(--ok); }

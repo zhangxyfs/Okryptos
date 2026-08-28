@@ -102,8 +102,10 @@ const I18N = {
     cTitle:"跨轮注入冷却", cDesc:"同会话内已注入的检索条目冷却 N 个 prompt 轮不再注入（门控轮也计）；0 = 关闭（每轮都可注入）；全局生效（对所有项目生效）", cTurns:"冷却轮数",
     rTitle:"规则配置（强制检查）", rDesc:"AI 改动命中 code globs 的文件时，回合结束校验 changelog 是否同步更新；全局生效（对所有项目生效）",
     rType:"类型", rGlobs:"code globs", rCl:"changelog glob", rMsg:"提示语", rAdd:"+ 添加规则",
+    rGlobsPh:"**/*.go, web/**（什么算改代码）", rClPh:"docs/changelogs/**（什么算写日志）", rMsgPh:"阻断时发给 AI 的提示语",
+    rHint:"判定：本会话碰过的文件命中 code globs 且未命中 changelog glob → 回合结束阻断并发出提示语；同会话同规则只阻断一次。",
     capTitle:"经验沉淀", capDesc:"propose = AI 提议草稿、人批准后入库；auto = 按轮次间隔自动提取；全局生效（对所有项目生效）",
-    capMode:"模式", capPropose:"propose（人批准）", capAuto:"auto（自动提取）", capInterval:"轮次间隔",
+    capPropose:"propose（人批准）", capAuto:"auto（自动提取）", capInterval:"轮次间隔",
     lgSemantic:"◆ 语义", lgFilter:"过滤日志…", lgAuto:"自动刷新", lgBackLatest:"↓ 回到最新",
     lgMeta:"共 {n} 行 · 显示 {m} 行", lgEmpty:"（无匹配日志）",
     xExport:"数据导出", xExportDesc:"导出 registry 与条目（不含索引，导入时自动重建）",
@@ -244,8 +246,10 @@ const I18N = {
     cTitle:"Cross-turn injection cooldown", cDesc:"Retrieved entries already injected in this session cool down for N prompt turns (gate turns count too); 0 = off; applies globally to all projects", cTurns:"Cooldown turns",
     rTitle:"Rules (enforce checks)", rDesc:"When AI edits files matching code globs, session end verifies the changelog was updated; applies globally to all projects",
     rType:"Type", rGlobs:"code globs", rCl:"changelog glob", rMsg:"Message", rAdd:"+ Add rule",
+    rGlobsPh:"**/*.go, web/** (counts as code change)", rClPh:"docs/changelogs/** (counts as changelog)", rMsgPh:"Message sent to AI on block",
+    rHint:"Rule: files touched this session match code globs but none matches changelog glob → block at session end with the message; each rule blocks at most once per session.",
     capTitle:"Experience capture", capDesc:"propose = AI drafts, human approves; auto = extract every N turns; applies globally to all projects",
-    capMode:"Mode", capPropose:"propose (human-approved)", capAuto:"auto (automatic)", capInterval:"Turn interval",
+    capPropose:"propose (human-approved)", capAuto:"auto (automatic)", capInterval:"Turn interval",
     lgSemantic:"◆ Semantic", lgFilter:"Filter logs…", lgAuto:"Auto-refresh", lgBackLatest:"↓ Back to latest",
     lgMeta:"{n} lines · showing {m}", lgEmpty:"(no matching logs)",
     xExport:"Export data", xExportDesc:"Exports the registry and entries (no index — rebuilt on import).",
@@ -764,8 +768,9 @@ function pnum(val, min, max, commit){
   i.style.width="90px"; i.onchange = ()=>commit(+i.value);
   return i;
 }
-function ptext(val, commit, width){
+function ptext(val, commit, width, ph){
   const i = el("input","pinput"); i.value=val; if(width) i.style.width=width;
+  if(ph) i.placeholder = ph;
   i.onchange = ()=>commit(i.value);   // onchange 提交，避免每键重渲丢焦点
   return i;
 }
@@ -3635,29 +3640,50 @@ function renderPrefs(){
     });
     d.appendChild(card);
   }
-  // 6. 经验沉淀（全局）：保存按钮收进「轮次间隔」行右端；模式+间隔合并判脏
+  // 6. 经验沉淀（全局）：模式用互斥开关组（恒定一开：点已开侧无操作，点另一侧换边），
+  //    每模式一行（propose 上 / auto 下）；轮次间隔+保存隶属 auto 行，非 auto 时禁用
+  //    （原位切 class/disabled，不重渲保焦点）；模式+间隔合并判脏
   if(PREFS.errs.cap){
     d.appendChild(prefsNoteCard(t("capTitle"), t("capDesc"), t("xLoadFail")+PREFS.errs.cap, true));
   } else {
     const b = el("div");
     const origM = PREFS.cap.mode, origI = PREFS.cap.turn_interval;
     const chk = ()=>pDirtyLive("cap", PREFS_D.capMode!==origM || PREFS_D.capInterval!==origI);
-    const modeRow = el("div","prow");
-    modeRow.appendChild(Object.assign(el("span","k"),{textContent:t("capMode")}));
-    [["propose",t("capPropose")],["auto",t("capAuto")]].forEach(([v,label])=>{
-      const lab = el("label","prow"); lab.style.margin="0";
-      const rd = el("input"); rd.type="radio"; rd.name="capmode"; rd.className="radio";
-      rd.checked = PREFS_D.capMode===v;
-      rd.onchange = ()=>{ PREFS_D.capMode=v; chk(); };
-      lab.appendChild(rd); lab.appendChild(document.createTextNode(label));
-      modeRow.appendChild(lab);
-    });
-    b.appendChild(modeRow);
-    const iRow = prow(t("capInterval"), pnumLive(PREFS_D.capInterval,1,100,v=>{
+    const iNum = pnumLive(PREFS_D.capInterval,1,100,v=>{
       PREFS_D.capInterval=v; chk();
-    }));
-    b.appendChild(iRow);
-    const card = pcard("cap", t("capTitle"), t("capDesc"), b, iRow);
+    });
+    iNum.disabled = PREFS_D.capMode!=="auto";
+    const setOn = (sw,on)=>{
+      sw.classList.toggle("on", on);
+      sw.setAttribute("aria-checked", on?"true":"false");
+    };
+    const mkSwitch = v=>{
+      const sw = el("button","switch"+(PREFS_D.capMode===v?" on":""));
+      sw.setAttribute("role","switch");
+      sw.setAttribute("aria-checked", PREFS_D.capMode===v?"true":"false");
+      return sw;
+    };
+    const swP = mkSwitch("propose"), swA = mkSwitch("auto");
+    const flipTo = v=>{
+      if(PREFS_D.capMode===v) return;   // 已开侧点击无操作：互斥组不允许全关
+      PREFS_D.capMode = v;
+      setOn(swP, v==="propose"); setOn(swA, v==="auto");
+      iNum.disabled = v!=="auto";
+      chk();
+    };
+    swP.onclick = ()=>flipTo("propose");
+    swA.onclick = ()=>flipTo("auto");
+    const pRow = el("div","prow");
+    pRow.appendChild(swP);
+    pRow.appendChild(Object.assign(el("span"),{textContent:t("capPropose")}));
+    b.appendChild(pRow);
+    const aRow = el("div","prow");
+    aRow.appendChild(swA);
+    aRow.appendChild(Object.assign(el("span"),{textContent:t("capAuto")}));
+    aRow.appendChild(Object.assign(el("span","muted"),{textContent:t("capInterval")}));
+    aRow.appendChild(iNum);
+    b.appendChild(aRow);
+    const card = pcard("cap", t("capTitle"), t("capDesc"), b, aRow);
     wireSave(card, "cap", ()=>{
       prefsErr.cap = "";
       api("/api/capture", { method:"POST", body:{
@@ -3711,13 +3737,13 @@ function renderPrefs(){
       const tr = el("tr");
       const td0 = el("td");
       const sel = el("select","pselect");
-      ["changelog"].forEach(o=>{ const op=el("option"); op.value=o; op.textContent=o; sel.appendChild(op); });
+      ["changelog_required"].forEach(o=>{ const op=el("option"); op.value=o; op.textContent=o; sel.appendChild(op); });
       sel.value = rule.type;
       sel.onchange = ()=>{ rule.type=sel.value; pDirtyLive("r", rulesDirty()); };
       td0.appendChild(sel); tr.appendChild(td0);
-      [["globs"],["cl"],["msg"]].forEach(([f])=>{
+      [["globs","rGlobsPh"],["cl","rClPh"],["msg","rMsgPh"]].forEach(([f,ph])=>{
         const td = el("td");
-        td.appendChild(ptext(rule[f], v=>{ rule[f]=v; pDirtyLive("r", rulesDirty()); }));
+        td.appendChild(ptext(rule[f], v=>{ rule[f]=v; pDirtyLive("r", rulesDirty()); }, "", t(ph)));
         tr.appendChild(td);
       });
       const tdX = el("td");
@@ -3728,10 +3754,14 @@ function renderPrefs(){
     });
     tb.appendChild(tbBody);
     b.appendChild(tb);
+    const hint = el("div");
+    hint.style.cssText = "color:var(--muted);font-size:12px;margin-top:6px";
+    hint.textContent = t("rHint");
+    b.appendChild(hint);
     const addRow = el("div");
     addRow.style.cssText = "display:flex;align-items:center;margin-top:8px";
     const add = el("button","btn"); add.textContent = t("rAdd");
-    add.onclick = ()=>{ PREFS_D.rules.push({type:"changelog",globs:"",cl:"",msg:""}); prefsDirty.r = true; render(); };
+    add.onclick = ()=>{ PREFS_D.rules.push({type:"changelog_required",globs:"**/*.go",cl:"docs/changelogs/**",msg:"本次会话修改了代码但未更新变更日志，请先按规范补齐。"}); prefsDirty.r = true; render(); };
     addRow.appendChild(add);
     b.appendChild(addRow);
     const card = pcard("r", t("rTitle"), t("rDesc"), b, addRow);
