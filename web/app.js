@@ -2720,12 +2720,13 @@ function graphReset(proj){
   if(!d || !(d.nodes||[]).length) return;
   (d.categories||[]).forEach((c,i)=> catColor[c] = PALETTE[i % PALETTE.length]);
   gV = {
-    // {...n} 拷贝，不污染 GRAPH.data 缓存；placed=已布点（预跑收敛过或展开时已按邻居质心放置）
-    nodes: d.nodes.map(n=>({...n, x:0,y:0,vx:0,vy:0,pinned:false,placed:false})),
+    // {...n} 拷贝，不污染 GRAPH.data 缓存；placed=已布点（预跑收敛过或展开时已按邻居质心放置）；
+    // driftPhase=展示期微漂移除相位（按节点下标黄金角散开，同数据稳定复现）
+    nodes: d.nodes.map((n,i)=>({...n, x:0,y:0,vx:0,vy:0,pinned:false,placed:false, driftPhase:i*2.399963, driftX:0, driftY:0})),
     edges: d.edges||[], byId:{}, adj:{},
     nodeEls:{}, labelEls:{}, edgeEls:[],
     view:{x:0,y:0,k:1}, alpha:1,
-    maxStep:12, speed:1,               // 预跑档原速（位移钳 12）；gFirstLayout 预跑结束切展示档 MAX_STEP/SPEED_SCALE
+    maxStep:12, speed:1, tickCount:0,   // 预跑档原速（位移钳 12）；gFirstLayout 预跑结束切展示档 MAX_STEP/SPEED_SCALE；tickCount=展示期帧计数（预跑不计）
     dragNode:null, panning:false, panStart:null, moved:false,
     layered:(d.nodes||[]).length > LAYER_THRESHOLD,  // Task 5：>400 条目自动分层（骨架常显+类目下钻）
     expanded:new Set(),                // 分层模式已展开类目（Set<category>）；全量模式恒空
@@ -2782,6 +2783,15 @@ const CENTER_ANCHOR_GAP = 120;  // 中心双锚距画布中心的水平偏移（
 const ANCHOR_K = 0.01;     // 双锚回中力系数（定位力不随 alpha 衰减；节点可拖走，松手缓慢归位）
 const MAX_STEP = 1.5;      // 展示档单帧位移钳（px/帧）——慢速漂移可点击；预跑档仍 12 快速收敛
 const SPEED_SCALE = 0.5;   // 展示档积分速度缩放（原型阻尼 0.82 后再乘）；预跑档为 1 原速
+/* 展示期微漂移（用户明确要节点持续缓慢移动）：alpha 地板 0 下残余力被 0.02 死区清零、速度通道
+   必然近静止，故与碰撞 pass 同性质在 gTick 直改位置（绕过速度死区与位移钳是有意的，逐帧位移
+   ≤0.12 ≪ MAX_STEP）。形态是"帧首撤、帧尾加"的可撤漂移层而非累积进坐标：密集碰撞笼会逐帧吸收
+   累积位移（探针实测累积版 t=100s 全库均值被吃至 0.012px/帧、笼芯节点仅 12% 透传、视觉近静止
+   复现），可撤层让物理/碰撞只见基座坐标、漂移零吸收。逐帧速率 = AMP×F ≈ 0.06-0.09px/帧（钉死
+   0.05-0.1 档）；轨道半径 2px ≪ 节点间距（≥24px），点击/悬停按渲染后 DOM 命中不受影响 */
+const DRIFT_AMP = 2.0;     // 微漂移轨道幅值（px）
+const DRIFT_F1 = 0.031;    // 微漂移 x 向正弦频率（rad/帧；周期 ≈3.4s@60fps）
+const DRIFT_F2 = 0.047;    // 微漂移 y 向余弦频率（与 x 异频，合成轨迹是有界利萨如慢漂而非往返线段）
 
 /* 双锚目标点刷新：钉在画布中心左右 ±CENTER_ANCHOR_GAP（gFirstLayout 首布局与 RO resize 共用）。
    anchors 为空（项目无 wiki 目录条目）时自然跳过，布局退化为纯向心+边弹簧 */
@@ -2795,6 +2805,9 @@ function gTick(){
   const nodes = gVisibleNodes();   // 分层模式只模拟可见集（叶子不参与物理）；全量模式 = gV.nodes
   const vis = {};                  // 可见 id 集（与 nodes 同趟构建），弹簧端点不可见时跳过
   nodes.forEach(n => vis[n.id] = true);
+  // 帧首撤上帧微漂移（与帧尾"加"配对）：物理/碰撞全程只见基座坐标，密集碰撞笼吃不到漂移层；
+  // 预跑期 driftX/Y 恒 0，本趟天然空转（见 DRIFT_* 常量块注释）
+  nodes.forEach(n => { n.x -= n.driftX; n.y -= n.driftY; n.driftX = 0; n.driftY = 0; });
   gV.alpha *= 0.996;
   const a = Math.max(gV.alpha, 0);   // alpha 地板 0（a3f928a）：斥力/弹簧随 alpha 自由衰减；
                                      // 永动由不随 alpha 衰减的定位力（向心/双锚）与碰撞维持，死区只消收尾微抖
@@ -2853,6 +2866,22 @@ function gTick(){
         if (!B.pinned) { B.x += dx*push; B.y += dy*push; }
       }
     }
+  }
+  // 展示期微漂移（仅 gV.laidOut 后的展示帧施加——gFirstLayout 预跑 900 tick 不施加、tickCount 不计）：
+  // 与碰撞 pass 同性质直改位置（绕过速度死区与位移钳是有意的，见 DRIFT_* 常量块注释）；每节点定相位
+  // 正弦项，本帧所加记进 driftX/driftY，下一 tick 帧首原值撤销——物理/碰撞只见基座坐标，漂移不被
+  // 密集碰撞笼吸收；渲染在 gTick 之后（gFrame），用户所见 = 基座 + 漂移层。
+  // pinned（拖拽中）跳过：帧首已撤旧值且不再加新值，拖拽全程指针精确跟手；
+  // 双锚照常参与——漂移叠加在回中力之上，松手仍缓慢回中，不冲突
+  if (gV.laidOut) {
+    gV.tickCount++;
+    const t = gV.tickCount;
+    nodes.forEach(n => {
+      if (n.pinned) return;
+      const dx = Math.sin(t*DRIFT_F1 + n.driftPhase) * DRIFT_AMP;
+      const dy = Math.cos(t*DRIFT_F2 + n.driftPhase) * DRIFT_AMP;
+      n.x += dx; n.y += dy; n.driftX = dx; n.driftY = dy;
+    });
   }
 }
 
