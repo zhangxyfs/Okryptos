@@ -151,7 +151,8 @@ func logTruncation(event string) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法: ok [gui] <setup|init|add|propose|approve|backfill-born|capture|wiki|search|index|archive|list|doctor|on|off|hook> ...")
+	fmt.Fprintln(os.Stderr, "用法: ok [gui] <setup|init|add|propose|sync|approve|backfill-born|capture|wiki|search|index|archive|list|doctor|on|off|hook> ...")
+	fmt.Fprintln(os.Stderr, "  sync [init [remote-url]]  项目知识库多端同步")
 	fmt.Fprintln(os.Stderr, "  archive [--undo] <文件.md...>  归档/取消归档条目（不进 INDEX，仍可检索）")
 }
 

@@ -38,10 +38,12 @@ func (e *ExitError) Error() string {
 
 // execGit 执行 git -C dir <args>，返回合并输出。错误三分类：
 // ErrGitNotFound / ErrTimeout / *ExitError。
+// core.quotepath=false：路径按原始字节输出——默认 quotepath 会把非 ASCII 路径
+// 转八进制转义（中文条目名变成 \345\206\262...），冲突文件列表将不可展示/不可用。
 func execGit(dir string, timeout time.Duration, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.quotepath=false"}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	procx.HideWindow(cmd)
 	out, err := cmd.CombinedOutput()

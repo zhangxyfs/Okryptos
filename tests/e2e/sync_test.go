@@ -169,6 +169,9 @@ func TestSyncConflict(t *testing.T) {
 	if err := json.Unmarshal(data, &cf); err != nil || len(cf.Files) == 0 {
 		t.Fatalf("conflict json: %v %s", err, data)
 	}
+	if !strings.Contains(strings.Join(cf.Files, ","), "冲突条目") {
+		t.Fatalf("conflict files 应含冲突条目文件: %v", cf.Files)
+	}
 	// 内容不丢：B 的改动仍在工作区（冲突标记内）
 	kdir := filepath.Join(homeB, "projects", "demo", "knowledge")
 	entries, _ := os.ReadDir(kdir)
