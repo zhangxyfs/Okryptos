@@ -141,6 +141,8 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 	}
 	defer sidecarMgr.Stop()
 	go sidecarJanitor(sidecarMgr)
+	// 同步 ticker：每分钟检查一轮，启用同步且到点的项目跑 SyncOnce（失败仅记日志）
+	startSyncJanitor(stdout)
 	fmt.Fprintf(stdout, "OpenKnowledge daemon: %s\n", info.URL())
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintln(stderr, err)
