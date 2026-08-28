@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="OpenKnowledge">
   <!-- 方案 B 书形 mark 小尺寸加粗变体（16/32 用）：白色圆角外框 + 加粗镂空笔画 -->
   <rect x="2" y="2" width="92" height="92" rx="20" fill="#FFFFFF" stroke="#E5E7EB" stroke-width="3"/>
-  <g transform="translate(7.7,13.4) scale(0.72)">
+  <g transform="translate(-3.5,4.1) scale(0.92)">
     <path d="M54 22 Q20 14 14 26 L14 70 Q20 82 54 74 Z" fill="#2B6CEE"/>
     <circle cx="34" cy="48" r="12" fill="none" stroke="#FFFFFF" stroke-width="9"/>
     <path d="M58 22 Q92 14 98 26 L98 70 Q92 82 58 74 Z" fill="#1F2937"/>

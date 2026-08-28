@@ -11,3 +11,4 @@ cmd/ok/*.syso
 .mimosa/
 /docs/2026-08-19-vikingmem-paper.md
 __pycache__/
+/docs/prototypes/
