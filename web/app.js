@@ -2773,12 +2773,14 @@ function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;
   let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;
   return((t^t>>>14)>>>0)/4294967296;}}
 
-/* 力导向物理参数（原型逐字沿用；radial 改版删类目焦点环聚拢力，新增双锚与展示档限速四常量） */
+/* 力导向物理参数（原型为底；radial 改版删类目焦点环聚拢力，新增双锚与展示档限速四常量；
+   2026-08-28 密度调参：真实库 91 节点收敛成 ~400px 紧球（stage 覆盖仅 ~26%）、小球难点击、
+   标签互叠——弹簧原长/碰撞间距加大 + 向心减弱稀疏化，fitView 放大上限 1.5→3.0 配套填空） */
 const REP = 9000;          // 斥力强度
 const REP_CUT = 320;       // 斥力截断距离（跨簇不互斥）
-const LEN = {struct: 110, ref: 170, sem: 150};  // 弹簧原长（sem=语义相似边；缺 kind 会 NaN 崩物理，新增边型必须登记）
+const LEN = {struct: 140, ref: 210, sem: 210};  // 弹簧原长（sem=语义相似边；缺 kind 会 NaN 崩物理，新增边型必须登记）
 const SPRING = 0.014;
-const GRAV = 0.004;        // 向心力
+const GRAV = 0.0019;       // 向心力（密度调参：0.004 档把全库压成紧球；0.0019 档让压缩前置到预跑期、fitView 取景贴合稳态——alpha 地板 0 下弹簧/斥力展示期消亡，稳态=碰撞笼 vs 向心，GRAV 过小则收缩拖进展示期、完全收敛口径反而更小）
 const CENTER_ANCHOR_GAP = 120;  // 中心双锚距画布中心的水平偏移（架构总览在左 / 演进历程在右）
 const ANCHOR_K = 0.01;     // 双锚回中力系数（定位力不随 alpha 衰减；节点可拖走，松手缓慢归位）
 const MAX_STEP = 1.5;      // 展示档单帧位移钳（px/帧）——慢速漂移可点击；预跑档仍 12 快速收敛
@@ -2858,7 +2860,7 @@ function gTick(){
     for (let j=i+1;j<nodes.length;j++) {
       const B = nodes[j];
       const dx = B.x-A.x, dy = B.y-A.y;
-      const min = gRadius(A)+gRadius(B)+10;
+      const min = gRadius(A)+gRadius(B)+20;   // 碰撞间距（密度调参 +10→+20：稳态=碰撞笼，笼直径的最大杠杆；节点间留标签/点击空隙）
       const d2 = dx*dx+dy*dy;
       if (d2 > 0 && d2 < min*min) {
         const d = Math.sqrt(d2), push = (min-d)/2/d;
@@ -2938,7 +2940,7 @@ function gFirstLayout(){
   gVisibleNodes().forEach(n => { x0=Math.min(x0,n.x); y0=Math.min(y0,n.y);
     x1=Math.max(x1,n.x); y1=Math.max(y1,n.y); });
   const bw = Math.max(x1-x0,1), bh = Math.max(y1-y0,1);
-  const k = Math.max(0.25, Math.min(1.5, Math.min((gV.W-160)/bw, (gV.H-120)/bh)));
+  const k = Math.max(0.25, Math.min(3.0, Math.min((gV.W-160)/bw, (gV.H-120)/bh)));   // 密度调参：放大上限 1.5→3.0（小世界 bbox 不再被卡死，可放大填空）
   gV.view.k = k;
   gV.view.x = (gV.W - bw*k)/2 - x0*k;
   gV.view.y = (gV.H - bh*k)/2 - y0*k;
