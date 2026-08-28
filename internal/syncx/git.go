@@ -1,7 +1,7 @@
 // Package syncx 在项目数据目录里执行 git：个人多端同步的单机引擎。
 // 叶子包——仅依赖 fsx（原子写状态），不依赖其他 internal 包。
 // 纪律（设计文档 §4）：参数数组调系统 git，不走 shell；网络操作给足超时；
-// GIT_TERMINAL_PROMPT=0 防凭据提示挂起。
+// GIT_TERMINAL_PROMPT=0 防凭据提示挂起；LC_ALL=C 固定 locale，防本地化输出影响解析。
 package syncx
 
 import (
@@ -42,7 +42,7 @@ func execGit(dir string, timeout time.Duration, args ...string) (string, error) 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	procx.HideWindow(cmd)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
