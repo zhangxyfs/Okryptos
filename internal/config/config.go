@@ -257,6 +257,13 @@ type Provenance struct {
 	AutoBorn bool `toml:"auto_born"` // 默认 true（见 Default）
 }
 
+// Sync 是项目级 [sync] 段（设计文档 §12）。
+type Sync struct {
+	Enabled         bool   `toml:"enabled"`
+	Remote          string `toml:"remote"`
+	AutoIntervalMin int    `toml:"auto_interval_min"`
+}
+
 type Config struct {
 	Embedding  Embedding     `toml:"embedding"`
 	Inject     Inject        `toml:"inject"`
@@ -269,6 +276,9 @@ type Config struct {
 	Provenance Provenance    `toml:"provenance"`
 	Index      Index         `toml:"index"`
 	LLM        LLM           `toml:"llm"`
+	// Sync 同步配置。内部即按 personal 层建模——团队版演进为
+	// [sync.personal]+[sync.team] 时本结构平移到层下（设计文档 §13 口子 1）。
+	Sync Sync `toml:"sync"`
 }
 
 func Default() Config {
@@ -286,6 +296,7 @@ func Default() Config {
 		Hooks:      Hooks{TimeoutSec: 10},
 		Provenance: Provenance{AutoBorn: true},
 		Index:      Index{MaxLines: 50},
+		Sync:       Sync{Enabled: false, Remote: "", AutoIntervalMin: 5},
 	}
 }
 
@@ -442,4 +453,52 @@ func setEnforceRulesLocked(path, block string) error {
 		}
 	}
 	return fsx.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+}
+
+// SetSync 行级更新 path 的 [sync] 段（enabled/remote/auto_interval_min 三行），
+// 保留文件其余内容；照 SetEnforceRules 的读-改-写先例，fsx 锁内完成。
+func SetSync(path string, s Sync) error {
+	return fsx.WithFileLock(path, func() error {
+		data, _ := os.ReadFile(path)
+		lines := strings.Split(string(data), "\n")
+		var out []string
+		inSync := false
+		wrote := false
+		section := []string{
+			"[sync]",
+			fmt.Sprintf("enabled = %t", s.Enabled),
+		}
+		if s.Remote != "" {
+			section = append(section, fmt.Sprintf("remote = %q", s.Remote))
+		}
+		section = append(section, fmt.Sprintf("auto_interval_min = %d", s.AutoIntervalMin))
+		for _, line := range lines {
+			trim := strings.TrimSpace(line)
+			if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
+				if inSync && !wrote {
+					out = append(out, section...)
+					wrote = true
+				}
+				inSync = trim == "[sync]"
+				if inSync {
+					continue // 跳过旧 [sync] 段头，由 section 重写
+				}
+			} else if inSync {
+				continue // 丢弃旧 [sync] 段体
+			}
+			out = append(out, line)
+		}
+		if !wrote {
+			if inSync {
+				out = append(out, section...)
+			} else {
+				for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
+					out = out[:len(out)-1]
+				}
+				out = append(out, "")
+				out = append(out, section...)
+			}
+		}
+		return fsx.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+	})
 }

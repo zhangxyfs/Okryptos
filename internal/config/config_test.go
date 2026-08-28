@@ -508,3 +508,59 @@ func TestSetEnforceRules(t *testing.T) {
 		t.Fatalf("append after clear failed: %+v", cfg)
 	}
 }
+
+func TestSyncDefaults(t *testing.T) {
+	cfg := Default()
+	if cfg.Sync.Enabled || cfg.Sync.Remote != "" || cfg.Sync.AutoIntervalMin != 5 {
+		t.Fatalf("defaults: %+v", cfg.Sync)
+	}
+}
+
+func TestSyncMerged(t *testing.T) {
+	dir := t.TempDir()
+	global := filepath.Join(dir, "global.toml")
+	project := filepath.Join(dir, "project.toml")
+	if err := os.WriteFile(global, []byte("[sync]\nenabled = true\nremote = \"http://nas:3000/u/ok-x.git\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte("[sync]\nauto_interval_min = 10\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadMerged(project, global)
+	if err != nil {
+		t.Fatalf("LoadMerged: %v", err)
+	}
+	// 项目未覆盖的字段继承 global；覆盖的字段取项目值
+	if !cfg.Sync.Enabled || cfg.Sync.Remote != "http://nas:3000/u/ok-x.git" || cfg.Sync.AutoIntervalMin != 10 {
+		t.Fatalf("merged: %+v", cfg.Sync)
+	}
+}
+
+func TestSetSync(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("# 注释行\n[retrieve]\ntop_n = 5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSync(path, Sync{Enabled: true, Remote: "http://nas/u/ok-x.git", AutoIntervalMin: 5}); err != nil {
+		t.Fatalf("SetSync: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Sync.Enabled || cfg.Sync.Remote != "http://nas/u/ok-x.git" {
+		t.Fatalf("after SetSync: %+v", cfg.Sync)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "# 注释行") || !strings.Contains(string(data), "[retrieve]") {
+		t.Fatalf("SetSync should preserve other content:\n%s", data)
+	}
+	// 幂等更新：改 remote 不重复追加段
+	if err := SetSync(path, Sync{Enabled: true, Remote: "http://nas/v2/ok-x.git", AutoIntervalMin: 3}); err != nil {
+		t.Fatalf("SetSync update: %v", err)
+	}
+	data, _ = os.ReadFile(path)
+	if strings.Count(string(data), "[sync]") != 1 {
+		t.Fatalf("duplicate [sync] section:\n%s", data)
+	}
+}
