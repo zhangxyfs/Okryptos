@@ -3194,9 +3194,10 @@ function gSelectNode(n){
   panelBody.querySelectorAll(".rel").forEach(el=>{
     el.onclick = ()=>{
       if(!dblClick(gRelClick, el.dataset.id)){
-        // 单击：图内联动——选中对应节点并高亮邻居（不跳页）
+        // 单击：只图内高亮定位（hotNode），不调 gSelectNode——面板一旦重建，
+        // 第二击落点行被换掉，dblClick 永远凑不成对（双击跳转被单击掐死）
         const n2 = gV.byId[el.dataset.id];
-        if(n2){ hotNode(n2); gSelectNode(n2); }
+        if(n2) hotNode(n2);
         return;
       }
       gJumpToManage(el.dataset.id);   // 双击：跳管理页（R4）
