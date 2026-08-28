@@ -3368,7 +3368,8 @@ function renderGraph(main){
         const d = el("div","item"+(on?"":" off"));
         const dot = el("span","dot"); dot.style.background = gCatColor(c);
         const txt = el("span");
-        txt.textContent = c + "（" + gV.nodes.filter(n=>n.category===c).length + "）";
+        txt.textContent = t(CATEGORY_I18N[c] || c) +   // 类目名走管理页同款 i18n（catRule/catPitfall…）
+          (state.lang==="en" ? " (" : "（") + gV.nodes.filter(n=>n.category===c).length + (state.lang==="en" ? ")" : "）");
         d.appendChild(dot); d.appendChild(txt);
         d.onclick = ()=>{
           if(gV.layered){
