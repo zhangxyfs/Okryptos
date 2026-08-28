@@ -120,6 +120,42 @@ func TestSyncConflictStopsPush(t *testing.T) {
 	_, _ = execGit(dirB, localTimeout, "rebase", "--abort")
 }
 
+func TestSyncDuringConflictRefuses(t *testing.T) {
+	_, dirA, dirB := mkPair(t)
+	// A 改同一行并推
+	writeFile(t, dirA, "k.md", "v2a\n")
+	if o := Open(dirA).Sync("sync: a"); o.Err != nil {
+		t.Fatalf("A sync: %v", o.Err)
+	}
+	// B 改同一行并 sync → 冲突，rebase 停半途
+	writeFile(t, dirB, "k.md", "v2b\n")
+	o := Open(dirB).Sync("sync: b")
+	if len(o.Conflicts) == 0 {
+		t.Fatalf("want conflicts: %+v", o)
+	}
+	count := func() string {
+		out, err := execGit(dirB, localTimeout, "rev-list", "--count", "HEAD")
+		if err != nil {
+			t.Fatalf("rev-list: %v", err)
+		}
+		return out
+	}
+	before := count()
+	// 冲突未解决时再 Sync：直接返回未决冲突，不提交、不吞冲突标记
+	o = Open(dirB).Sync("sync: again")
+	if len(o.Conflicts) == 0 {
+		t.Fatalf("want conflicts on re-sync: %+v", o)
+	}
+	if o.Committed {
+		t.Fatalf("must not commit during conflict: %+v", o)
+	}
+	if after := count(); after != before {
+		t.Fatalf("HEAD moved during conflict: %s → %s", before, after)
+	}
+	// 清理
+	_, _ = execGit(dirB, localTimeout, "rebase", "--abort")
+}
+
 func TestSyncOnceSingleFlight(t *testing.T) {
 	_, dirA, _ := mkPair(t)
 	writeFile(t, dirA, "k.md", "v3\n")

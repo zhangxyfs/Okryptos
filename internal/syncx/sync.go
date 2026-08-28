@@ -40,6 +40,15 @@ func (r *Repo) Sync(msg string) (o Outcome) {
 		o.NotRepo = true
 		return o
 	}
+	// rebase 进行中 = 上次冲突未解决：直接报告未决冲突返回，不做任何提交/拉取——
+	// 否则 CommitAll 会把冲突标记 add -A 提交进历史（冲突期应等人解决，设计文档 §7）。
+	if _, err := execGit(r.Dir, localTimeout, "rev-parse", "--verify", "--quiet", "REBASE_HEAD"); err == nil {
+		out, _ := execGit(r.Dir, localTimeout, "diff", "--name-only", "--diff-filter=U")
+		if out != "" {
+			o.Conflicts = strings.Split(out, "\n")
+		}
+		return o
+	}
 	// 有远端时先 fetch：Status 的 behind 读的是本地远程跟踪引用，
 	// 不 fetch 永远看不到别人新推的提交（失败忽略——真网络错误由下面 pull 暴露）。
 	if r.RemoteURL() != "" {
