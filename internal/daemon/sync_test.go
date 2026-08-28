@@ -227,3 +227,32 @@ func TestRunSyncCycleConcurrent(t *testing.T) {
 		t.Fatal("a should have been synced")
 	}
 }
+
+// TestForceSkipsZeroInterval 验证 auto_interval_min=0 在 force（写入防抖）模式同样跳过——
+// 0 = 关闭全部自动触发（终审裁决）。
+func TestForceSkipsZeroInterval(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	bare := t.TempDir()
+	gitExec(t, bare, "init", "--bare", "-b", "main")
+	st := store.New(filepath.Join(home, "projects", "a"))
+	_ = os.MkdirAll(st.KnowledgeDir(), 0o755)
+	_ = os.MkdirAll(st.StateDir(), 0o755)
+	r := syncx.Open(st.Root)
+	_ = r.Init()
+	_, _ = r.CommitAll("init")
+	_ = r.SetRemote(bare)
+	if err := r.Push(); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(st.ConfigPath(), []byte("[sync]\nenabled = true\nremote = \""+filepath.ToSlash(bare)+"\"\nauto_interval_min = 0\n"), 0o644)
+	reg := &registry.Registry{Projects: []registry.Project{{Name: "a", Paths: []string{"/x/a"}}}}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	runSyncCycle(io.Discard, true)
+	if _, err := os.Stat(filepath.Join(st.StateDir(), "sync-status.json")); !os.IsNotExist(err) {
+		t.Fatalf("interval=0 must skip even in force mode: %v", err)
+	}
+}

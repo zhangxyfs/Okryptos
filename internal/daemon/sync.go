@@ -34,7 +34,8 @@ func startSyncJanitor(stdout io.Writer) {
 }
 
 // runSyncCycle 遍历注册项目，对启用同步且到点（或 force）的项目执行一次同步。
-// force=true 跳过 interval 判断（写入防抖触发用，设计文档 §8）。
+// force=true 跳过到点判断（写入防抖触发用，设计文档 §8）；
+// auto_interval_min<=0 在两种模式下都跳过（0 = 关闭全部自动触发）。
 func runSyncCycle(out io.Writer, force bool) {
 	syncCycleMu.Lock()
 	defer syncCycleMu.Unlock()
@@ -53,6 +54,9 @@ func runSyncCycle(out io.Writer, force bool) {
 		}
 		if !cfg.Sync.Enabled {
 			continue
+		}
+		if cfg.Sync.AutoIntervalMin <= 0 {
+			continue // 0 = 关闭全部自动触发（ticker 与写入防抖）
 		}
 		if !force && !syncDue(st, cfg.Sync.AutoIntervalMin) {
 			continue

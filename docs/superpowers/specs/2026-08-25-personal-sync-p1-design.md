@@ -65,7 +65,7 @@ state/
 *.log
 ```
 
-进仓内容：`knowledge/`、`INDEX.md`、wiki 相关文件。**一个项目一个仓**，命名空间两层同构、从第一天就位：
+进仓内容：`knowledge/`、`INDEX.md`、wiki 相关文件、`config.toml`（2026-08-28 终审定案：项目配置随仓分发，全设备一致；设备特定配置属全局配置、不在仓内）。**一个项目一个仓**，命名空间两层同构、从第一天就位：
 
 | 层 | 远端仓 | 权限语义 | 本期状态 |
 |---|---|---|---|
@@ -115,7 +115,7 @@ state/
 
 ## 8. okd auto-sync
 
-- 照 `run.go:96` ticker 模式加同步 ticker：默认 5 分钟（`auto_interval_min` 可配，0 = 关闭），到点对每个已启用同步的项目跑 §7 同逻辑；
+- 照 `run.go:96` ticker 模式加同步 ticker：默认 5 分钟（`auto_interval_min` 可配，**0 = 关闭全部自动触发**——ticker 与写入防抖都关，手动 `ok sync` 不受影响），到点对每个已启用同步的项目跑 §7 同逻辑；
 - **写入后尽快推**：条目写入动作（approve、GUI 编辑等）触发一次 30s 防抖的延迟 sync，把未同步窗口压到分钟级（未同步窗口是本方案唯一的残余丢失面）；
 - 失败仅记日志 + 更新状态文件，绝不影响 hook 注入等本地链路。
 
@@ -397,6 +397,7 @@ token = "***"                # okserver 会话 token，文件权限 0600；不�
 - **自建 okserver 管理面**：用户/组织/仓库/认证/审计，推翻上游"零认证代码"（用户指示，动机 = 团队版免迁移 + 集中管理面，§2）；
 - okserver 定义扩展 = 管理面（本期）+ AI wiki 管线（后期模块并入同进程，§13 口子 5）；
 - 仓命名：个人层 `<user>/ok-<project>`、团队层 `ok-<org>/<project>`，每项目一仓、强制 private（§4）；
+- **项目 config.toml 随仓同步**（2026-08-28 终审定案）：[sync] 与检索调优全设备一致，设备特定配置在全局配置不受影响（§4）；
 - 服务器 = NAS 双容器（okserver + Gitea），Gitea 对终端用户透明（§3、§9）；
 - **仓库目录约定**：Go 代码守 cmd/internal 布局（`cmd/okserver` + `internal/oksrv`），非 Go 部署资产归 `server/nas/`（§9.6）；
 - **发布边界**：okserver 不进任何客户端安装包（iss/build.py/nfpm 三路径显式排除），只经 Docker 镜像 + release 独立二进制分发（§9.6 纪律）；
@@ -428,4 +429,4 @@ token = "***"                # okserver 会话 token，文件权限 0600；不�
 - 审计日志保留期；
 - AI 合并的 LLM 超时阈值（GUI 交互场景，建议 60s 可取消）与 P2 merge driver 场景阈值（建议 30s）；
 - server 档开放时的成本语义提示（谁的服务器谁的 key，成员侧需可见）。
-- INDEX.md 由各消费方按需重建，跨设备 index.max_lines 等配置不一致会产生自冲突（E2E 评审发现）：配置随仓分发是否钉死、或 INDEX.md 也入 .gitignore；
+- ~~INDEX.md 由各消费方按需重建，跨设备配置不一致会产生自冲突~~（2026-08-28 已决：配置随仓分发钉死，不一致只剩手工本地改配置一途，INDEX.md 不入 .gitignore、冲突走正常冲突解决路径）；
