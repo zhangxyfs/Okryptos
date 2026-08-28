@@ -105,12 +105,13 @@ func buildGraph(entries []*entry.Entry, vecs map[string][]float32) graphData {
 			}
 		}
 	}
-	// sem 通道：每条目取余弦 ≥0.75 的前 3 近邻；配对按文件名升序定向（source<target），
-	// A→B 与 B→A 经 add 的 key 去重只留一条。n>2000 跳过（O(n²×dim) 护栏，静默）。
+	// sem 通道：每条目取动态阈值以上的前 3 近邻。top-3 候选与打分在同一趟
+	// O(n²) 循环里收集，再由 semThreshold 按目标密度（平均度≈1）分位反推阈值
+	// 过滤加边。配对按文件名升序定向（source<target），A→B 与 B→A 经 add 的
+	// key 去重只留一条。n>2000 跳过（O(n²×dim) 护栏，静默）。
 	const (
-		semFloor = 0.75
-		semTopK  = 3
-		semMaxN  = 2000
+		semTopK = 3
+		semMaxN = 2000
 	)
 	if n := len(vecs); n > 0 && n <= semMaxN {
 		names := make([]string, 0, n)
@@ -122,15 +123,15 @@ func buildGraph(entries []*entry.Entry, vecs map[string][]float32) graphData {
 			name string
 			cos  float64
 		}
+		tops := make([][]sim, len(names))
+		cands := make([]float64, 0, semTopK*len(names))
 		for i, a := range names {
 			var sims []sim
 			for j, b := range names {
 				if i == j {
 					continue
 				}
-				if cos := embed.Cosine(vecs[a], vecs[b]); cos >= semFloor {
-					sims = append(sims, sim{b, cos})
-				}
+				sims = append(sims, sim{b, embed.Cosine(vecs[a], vecs[b])})
 			}
 			// 相似度降序，并列按文件名升序（确定性）
 			sort.Slice(sims, func(x, y int) bool {
@@ -142,7 +143,17 @@ func buildGraph(entries []*entry.Entry, vecs map[string][]float32) graphData {
 			if len(sims) > semTopK {
 				sims = sims[:semTopK]
 			}
+			tops[i] = sims
 			for _, s := range sims {
+				cands = append(cands, s.cos)
+			}
+		}
+		thr := semThreshold(cands, len(nodes))
+		for i, a := range names {
+			for _, s := range tops[i] {
+				if s.cos < thr {
+					continue
+				}
 				src, tgt := a, s.name
 				if src > tgt {
 					src, tgt = tgt, src
@@ -169,4 +180,30 @@ func buildGraph(entries []*entry.Entry, vecs map[string][]float32) graphData {
 		return edges[i].Target < edges[j].Target
 	})
 	return graphData{Nodes: nodes, Edges: edges, Categories: cats}
+}
+
+// semThreshold 由全部条目 top-3 候选相似度（≤3n 个）分位反推 sem 边阈值：目标
+// 去重后边数 ≈0.45×nodeCount（平均度≈1），即候选降序第 ceil(0.45×nodeCount×2)
+// 名的分值（×2 是每候选被两端各提名一次的换算）；候选不足取候选最小值。结果
+// 钳制 [0.55,0.75]；nodeCount<10 的小库分布噪声大，直接用 0.55。
+func semThreshold(cands []float64, nodeCount int) float64 {
+	const (
+		semLo = 0.55
+		semHi = 0.75
+	)
+	if nodeCount < 10 {
+		return semLo
+	}
+	if len(cands) == 0 {
+		return semHi
+	}
+	sorted := make([]float64, len(cands))
+	copy(sorted, cands)
+	sort.Sort(sort.Reverse(sort.Float64Slice(sorted)))
+	rank := (9*nodeCount + 9) / 10 // ceil(0.45×nodeCount×2)，整数运算避免浮点误差
+	thr := sorted[len(sorted)-1]
+	if rank <= len(sorted) {
+		thr = sorted[rank-1]
+	}
+	return min(max(thr, semLo), semHi)
 }
