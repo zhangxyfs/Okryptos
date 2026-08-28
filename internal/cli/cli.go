@@ -376,8 +376,30 @@ func Search(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer db.Close()
+	client := embeddingClient(pc)
+	// 查询时按需 mtime 增量同步（一致性模型：各消费方按需 db.Sync，与 hook prompt
+	// 同口径）——sync 克隆/拉取、手工改文件后，首次 search 前先重建索引再检索。
+	if err := db.Sync(pc.Store.KnowledgeDir(), client, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines, FeedbackWindowDays: pc.Config.Retrieve.Feedback.WindowDays}); err != nil {
+		var corrupt *index.CorruptEntriesError
+		switch {
+		case errors.As(err, &corrupt):
+			// 损坏条目已跳过、INDEX 已重建：警告到 stderr，检索继续
+			fmt.Fprintln(stderr, err)
+		case client == nil:
+			fmt.Fprintln(stderr, err)
+			return 1
+		default:
+			// embedding 失败：降级为只同步 INDEX，关键词检索不被阻断
+			if err2 := db.Sync(pc.Store.KnowledgeDir(), nil, index.SyncOptions{MaxLines: pc.Config.Index.MaxLines, FeedbackWindowDays: pc.Config.Retrieve.Feedback.WindowDays}); err2 != nil {
+				fmt.Fprintln(stderr, err2)
+				if !errors.As(err2, &corrupt) {
+					return 1
+				}
+			}
+		}
+	}
 	var queryVec []float32
-	if client := embeddingClient(pc); client != nil {
+	if client != nil {
 		if vec, err := client.EmbedQuery(context.Background(), query); err != nil {
 			fmt.Fprintf(stderr, "embedding 失败，降级为关键词检索: %v\n", err)
 		} else {
