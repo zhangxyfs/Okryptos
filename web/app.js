@@ -2678,7 +2678,8 @@ function openLlmNeededModal(){
 
 /* ================= 图谱页 ================= */
 /* 需求 docs/2026-08-27-gui-graph-page-requirements.md；引擎移植自
-   docs/prototypes/prototype-wiki-graph.html（物理参数逐字沿用）。
+   docs/prototypes/prototype-wiki-graph.html（物理参数以原型为底；radial 改版
+   删类目焦点环改中心双锚 + 展示档限速慢速漂移，见引擎区常量注释）。
    关键集成约束：GUI render() 是整页 DOM 重建——一切模拟/布局/视图状态
    必须放模块级 gV，renderGraph 只按 gV 重建 DOM，坐标不丢。 */
 let GRAPH = null;        // {proj, data, err}；loadGraph 惰性加载
@@ -2719,10 +2720,12 @@ function graphReset(proj){
   if(!d || !(d.nodes||[]).length) return;
   (d.categories||[]).forEach((c,i)=> catColor[c] = PALETTE[i % PALETTE.length]);
   gV = {
-    nodes: d.nodes.map(n=>({...n, x:0,y:0,vx:0,vy:0,pinned:false})),   // {...n} 拷贝，不污染 GRAPH.data 缓存
+    // {...n} 拷贝，不污染 GRAPH.data 缓存；placed=已布点（预跑收敛过或展开时已按邻居质心放置）
+    nodes: d.nodes.map(n=>({...n, x:0,y:0,vx:0,vy:0,pinned:false,placed:false})),
     edges: d.edges||[], byId:{}, adj:{},
     nodeEls:{}, labelEls:{}, edgeEls:[],
     view:{x:0,y:0,k:1}, alpha:1,
+    maxStep:12, speed:1,               // 预跑档原速（位移钳 12）；gFirstLayout 预跑结束切展示档 MAX_STEP/SPEED_SCALE
     dragNode:null, panning:false, panStart:null, moved:false,
     layered:(d.nodes||[]).length > LAYER_THRESHOLD,  // Task 5：>400 条目自动分层（骨架常显+类目下钻）
     expanded:new Set(),                // 分层模式已展开类目（Set<category>）；全量模式恒空
@@ -2730,16 +2733,23 @@ function graphReset(proj){
     svg:null, world:null, tip:null, ro:null,  // DOM 引用随 renderGraph 整页重建替换
     panel:null, panelBody:null,               // 详情面板 DOM（renderGraph 建，随整页重建替换）
     catState:{}, query:"",                    // 图例类目开关 / 搜索词：过滤状态要扛整页重建，放 gV
-    W:0, H:0, cats:[], focus:{}, laidOut:false, // laidOut：已预跑+fitView，DOM 重建只按坐标重画
+    W:0, H:0, cats:[], anchors:[], anchorOf:{}, laidOut:false, // laidOut：已预跑+fitView，DOM 重建只按坐标重画
     rand: mulberry32(42),              // 种子定死：同数据重进布局可复现
   };
   gV.cats = (d.categories && d.categories.length ? d.categories
             : [...new Set(gV.nodes.map(n=>n.category))]).slice();
   gV.nodes.forEach(n=>{ gV.byId[n.id]=n; gV.adj[n.id]=[]; });
   gV.edges.forEach(e=>{ (gV.adj[e.source]||[]).push(e); (gV.adj[e.target]||[]).push(e); });
+  // 中心双锚（radial 改版）：is_dir 且 title 命中目录约定的节点钉画布中心左右，
+  // 目标点由 gLayoutFoci 按 W/H 刷新；无双锚项目 anchors 为空 = gTick 跳过锚定，纯向心+边弹簧
+  [["架构总览",-1],["演进历程",1]].forEach(([title, side])=>{
+    const n = gV.nodes.find(x => x.is_dir && x.title===title);
+    if(n){ const a = { n, side, tx:0, ty:0 }; gV.anchors.push(a); gV.anchorOf[n.id] = a; }
+  });
 }
 
-/* ---------- 引擎（移植自 docs/prototypes/prototype-wiki-graph.html，物理参数逐字沿用） ---------- */
+/* ---------- 引擎（移植自 docs/prototypes/prototype-wiki-graph.html；物理参数以原型为底，
+   radial 改版：删类目焦点环改中心双锚 + 展示档限速慢速漂移，见常量区注释） ---------- */
 const PALETTE = ["#1f2937","#8b5cf6","#3b82f6","#10b981","#f59e0b","#ef4444",
                  "#06b6d4","#ec4899","#84cc16","#f97316","#9ca3af"];
 const catColor = {};   // 按 GRAPH.data.categories 填色（graphReset 内）
@@ -2762,35 +2772,32 @@ function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;
   let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;
   return((t^t>>>14)>>>0)/4294967296;}}
 
-/* 力导向物理参数（原型逐字） */
+/* 力导向物理参数（原型逐字沿用；radial 改版删类目焦点环聚拢力，新增双锚与展示档限速四常量） */
 const REP = 9000;          // 斥力强度
 const REP_CUT = 320;       // 斥力截断距离（跨簇不互斥）
 const LEN = {struct: 110, ref: 170, sem: 150};  // 弹簧原长（sem=语义相似边；缺 kind 会 NaN 崩物理，新增边型必须登记）
 const SPRING = 0.014;
 const GRAV = 0.004;        // 向心力
-const CLUSTER = 0.05;      // 同类目焦点聚拢
+const CENTER_ANCHOR_GAP = 120;  // 中心双锚距画布中心的水平偏移（架构总览在左 / 演进历程在右）
+const ANCHOR_K = 0.01;     // 双锚回中力系数（定位力不随 alpha 衰减；节点可拖走，松手缓慢归位）
+const MAX_STEP = 1.5;      // 展示档单帧位移钳（px/帧）——慢速漂移可点击；预跑档仍 12 快速收敛
+const SPEED_SCALE = 0.5;   // 展示档积分速度缩放（原型阻尼 0.82 后再乘）；预跑档为 1 原速
 
-// 每个类目一个环绕中心的焦点，节点被拉向自己类目的焦点 -> 类目成簇
-// （原型"目录"居中特判已删：后端 category 无此值，焦点环覆盖全部 categories）
+/* 双锚目标点刷新：钉在画布中心左右 ±CENTER_ANCHOR_GAP（gFirstLayout 首布局与 RO resize 共用）。
+   anchors 为空（项目无 wiki 目录条目）时自然跳过，布局退化为纯向心+边弹簧 */
 function gLayoutFoci(){
-  const catSize = {};
-  gV.nodes.forEach(n => catSize[n.category] = (catSize[n.category]||0)+1);
-  const ring = [...gV.cats].sort((a,b)=>(catSize[b]||0)-(catSize[a]||0));
-  const R = Math.min(gV.W,gV.H) * 0.40;
-  gV.focus = {};
-  ring.forEach((c,i) => {
-    const ang = i / ring.length * 2 * Math.PI - Math.PI/2;
-    gV.focus[c] = { x: gV.W/2 + R*Math.cos(ang), y: gV.H/2 + R*Math.sin(ang)*0.8 };
-  });
+  gV.anchors.forEach(a => { a.tx = gV.W/2 + a.side*CENTER_ANCHOR_GAP; a.ty = gV.H/2; });
 }
 
 function gTick(){
-  const edges = gV.edges, byId = gV.byId, focus = gV.focus, rand = gV.rand;
+  const edges = gV.edges, byId = gV.byId, anchorOf = gV.anchorOf, rand = gV.rand;
+  const step = gV.maxStep, spd = gV.speed;   // 预跑档 12/1 原速；展示档 MAX_STEP/SPEED_SCALE 慢速漂移
   const nodes = gVisibleNodes();   // 分层模式只模拟可见集（叶子不参与物理）；全量模式 = gV.nodes
   const vis = {};                  // 可见 id 集（与 nodes 同趟构建），弹簧端点不可见时跳过
   nodes.forEach(n => vis[n.id] = true);
   gV.alpha *= 0.996;
-  const a = Math.max(gV.alpha, 0);   // 无永动地板：alpha 自由衰减；静止终点在 gFrame 冷却冻结，死区只消收尾微抖
+  const a = Math.max(gV.alpha, 0);   // alpha 地板 0（a3f928a）：斥力/弹簧随 alpha 自由衰减；
+                                     // 永动由不随 alpha 衰减的定位力（向心/双锚）与碰撞维持，死区只消收尾微抖
   const cx = () => gV.W/2, cy = () => gV.H/2;
 
   // 斥力 O(n^2)
@@ -2817,19 +2824,19 @@ function gTick(){
     const fx = dx/d*f, fy = dy/d*f;
     A.vx += fx; A.vy += fy; B.vx -= fx; B.vy -= fy;
   });
-  // 向心 + 类目焦点聚拢（定位力，不随 alpha 衰减）+ 积分
+  // 向心 + 中心双锚回中（定位力，不随 alpha 衰减）+ 积分
   nodes.forEach(n => {
     n.vx += (cx()-n.x) * GRAV;
     n.vy += (cy()-n.y) * GRAV;
-    const f = focus[n.category] || { x: cx(), y: cy() };   // 防御：category 无焦点（异常数据）回落画布中心
-    n.vx += (f.x-n.x) * CLUSTER;
-    n.vy += (f.y-n.y) * CLUSTER;
+    const an = anchorOf[n.id];   // 双锚节点每帧回中钉目标点（无双锚项目 anchorOf 为空自然跳过）
+    if(an){ n.vx += (an.tx-n.x) * ANCHOR_K; n.vy += (an.ty-n.y) * ANCHOR_K; }
     n.vx *= 0.82; n.vy *= 0.82;
+    n.vx *= spd; n.vy *= spd;   // 展示档 SPEED_SCALE 慢速缩放（预跑 spd=1 原速；独立一行保留原型阻尼 0.82 可读）
     if (Math.abs(n.vx) < 0.02) n.vx = 0;   // 速度死区：亚像素速度清零，消平衡态微抖
     if (Math.abs(n.vy) < 0.02) n.vy = 0;
     if (!n.pinned) {
-      n.x += Math.max(-12, Math.min(12, n.vx));
-      n.y += Math.max(-12, Math.min(12, n.vy));
+      n.x += Math.max(-step, Math.min(step, n.vx));
+      n.y += Math.max(-step, Math.min(step, n.vy));
     }
   });
   // 碰撞（半径不重叠）
@@ -2881,22 +2888,22 @@ function gFrame(){
     return;
   }
   gTick(); gRender();
-  // 冷却冻结：alpha 衰减到旧地板值（0.02）即停帧静止——只归零地板不够，向心/聚拢
-  // 是不随 alpha 衰减的定位力，碰撞又直改位置，三者构成极限环永不收敛（实测 45px/帧）。
-  // 停帧后由回热处重启：拖拽 pointerdown、gExpandCat、gInitGraph（render/RO 路径）。
-  if(gV.alpha > 0.02 || gV.dragNode) gV.raf = requestAnimationFrame(gFrame);
-  else gV.raf = null;
+  gV.raf = requestAnimationFrame(gFrame);   // 永动：用户明确否决静止（radial 改版撤掉 a3f928a 冷却冻结）
 }
 
-/* 首布局：随机布点 + 900 tick 预跑 + fitView（gInitGraph 首建与 RO 零尺寸兜底共用） */
+/* 首布局：随机布点 + 双锚就位 + 900 tick 预跑（原速档）+ 切展示档 + fitView
+   （gInitGraph 首建与 RO 零尺寸兜底共用） */
 function gFirstLayout(){
   gV.nodes.forEach(n => {
     n.x = gV.W/2 + (gV.rand()-0.5) * Math.min(gV.W,900);
     n.y = gV.H/2 + (gV.rand()-0.5) * Math.min(gV.H,600);
   });
-  gLayoutFoci();
-  // 先同步预跑收敛（初 Speed 快后衰减由 alpha 控制），不依赖 rAF 帧数
+  gLayoutFoci();   // 双锚目标点按 W/H 就位
+  gV.anchors.forEach(a => { a.n.x = a.tx; a.n.y = a.ty; });   // 双锚初始布点即目标点
+  // 先同步预跑收敛（初 Speed 快后衰减由 alpha 控制），不依赖 rAF 帧数；预跑全程原速档
   for (let i = 0; i < 900; i++) gTick();
+  gV.maxStep = MAX_STEP; gV.speed = SPEED_SCALE;   // 预跑结束切展示档：慢速漂移
+  gVisibleNodes().forEach(n => n.placed = true);   // 预跑收敛过的节点标记已布点（分层展开布点判据）
   // 自动适配视图：让整图居中且留边（分层模式只对可见集取景，未展开叶子不参与）
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
   gVisibleNodes().forEach(n => { x0=Math.min(x0,n.x); y0=Math.min(y0,n.y);
@@ -2972,8 +2979,7 @@ function gInitGraph(stage){
     const g = ev.target.closest(".node");
     if (g) {
       const n = gV.nodes.find(n => gV.nodeEls[n.id] === g);
-      if (n) { gV.dragNode = n; n.pinned = true; gV.alpha = Math.max(gV.alpha, 0.25);
-        if(!gV.raf) gV.raf = requestAnimationFrame(gFrame); }   // 冷却冻结态回热重启渲染循环
+      if (n) { gV.dragNode = n; n.pinned = true; gV.alpha = Math.max(gV.alpha, 0.25); }
     } else {
       gV.panning = true; svg.classList.add("panning");
       gV.panStart = {x: ev.clientX, y: ev.clientY, vx: gV.view.x, vy: gV.view.y};
@@ -3137,7 +3143,7 @@ function gApplyFilters(){
       if(gMatchQuery(n, q)) toExpand.add(n.category);
     });
     if(toExpand.size){
-      toExpand.forEach(c => gV.expanded.add(c));
+      toExpand.forEach(c => { gV.expanded.add(c); gPlaceLeaves(c); });   // 与 gExpandCat 同款邻居质心布点
       gV.alpha = Math.max(gV.alpha, 0.35);   // 与 gExpandCat 同款局部回热收敛
       render();                              // 重建路径 renderGraph 末尾会重放本函数
       return;
@@ -3160,11 +3166,37 @@ function gApplyFilters(){
 
 /* ---------- 分层下钻（gV.layered 时图例点击/「返回总览」走这里；
    展开=建 DOM + alpha 回热 .35 局部收敛；收起=摘 DOM 但保留 n.x/n.y，再展开不重排） ---------- */
+/* 展开类目新成员布点（radial 改版：原靠类目焦点环收敛，环删后改此）：未布点（!placed）的
+   叶子放到其可见邻居质心，无可见邻居则画布中心；同一质心的成员按黄金角螺旋排开
+   （24×√k 半径）——直接叠在质心一点会被碰撞 pass 瞬间炸开（碰撞直改位置不吃位移钳）；
+   已布点的（收起再展开）保留原坐标不动 */
+function gPlaceLeaves(cat){
+  const vis = {};   // 已布点的可见节点集（新成员的邻居参照系；未布点同类成员不计）
+  gVisibleNodes().forEach(n => { if(n.placed) vis[n.id] = true; });
+  const members = [];
+  gV.nodes.forEach(n => {
+    if(n.category!==cat || n.placed) return;
+    let sx=0, sy=0, cnt=0;
+    (gV.adj[n.id]||[]).forEach(e => {
+      const o = e.source===n.id ? e.target : e.source;
+      if(vis[o]){ const m = gV.byId[o]; sx+=m.x; sy+=m.y; cnt++; }
+    });
+    members.push({ n, cx: cnt ? sx/cnt : gV.W/2, cy: cnt ? sy/cnt : gV.H/2 });
+  });
+  const seen = {};   // 同质心分组序号（四舍五入到像素归组）
+  members.forEach(({n, cx, cy}) => {
+    const key = Math.round(cx) + "," + Math.round(cy);
+    const k = (seen[key] = (seen[key]||0) + 1);   // 1-based
+    const r = 24 * Math.sqrt(k), ang = k * 2.399963;   // 黄金角螺旋，k=1 也有 24px 初距防叠进邻居
+    n.x = cx + r*Math.cos(ang); n.y = cy + r*Math.sin(ang);
+    n.placed = true;
+  });
+}
 function gExpandCat(cat){
   gV.expanded.add(cat);
+  gPlaceLeaves(cat);                   // 新成员初始位置：可见邻居质心（无邻居则中心）
   gV.alpha = Math.max(gV.alpha, 0.35);   // 局部回热收敛（沿用拖拽回热机制）
   render();                              // 整页重建 → gInitGraph 懒挂载新成员
-  if(!gV.raf) gV.raf = requestAnimationFrame(gFrame);
 }
 function gCollapseCat(cat){ gV.expanded.delete(cat); render(); }
 function gBackToOverview(){ gV.expanded.clear(); render(); }
