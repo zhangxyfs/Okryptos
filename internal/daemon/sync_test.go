@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -132,4 +133,97 @@ func TestSyncDueInterval(t *testing.T) {
 	// force=true → 到点判断被跳过，状态文件被触碰（ahead/behind 刷新）
 	runSyncCycle(io.Discard, true)
 	// force 路径无错误即视为执行（具体由上一用例覆盖推送行为）
+}
+
+// TestNotifyWriteDebounce 验证防抖合并：连续触发只跑一次，且等够时长。
+func TestNotifyWriteDebounce(t *testing.T) {
+	old := syncWriteDebounce
+	syncWriteDebounce = 50 * time.Millisecond
+	defer func() { syncWriteDebounce = old }()
+
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	reg := &registry.Registry{}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	// 计数器：替换 fire 函数
+	var mu sync.Mutex
+	fires := 0
+	oldFire := syncFire
+	syncFire = func() {
+		mu.Lock()
+		fires++
+		mu.Unlock()
+	}
+	defer func() { syncFire = oldFire }()
+
+	NotifyWrite()
+	NotifyWrite()
+	NotifyWrite()
+	time.Sleep(150 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if fires != 1 {
+		t.Fatalf("debounced fires = %d, want 1", fires)
+	}
+}
+
+// TestRunSyncCycleConcurrent 验证 runSyncCycle 并发安全：ticker goroutine 与写入
+// 防抖 goroutine 会并发调用，syncCycleMu 串行化后并发跑 force 同步无数据竞争、
+// 无 git 锁争用（sync-status.json 的读-改-写被互斥保护）。
+func TestRunSyncCycleConcurrent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	bare := t.TempDir()
+	gitExec(t, bare, "init", "--bare", "-b", "main")
+	st := store.New(filepath.Join(home, "projects", "a"))
+	if err := os.MkdirAll(st.KnowledgeDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(st.StateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := syncx.Open(st.Root)
+	if err := r.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(st.KnowledgeDir(), "k.md"), []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.CommitAll("init"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetRemote(bare); err != nil {
+		t.Fatal(err)
+	}
+	// 首推建立 upstream（同 TestRunSyncCycle 的适配说明）
+	if err := r.Push(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(st.ConfigPath(), []byte("[sync]\nenabled = true\nremote = \""+filepath.ToSlash(bare)+"\"\nauto_interval_min = 5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := &registry.Registry{Projects: []registry.Project{{Name: "a", Paths: []string{"/x/a"}}}}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runSyncCycle(io.Discard, true)
+		}()
+	}
+	wg.Wait()
+
+	sf, err := syncx.LoadStatus(st.StateDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sf.Layer("personal").LastSync.IsZero() {
+		t.Fatal("a should have been synced")
+	}
 }

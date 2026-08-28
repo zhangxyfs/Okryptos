@@ -50,6 +50,8 @@ type Handler struct {
 	dl       map[string]*dlJob
 	tkMu     sync.Mutex
 	tickets  map[string]assetTicket
+	// OnWrite 条目写入成功后的回调（daemon 注入同步防抖触发），可为 nil。
+	OnWrite func()
 }
 
 // NewHandler 构建路由。beats 收到每次 /api/heartbeat 的信号（非阻塞，可传 nil）；
@@ -136,6 +138,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) { h.mux.Serv
 
 // Done 在收到 /api/shutdown 后关闭。
 func (h *Handler) Done() <-chan struct{} { return h.done }
+
+// notifyWrite 条目写入成功后触发 OnWrite 回调（nil 安全）。
+func (h *Handler) notifyWrite() {
+	if h.OnWrite != nil {
+		h.OnWrite()
+	}
+}
 
 // withAuth 校验 X-Ok-Token 头，失败 401。
 func (h *Handler) withAuth(fn http.HandlerFunc) http.HandlerFunc {
@@ -785,7 +794,7 @@ func validateEntryRequest(w http.ResponseWriter, req *entryRequest) *store.Store
 // created 仅新建路径传入（YYYY-MM-DD）；更新既有条目传 ""，此时从盘上原条目
 // 继承 created/draft/archived——不继承会让"编辑草稿"静默转正、"编辑归档条目"
 // 静默取消归档（entryRequest 不带这三个字段，GUI 编辑器不管生命周期标记）。
-func writeEntry(w http.ResponseWriter, st *store.Store, path string, req *entryRequest, created string) {
+func (h *Handler) writeEntry(w http.ResponseWriter, st *store.Store, path string, req *entryRequest, created string) {
 	var draft, archived bool
 	var prev time.Time
 	if created == "" {
@@ -828,6 +837,7 @@ func writeEntry(w http.ResponseWriter, st *store.Store, path string, req *entryR
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("索引同步失败: %v", err))
 		return
 	}
+	h.notifyWrite()
 	writeJSON(w, http.StatusOK, summaryOf(e))
 }
 
@@ -888,7 +898,7 @@ func (h *Handler) apiEntryCreate(w http.ResponseWriter, r *http.Request) {
 			req.Tags = append(req.Tags, bt)
 		}
 	}
-	writeEntry(w, st, path, &req, time.Now().Format("2006-01-02"))
+	h.writeEntry(w, st, path, &req, time.Now().Format("2006-01-02"))
 }
 
 func (h *Handler) apiEntryUpdate(w http.ResponseWriter, r *http.Request) {
@@ -908,7 +918,7 @@ func (h *Handler) apiEntryUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "条目不存在")
 		return
 	}
-	writeEntry(w, st, path, &req, "")
+	h.writeEntry(w, st, path, &req, "")
 }
 
 func (h *Handler) apiEntryDelete(w http.ResponseWriter, r *http.Request) {
@@ -931,6 +941,7 @@ func (h *Handler) apiEntryDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("索引同步失败: %v", err))
 		return
 	}
+	h.notifyWrite()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -1223,6 +1234,7 @@ func (h *Handler) apiApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e.Path = path
+	h.notifyWrite()
 	writeJSON(w, http.StatusOK, summaryOf(e))
 }
 
@@ -1284,6 +1296,7 @@ func (h *Handler) apiEntryArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e.Path = path
+	h.notifyWrite()
 	writeJSON(w, http.StatusOK, summaryOf(e))
 }
 

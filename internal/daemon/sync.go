@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"openknowledge/internal/config"
@@ -15,9 +16,14 @@ import (
 
 var syncCheckInterval = time.Minute // 检查周期（包级 var 供测试调小）
 
+// syncCycleMu 串行化 runSyncCycle：ticker goroutine 与写入防抖 goroutine 会并发
+// 调用，RecordOutcome 对 sync-status.json 的读-改-写不加锁存在 lost-update 窗口。
+var syncCycleMu sync.Mutex
+
 // startSyncJanitor 挂同步 ticker（照 run.go:96 自省 ticker 模式，随进程生命周期结束）。
 // 每分钟检查一轮：启用同步且到点的项目跑 SyncOnce。失败仅记日志，绝不影响本地链路。
 func startSyncJanitor(stdout io.Writer) {
+	syncLogOut = stdout // 写入防抖触发的同步日志也走 daemon stdout
 	go func() {
 		ticker := time.NewTicker(syncCheckInterval)
 		defer ticker.Stop()
@@ -30,15 +36,22 @@ func startSyncJanitor(stdout io.Writer) {
 // runSyncCycle 遍历注册项目，对启用同步且到点（或 force）的项目执行一次同步。
 // force=true 跳过 interval 判断（写入防抖触发用，设计文档 §8）。
 func runSyncCycle(out io.Writer, force bool) {
+	syncCycleMu.Lock()
+	defer syncCycleMu.Unlock()
 	reg, err := registry.Load(registry.DefaultPath())
 	if err != nil {
+		fmt.Fprintf(out, "sync: 加载注册表失败: %v\n", err)
 		return
 	}
 	globalCfg := filepath.Join(registry.Home(), "config.toml")
 	for _, p := range reg.Projects {
 		st := store.New(filepath.Join(registry.Home(), "projects", p.Name))
 		cfg, err := config.LoadMerged(st.ConfigPath(), globalCfg)
-		if err != nil || !cfg.Sync.Enabled {
+		if err != nil {
+			fmt.Fprintf(out, "sync: %s 加载配置失败: %v\n", p.Name, err)
+			continue
+		}
+		if !cfg.Sync.Enabled {
 			continue
 		}
 		if !force && !syncDue(st, cfg.Sync.AutoIntervalMin) {
@@ -71,4 +84,44 @@ func syncDue(st *store.Store, intervalMin int) bool {
 		return true
 	}
 	return time.Since(last) >= time.Duration(intervalMin)*time.Minute
+}
+
+var syncWriteDebounce = 30 * time.Second // 写入后防抖时长（设计文档 §8）
+
+// syncFire 是防抖到点后的动作（包级 var 供测试替换）。
+var syncFire = func() {
+	runSyncCycle(syncLogOut, true)
+}
+
+var syncLogOut io.Writer = io.Discard
+
+var writeDeb = newDebouncer(syncWriteDebounce, func() { syncFire() })
+
+// NotifyWrite 条目写入动作（approve、GUI 编辑保存等）的钩子：30s 防抖后
+// 对启用同步的项目跑一轮同步，把未同步窗口压到分钟级。
+func NotifyWrite() {
+	writeDeb.mu.Lock()
+	writeDeb.d = syncWriteDebounce // 每次读取当前值（测试可调）
+	writeDeb.mu.Unlock()
+	writeDeb.Trigger()
+}
+
+type debouncer struct {
+	mu sync.Mutex
+	d  time.Duration
+	fn func()
+	t  *time.Timer
+}
+
+func newDebouncer(d time.Duration, fn func()) *debouncer {
+	return &debouncer{d: d, fn: fn}
+}
+
+func (b *debouncer) Trigger() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.t != nil {
+		b.t.Stop()
+	}
+	b.t = time.AfterFunc(b.d, b.fn)
 }

@@ -77,6 +77,8 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 	}()
 
 	gh := gui.NewHandler(webDir, token, nil)
+	// 条目写入（GUI 编辑保存/approve/归档/删除）后 30s 防抖触发一轮同步（设计文档 §8）
+	gh.OnWrite = NotifyWrite
 	// ErrorLog 不设时 http.Server 内部错误走 log 默认输出（直写 os.Stderr fd，
 	// 绕过入口的时间戳包装）；指到 stderr 且 flags=0，时间戳由外层统一加。
 	srv := &http.Server{Handler: NewMux(gh, token, fp), ErrorLog: log.New(stderr, "", 0)}
