@@ -188,6 +188,47 @@ func TestSyncDuringConflictResolvedStaged(t *testing.T) {
 	_, _ = execGit(dirB, localTimeout, "rebase", "--abort")
 }
 
+func TestSyncDuringMergeConflictRefuses(t *testing.T) {
+	_, dirA, dirB := mkPair(t)
+	// A 改同一行并推
+	writeFile(t, dirA, "k.md", "v2a\n")
+	if o := Open(dirA).Sync("sync: a"); o.Err != nil {
+		t.Fatalf("A sync: %v", o.Err)
+	}
+	// B 改同一行并本地提交（不走 Sync——Sync 的 pull --rebase 不会制造 MERGE_HEAD）
+	writeFile(t, dirB, "k.md", "v2b\n")
+	if _, err := Open(dirB).CommitAll("sync: b"); err != nil {
+		t.Fatalf("B commit: %v", err)
+	}
+	// 复现 ok sync init 情形 3 的官方指引路径：用户手工 merge 远端，冲突停半途。
+	// pull 默认 merge 策略，两边改了同一行 → 冲突停下，留下 MERGE_HEAD。
+	_, _ = execGit(dirB, networkTimeout, "pull", "--no-rebase")
+	if _, err := execGit(dirB, localTimeout, "rev-parse", "--verify", "--quiet", "MERGE_HEAD"); err != nil {
+		t.Fatal("merge should be in progress (MERGE_HEAD)")
+	}
+	count := func() string {
+		out, err := execGit(dirB, localTimeout, "rev-list", "--count", "HEAD")
+		if err != nil {
+			t.Fatalf("rev-list: %v", err)
+		}
+		return out
+	}
+	before := count()
+	// merge 冲突未解决时 Sync：直接返回未决冲突，不提交、不吞冲突标记
+	o := Open(dirB).Sync("sync: b")
+	if len(o.Conflicts) == 0 {
+		t.Fatalf("want conflicts on sync during merge: %+v", o)
+	}
+	if o.Committed {
+		t.Fatalf("must not commit during merge: %+v", o)
+	}
+	if after := count(); after != before {
+		t.Fatalf("HEAD moved during merge: %s → %s", before, after)
+	}
+	// 清理
+	_, _ = execGit(dirB, localTimeout, "merge", "--abort")
+}
+
 func TestSyncOnceSingleFlight(t *testing.T) {
 	_, dirA, _ := mkPair(t)
 	writeFile(t, dirA, "k.md", "v3\n")

@@ -41,17 +41,26 @@ func (r *Repo) Sync(msg string) (o Outcome) {
 		o.NotRepo = true
 		return o
 	}
-	// rebase 进行中 = 上次冲突未解决：直接报告未决冲突返回，不做任何提交/拉取——
+	// rebase/merge 进行中 = 上次冲突未解决：直接报告未决冲突返回，不做任何提交/拉取——
 	// 否则 CommitAll 会把冲突标记 add -A 提交进历史（冲突期应等人解决，设计文档 §7）。
+	// MERGE_HEAD 同样拦：ok sync init 情形 3 指引用户手工 merge --allow-unrelated-histories，
+	// 该 merge 冲突中途也必须禁止 Sync。
+	midRebase := false
 	if _, err := execGit(r.Dir, localTimeout, "rev-parse", "--verify", "--quiet", "REBASE_HEAD"); err == nil {
+		midRebase = true
+	}
+	if _, err := execGit(r.Dir, localTimeout, "rev-parse", "--verify", "--quiet", "MERGE_HEAD"); err == nil {
+		midRebase = true
+	}
+	if midRebase {
 		out, _ := execGit(r.Dir, localTimeout, "diff", "--name-only", "--diff-filter=U")
 		if out != "" {
 			o.Conflicts = strings.Split(out, "\n")
 			return o
 		}
-		// 冲突文件已改好并暂存但还没 rebase --continue：此时返回全零会被
-		// RecordOutcome 误记成功、清掉冲突态，实际用户还卡在 rebase 半途。
-		o.Err = fmt.Errorf("rebase 进行中（冲突已暂存待继续）：请执行 git -C %s rebase --continue 或 --abort 后重试", r.Dir)
+		// 冲突文件已改好并暂存但还没 rebase/merge --continue：此时返回全零会被
+		// RecordOutcome 误记成功、清掉冲突态，实际用户还卡在半途。
+		o.Err = fmt.Errorf("合并/变基进行中（冲突已暂存待继续）：请执行 git -C %s rebase --continue 或 merge --continue，或 --abort 后重试", r.Dir)
 		return o
 	}
 	// 有远端时先 fetch：Status 的 behind 读的是本地远程跟踪引用，
