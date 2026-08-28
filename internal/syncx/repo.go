@@ -114,7 +114,7 @@ func (r *Repo) Push() error {
 // CloneToDir 把 url 克进 Dir——Dir 允许含骨架文件（config.toml/state/ 等）：
 // clone 到临时目录 → 移 .git 进来 → checkout 覆盖工作区（设计文档 §14"无知识内容"情形）。
 func (r *Repo) CloneToDir(url string) error {
-	tmp, err := os.MkdirTemp("", "ok-sync-clone")
+	tmp, err := os.MkdirTemp(filepath.Dir(r.Dir), "ok-sync-clone")
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,10 @@ func (r *Repo) CloneToDir(url string) error {
 	if err := os.Rename(filepath.Join(tmp, ".git"), filepath.Join(r.Dir, ".git")); err != nil {
 		return err
 	}
+	// 仓级固定行尾行为：后续 CommitAll/Status 不受全局 autocrlf 影响（错误忽略）。
+	_, _ = execGit(r.Dir, localTimeout, "config", "core.autocrlf", "false")
 	// 强制 autocrlf=false：库内 blob 是 LF，checkout 不做 CRLF 转换（Windows 全局 autocrlf=true 时也能逐字节还原）。
+	// 注意：此时 .git 已移入，失败留下"是仓但工作区未还原"的中间态，重试/Status 可感知。
 	_, err = execGit(r.Dir, localTimeout, "-c", "core.autocrlf=false", "checkout", "--", ".")
 	return err
 }
