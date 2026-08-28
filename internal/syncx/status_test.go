@@ -83,6 +83,9 @@ func TestRecordOutcome(t *testing.T) {
 	if sf.Layer("personal").LastError == "" {
 		t.Fatal("last_error not recorded")
 	}
+	if !sf.Layer("personal").Conflict {
+		t.Fatal("conflict should survive error")
+	}
 
 	// 再次成功：conflict 清除、冲突文件删除
 	RecordOutcome(dir, stateDir, Outcome{})
@@ -92,5 +95,28 @@ func TestRecordOutcome(t *testing.T) {
 	}
 	if files, _ := ReadConflictFiles(stateDir); len(files) != 0 {
 		t.Fatalf("conflict files should be cleared: %v", files)
+	}
+}
+
+func TestRecordOutcomeNotRepo(t *testing.T) {
+	// 先写一笔成功状态，再回写 NotRepo：状态文件必须原样不动（不能谎报已同步）。
+	dir := t.TempDir()
+	r := Open(dir)
+	if err := r.Init(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	writeFile(t, dir, "k.md", "v1\n")
+	stateDir := t.TempDir()
+	RecordOutcome(dir, stateDir, Outcome{})
+	before, _ := LoadStatus(stateDir)
+	if before.Layer("personal").LastSync.IsZero() {
+		t.Fatal("precondition: last_sync should be set")
+	}
+
+	RecordOutcome(t.TempDir(), stateDir, Outcome{NotRepo: true})
+	after, _ := LoadStatus(stateDir)
+	if !after.Layer("personal").LastSync.Equal(before.Layer("personal").LastSync) {
+		t.Fatalf("last_sync changed by NotRepo: %v → %v",
+			before.Layer("personal").LastSync, after.Layer("personal").LastSync)
 	}
 }

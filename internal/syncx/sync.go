@@ -1,6 +1,7 @@
 package syncx
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 )
@@ -46,7 +47,11 @@ func (r *Repo) Sync(msg string) (o Outcome) {
 		out, _ := execGit(r.Dir, localTimeout, "diff", "--name-only", "--diff-filter=U")
 		if out != "" {
 			o.Conflicts = strings.Split(out, "\n")
+			return o
 		}
+		// 冲突文件已改好并暂存但还没 rebase --continue：此时返回全零会被
+		// RecordOutcome 误记成功、清掉冲突态，实际用户还卡在 rebase 半途。
+		o.Err = fmt.Errorf("rebase 进行中（冲突已暂存待继续）：请执行 git -C %s rebase --continue 或 --abort 后重试", r.Dir)
 		return o
 	}
 	// 有远端时先 fetch：Status 的 behind 读的是本地远程跟踪引用，

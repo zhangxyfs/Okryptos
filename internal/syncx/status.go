@@ -107,6 +107,10 @@ func ClearConflictFiles(stateDir string) error {
 // RecordOutcome 是 CLI/daemon 共用的状态回写收敛：按 Outcome 更新
 // sync-status.json 的 personal 层与 sync-conflict.json。失败仅尽力而为（fail-open）。
 func RecordOutcome(dir, stateDir string, o Outcome) {
+	// 非仓目录不算同步结果：状态文件原样不动，不能谎报"已同步"。
+	if o.NotRepo {
+		return
+	}
 	sf, err := LoadStatus(stateDir)
 	if err != nil {
 		return
@@ -125,8 +129,9 @@ func RecordOutcome(dir, stateDir string, o Outcome) {
 		l.LastError = ""
 		_ = ClearConflictFiles(stateDir)
 	}
-	if Open(dir).IsRepo() {
-		_, l.Ahead, l.Behind = Open(dir).Status()
+	r := Open(dir)
+	if r.IsRepo() {
+		_, l.Ahead, l.Behind = r.Status()
 	}
 	_ = sf.Save(stateDir)
 }

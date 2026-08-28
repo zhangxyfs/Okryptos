@@ -156,6 +156,38 @@ func TestSyncDuringConflictRefuses(t *testing.T) {
 	_, _ = execGit(dirB, localTimeout, "rebase", "--abort")
 }
 
+func TestSyncDuringConflictResolvedStaged(t *testing.T) {
+	_, dirA, dirB := mkPair(t)
+	// A 改同一行并推
+	writeFile(t, dirA, "k.md", "v2a\n")
+	if o := Open(dirA).Sync("sync: a"); o.Err != nil {
+		t.Fatalf("A sync: %v", o.Err)
+	}
+	// B 改同一行并 sync → 冲突，rebase 停半途
+	writeFile(t, dirB, "k.md", "v2b\n")
+	if o := Open(dirB).Sync("sync: b"); len(o.Conflicts) == 0 {
+		t.Fatalf("want conflicts: %+v", o)
+	}
+	// 用户手工改好（去掉冲突标记）并暂存，但不 rebase --continue
+	writeFile(t, dirB, "k.md", "v2 resolved\n")
+	if _, err := execGit(dirB, localTimeout, "add", "-A"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	// 此时 U 列表为空但 rebase 未结束：必须报错引导 continue/abort，不能谎报成功
+	o := Open(dirB).Sync("sync: again")
+	if o.Err == nil {
+		t.Fatalf("want Err on staged-but-uncontinued rebase: %+v", o)
+	}
+	if !strings.Contains(o.Err.Error(), "rebase --continue") {
+		t.Fatalf("Err should guide to rebase --continue: %v", o.Err)
+	}
+	if o.Committed {
+		t.Fatalf("must not commit during rebase: %+v", o)
+	}
+	// 清理
+	_, _ = execGit(dirB, localTimeout, "rebase", "--abort")
+}
+
 func TestSyncOnceSingleFlight(t *testing.T) {
 	_, dirA, _ := mkPair(t)
 	writeFile(t, dirA, "k.md", "v3\n")
