@@ -233,7 +233,7 @@ Windows 下大小写不敏感与分隔符混乱问题全部收敛到 `NormalizeP
 func LoadMerged(projectPath, globalPath string) (Config, error)
 ```
 
-生效配置 = **内置默认 ← 全局 `~/.openknowledge/config.toml` ← 项目 `config.toml`**，后者覆盖前者（TOML 依次解码到同一 struct 实现）。`[[enforce]]` 两层均可配置（GUI 规则卡写全局层）。API key 解析收敛在一处：
+生效配置 = **内置默认 ← 全局 `~/.openknowledge/config.toml` ← 项目 `config.toml`**，后者覆盖前者（TOML 依次解码到同一 struct 实现）。两个数组例外：`embedding.profiles` 按 name 合并；`[[enforce]]` 全局与项目追加合并（全局在前）——GUI 规则卡写全局层，用户手改项目层补的规则同样生效。配置解析失败（如手改写坏 toml）整条 hook 链路 fail-open：规则不生效、不阻断，错误记 `ok.log`。API key 解析收敛在一处：
 
 ```go
 func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环境变量 > ""
