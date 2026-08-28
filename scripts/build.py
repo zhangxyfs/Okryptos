@@ -3,6 +3,7 @@
 
 用法:
   python scripts/build.py                  # 完整流程（dist + 安装程序）
+  python scripts/build.py --test           # 测试安装包：版本号追加 _test（OpenKnowledgeSetup-<ver>_test.exe），不改 iss 文件
   python scripts/build.py --skip-installer # 只构建 dist/
   python scripts/build.py --skip-winres    # 跳过 exe 图标/版本信息嵌入
 
@@ -23,13 +24,17 @@ LLAMA_TAG = "b10405"
 LLAMA_BASE_DEFAULT = "https://github.com/ggml-org/llama.cpp/releases/download"
 
 
-def app_version():
-    """从 installer/openknowledge.iss 提取 #define AppVersion，提取不到则报错退出。"""
+def app_version(test=False):
+    """从 installer/openknowledge.iss 提取 #define AppVersion，提取不到则报错退出。
+    test=True 时追加 _test 后缀（测试包与正式包可同机区分，幂等不叠加）。"""
     text = (ROOT / "installer" / "openknowledge.iss").read_text(encoding="utf-8")
     m = re.search(r'^#define AppVersion "([^"]+)"', text, re.MULTILINE)
     if not m:
         sys.exit("未能从 installer/openknowledge.iss 提取 AppVersion")
-    return m.group(1)
+    v = m.group(1)
+    if test and not v.endswith("_test"):
+        v += "_test"
+    return v
 
 
 def run(cmd, cwd=ROOT):
@@ -71,7 +76,9 @@ def main():
     ap = argparse.ArgumentParser(description="OpenKnowledge 一键构建")
     ap.add_argument("--skip-installer", action="store_true", help="只构建 dist/，不打包安装程序")
     ap.add_argument("--skip-winres", action="store_true", help="跳过 exe 图标/版本信息嵌入")
+    ap.add_argument("--test", action="store_true", help="测试安装包：版本号追加 _test，不改 iss 文件")
     args = ap.parse_args()
+    version = app_version(test=args.test)
 
     # 1. exe 图标与版本信息（go-winres）：缺失或失败即中断——静默跳过会让发布的
     #    exe 无 VS_VERSION_INFO 版本资源（M-16）；确需跳过须显式 --skip-winres
@@ -85,7 +92,7 @@ def main():
             run([winres, "make", "--in", "winres.json"], cwd=ROOT / "cmd" / pkg)
 
     # 2. 编译 dist/ 三 exe + 拷贝 web/（注入版本号，与 build-dist.sh 一致）
-    ldflags = f"{LDFLAGS} -X openknowledge/internal/version.Version={app_version()}"
+    ldflags = f"{LDFLAGS} -X openknowledge/internal/version.Version={version}"
     (ROOT / "dist").mkdir(exist_ok=True)
     run(["go", "build", "-ldflags", ldflags, "-o", "dist/ok.exe", "./cmd/ok"])
     run(["go", "build", "-ldflags", ldflags, "-o", "dist/okd.exe", "./cmd/okd"])
@@ -108,7 +115,20 @@ def main():
         if not Path(ISCC).exists():
             sys.exit(f"未找到 ISCC: {ISCC}（可用环境变量 ISCC 覆盖，或 --skip-installer）")
         (ROOT / "installer" / "output").mkdir(parents=True, exist_ok=True)
-        run([ISCC, "/Q", "installer/openknowledge.iss"])
+        if args.test:
+            # 测试包不改 openknowledge.iss：生成同目录临时脚本（相对 Source 路径按
+            # 脚本所在目录解析，必须同目录），替换 AppVersion 后编译，编完即删。
+            src = (ROOT / "installer" / "openknowledge.iss").read_text(encoding="utf-8")
+            tmp_iss = ROOT / "installer" / ".openknowledge-test.iss"
+            tmp_iss.write_text(re.sub(r'^#define AppVersion "[^"]+"',
+                                      f'#define AppVersion "{version}"',
+                                      src, count=1, flags=re.MULTILINE), encoding="utf-8")
+            try:
+                run([ISCC, "/Q", str(tmp_iss)])
+            finally:
+                tmp_iss.unlink(missing_ok=True)
+        else:
+            run([ISCC, "/Q", "installer/openknowledge.iss"])
         for f in sorted((ROOT / "installer" / "output").glob("*.exe")):
             print(f"安装程序: {f}  ({f.stat().st_size / 1024 / 1024:.1f} MB)")
 
