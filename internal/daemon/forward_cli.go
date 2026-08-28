@@ -22,6 +22,7 @@ var cliSubcommands = map[string]struct{}{
 	"init":            {},
 	"add":             {},
 	"propose":         {},
+	"sync":            {},
 	"approve":         {},
 	"backfill-born":   {},
 	"capture":         {},

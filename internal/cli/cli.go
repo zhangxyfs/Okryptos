@@ -28,6 +28,7 @@ import (
 	"openknowledge/internal/registry"
 	"openknowledge/internal/retrieve"
 	"openknowledge/internal/store"
+	"openknowledge/internal/syncx"
 	"openknowledge/internal/wiki"
 )
 
@@ -1123,4 +1124,158 @@ func WikiCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "用法: ok wiki <status|mark [commit]|base [分支名]|diff>")
 		return 1
 	}
+}
+
+// Sync 是 ok sync 入口（设计文档 §7）：一次执行 = commit → pull --rebase → push。
+// args[0]=="init" 时分发到 syncInit。
+func Sync(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "init" {
+		return syncInit(args[1:], stdout, stderr)
+	}
+	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	pc, code := resolveFromCwd(stderr)
+	if pc == nil {
+		return code
+	}
+	if !pc.Config.Sync.Enabled {
+		fmt.Fprintln(stderr, "同步未启用：先 ok sync init [remote-url] 初始化（或在项目 config.toml 设 [sync] enabled = true）")
+		return 1
+	}
+	host, _ := os.Hostname()
+	msg := fmt.Sprintf("sync: %s %s", host, time.Now().Format(time.RFC3339))
+	o := syncx.SyncOnce(pc.Store.Root, msg)
+	syncx.RecordOutcome(pc.Store.Root, pc.Store.StateDir(), o)
+	switch {
+	case o.NotRepo:
+		fmt.Fprintln(stderr, "项目目录还不是 git 仓：先 ok sync init [remote-url] 初始化")
+		return 1
+	case o.Err != nil:
+		fmt.Fprintf(stderr, "同步失败：%v（本地功能不受影响）\n", o.Err)
+		return 1
+	case len(o.Conflicts) > 0:
+		fmt.Fprintf(stderr, "同步冲突：拉取时 %d 个文件冲突，已停止推送：\n", len(o.Conflicts))
+		for _, f := range o.Conflicts {
+			fmt.Fprintf(stderr, "  - %s\n", f)
+		}
+		fmt.Fprintf(stderr, "请到 Web GUI 冲突解决页处理，或手动解决后执行 git -C %s rebase --continue && ok sync\n", pc.Store.Root)
+		return 1
+	case o.NoRemote:
+		if o.Committed {
+			fmt.Fprintln(stdout, "已本地提交（无远端，仅本地历史）")
+		} else {
+			fmt.Fprintln(stdout, "已是最新（无远端，仅本地历史）")
+		}
+		return 0
+	default:
+		var parts []string
+		if o.Pulled > 0 {
+			parts = append(parts, fmt.Sprintf("拉取 %d 个提交", o.Pulled))
+		}
+		if o.Pushed > 0 {
+			parts = append(parts, fmt.Sprintf("推送 %d 个提交", o.Pushed))
+		}
+		if len(parts) == 0 {
+			if o.Committed {
+				parts = append(parts, "本地提交已记录")
+			} else {
+				parts = append(parts, "已是最新")
+			}
+		}
+		fmt.Fprintln(stdout, strings.Join(parts, "，"))
+		return 0
+	}
+}
+
+// syncInit 实现 ok sync init [remote-url]（设计文档 §14 三情形）。
+func syncInit(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("sync init", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	remote := fs.Arg(0)
+	pc, code := resolveFromCwd(stderr)
+	if pc == nil {
+		return code
+	}
+	r := syncx.Open(pc.Store.Root)
+	if r.IsRepo() {
+		fmt.Fprintln(stderr, "项目目录已是 git 仓，无需初始化（直接 ok sync）")
+		return 1
+	}
+	host, _ := os.Hostname()
+	commitMsg := fmt.Sprintf("sync: init %s %s", host, time.Now().Format(time.RFC3339))
+
+	hasContent := func() bool {
+		entries, _ := os.ReadDir(pc.Store.KnowledgeDir())
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				return true
+			}
+		}
+		return false
+	}
+
+	finish := func() int {
+		if err := config.SetSync(pc.Store.ConfigPath(), config.Sync{
+			Enabled: true, Remote: remote, AutoIntervalMin: pc.Config.Sync.AutoIntervalMin,
+		}); err != nil {
+			fmt.Fprintf(stderr, "同步配置写入失败：%v\n", err)
+			return 1
+		}
+		return 0
+	}
+
+	// 情形 1：仅本地历史
+	if remote == "" {
+		if err := r.Init(); err != nil {
+			fmt.Fprintf(stderr, "git init 失败：%v\n", err)
+			return 1
+		}
+		if _, err := r.CommitAll(commitMsg); err != nil {
+			fmt.Fprintf(stderr, "首次提交失败：%v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "已初始化本地历史（未配置远端，后续可 git remote add 或在 config.toml 写 [sync] remote）")
+		return finish()
+	}
+
+	// 情形 2：无知识内容 → clone
+	if !hasContent() {
+		if err := r.CloneToDir(remote); err != nil {
+			fmt.Fprintf(stderr, "clone 失败：%v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "已从远端克隆项目知识库")
+		return finish()
+	}
+
+	// 情形 3：本地有内容 → init + commit + remote + push（首台设备路径）
+	if err := r.Init(); err != nil {
+		fmt.Fprintf(stderr, "git init 失败：%v\n", err)
+		return 1
+	}
+	if _, err := r.CommitAll(commitMsg); err != nil {
+		fmt.Fprintf(stderr, "首次提交失败：%v\n", err)
+		return 1
+	}
+	if err := r.SetRemote(remote); err != nil {
+		fmt.Fprintf(stderr, "关联远端失败：%v\n", err)
+		return 1
+	}
+	if err := r.Push(); err != nil {
+		var ee *syncx.ExitError
+		if errors.As(err, &ee) && (strings.Contains(ee.Output, "non-fast-forward") || strings.Contains(ee.Output, "fetch first")) {
+			fmt.Fprintf(stderr, "远端仓已有内容，不自动合并。请手动合并一次后重试：\n  git -C %s pull --rebase origin main\n  （或 git merge --allow-unrelated-histories）\n", pc.Store.Root)
+			return 1
+		}
+		fmt.Fprintf(stderr, "首次推送失败：%v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "已初始化并推送首个提交到远端")
+	return finish()
 }

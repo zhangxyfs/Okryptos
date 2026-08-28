@@ -53,6 +53,8 @@ func run(argv []string) int {
 		return cli.Add(argv[2:], os.Stdout, os.Stderr)
 	case "propose":
 		return cli.Propose(argv[2:], os.Stdout, os.Stderr)
+	case "sync":
+		return cli.Sync(argv[2:], os.Stdout, os.Stderr)
 	case "approve":
 		return cli.Approve(argv[2:], os.Stdout, os.Stderr)
 	case "backfill-born":
