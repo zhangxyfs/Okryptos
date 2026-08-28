@@ -91,6 +91,30 @@ func TestLoadMergedMissingFiles(t *testing.T) {
 	}
 }
 
+// TestLoadMergedEnforceUnion [[enforce]] 数组合并而非替换：GUI 规则卡写全局
+// config.toml，用户手改项目 config.toml 补的规则也必须生效——toml 数组默认整体
+// 替换会把全局规则顶掉，使"全局生效"落空。顺序：全局在前、项目在后。
+func TestLoadMergedEnforceUnion(t *testing.T) {
+	dir := t.TempDir()
+	global := filepath.Join(dir, "global.toml")
+	project := filepath.Join(dir, "project.toml")
+	g := "[[enforce]]\ntype = \"changelog_required\"\ncode_globs = [\"**/*.go\"]\nchangelog_glob = \"docs/changelogs/**\"\nmessage = \"全局规则\"\n"
+	p := "[[enforce]]\ntype = \"changelog_required\"\ncode_globs = [\"web/**\"]\nchangelog_glob = \"docs/changelogs/**\"\nmessage = \"项目规则\"\n"
+	if err := os.WriteFile(global, []byte(g), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(p), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Enforce) != 2 || cfg.Enforce[0].Message != "全局规则" || cfg.Enforce[1].Message != "项目规则" {
+		t.Fatalf("enforce 应合并（全局+项目），got %+v", cfg.Enforce)
+	}
+}
+
 func TestResolvedAPIKey(t *testing.T) {
 	t.Setenv("OK_TEST_KEY", "envkey")
 	if got := (EmbeddingProfile{APIKey: "direct", APIKeyEnv: "OK_TEST_KEY"}).ResolvedAPIKey(); got != "direct" {
@@ -423,13 +447,13 @@ func TestFeedbackConfigDefaultAndOverride(t *testing.T) {
 func TestSetEnforceRules(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	seed := "[retrieve]\ndedup_turns = 7\n\n[[enforce]]\ntype = \"changelog\"\ncode_globs = [\"**/*.old\"]\nchangelog_glob = \"docs/old/**\"\nmessage = \"旧规则\"\n"
+	seed := "[retrieve]\ndedup_turns = 7\n\n[[enforce]]\ntype = \"changelog_required\"\ncode_globs = [\"**/*.old\"]\nchangelog_glob = \"docs/old/**\"\nmessage = \"旧规则\"\n"
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	rules := []EnforceRule{
-		{Type: "changelog", CodeGlobs: []string{"**/*.go"}, ChangelogGlob: "docs/changelogs/**", Message: "改代码必须写变更日志"},
-		{Type: "changelog", CodeGlobs: []string{"web/**", "internal/**"}, ChangelogGlob: "docs/changelogs/**", Message: "第二条"},
+		{Type: "changelog_required", CodeGlobs: []string{"**/*.go"}, ChangelogGlob: "docs/changelogs/**", Message: "改代码必须写变更日志"},
+		{Type: "changelog_required", CodeGlobs: []string{"web/**", "internal/**"}, ChangelogGlob: "docs/changelogs/**", Message: "第二条"},
 	}
 	if err := SetEnforceRules(path, rules); err != nil {
 		t.Fatal(err)

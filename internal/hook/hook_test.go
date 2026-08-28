@@ -408,6 +408,74 @@ func TestStopWithoutEnforceRulesPass(t *testing.T) {
 	}
 }
 
+// TestStopEnforceGlobalRuleSurvivesProjectRules GUI 规则卡写全局 config.toml；
+// 项目 config.toml 里另有手改规则时，toml 数组替换语义不得把全局规则顶掉——
+// 全局规则命中（项目规则不匹配）仍须阻断。
+func TestStopEnforceGlobalRuleSurvivesProjectRules(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	globalCfg := "\n[[enforce]]\ntype = \"changelog_required\"\ncode_globs = [\"**/*.go\"]\nchangelog_glob = \"docs/changelogs/**\"\nmessage = \"全局规则命中\"\n"
+	if err := os.WriteFile(filepath.Join(registry.Home(), "config.toml"), []byte(globalCfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projCfg := "\n[[enforce]]\ntype = \"changelog_required\"\ncode_globs = [\"**/*.rs\"]\nchangelog_glob = \"docs/changelogs/**\"\nmessage = \"项目规则不命中\"\n"
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(projCfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	codeFile := filepath.Join(projDir, "main.go")
+	post := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s1","cwd":%q,"tool_name":"Write","tool_input":{"path":%q}}`, projDir, codeFile)
+	if code := HandlePostTool(strings.NewReader(post)); code != 0 {
+		t.Fatalf("post-tool exit %d", code)
+	}
+	stop := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s1","cwd":%q}`, projDir)
+	var stderr bytes.Buffer
+	if code := HandleStop(strings.NewReader(stop), &stderr, &bytes.Buffer{}, ""); code != 2 {
+		t.Fatalf("全局规则应阻断(2)，项目规则不得顶掉全局规则，got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "全局规则命中") {
+		t.Fatalf("missing global rule message %q", stderr.String())
+	}
+}
+
+// TestStopEnforceLegacyTypeAlias 2026-08-22~08-27 的 GUI 规则卡曾以
+// type = "changelog" 落盘（hook 只认 changelog_required，规则静默失效）。
+// 存量文件不回改，hook 兼容旧写法照常评估。
+func TestStopEnforceLegacyTypeAlias(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	cfg := "\n[[enforce]]\ntype = \"changelog\"\ncode_globs = [\"**/*.go\"]\nchangelog_glob = \"docs/changelogs/**\"\nmessage = \"请补变更日志\"\n"
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	codeFile := filepath.Join(projDir, "main.go")
+	post := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s1","cwd":%q,"tool_name":"Write","tool_input":{"path":%q}}`, projDir, codeFile)
+	if code := HandlePostTool(strings.NewReader(post)); code != 0 {
+		t.Fatalf("post-tool exit %d", code)
+	}
+	stop := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s1","cwd":%q}`, projDir)
+	var stderr bytes.Buffer
+	if code := HandleStop(strings.NewReader(stop), &stderr, &bytes.Buffer{}, ""); code != 2 {
+		t.Fatalf("旧 GUI 落盘的 changelog 规则应阻断(2)，got %d", code)
+	}
+}
+
+// TestStopMalformedConfigFailOpen 用户手改 config.toml 写坏 toml 时，Stop 须
+// fail-open：规则不生效、不阻断、 exit 0（错误记 ok.log），不拖累正常会话。
+func TestStopMalformedConfigFailOpen(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte("[[enforce]\ntype = "), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	codeFile := filepath.Join(projDir, "main.go")
+	post := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s1","cwd":%q,"tool_name":"Write","tool_input":{"path":%q}}`, projDir, codeFile)
+	if code := HandlePostTool(strings.NewReader(post)); code != 0 {
+		t.Fatalf("post-tool exit %d", code)
+	}
+	stop := fmt.Sprintf(`{"hook_event_name":"Stop","session_id":"s1","cwd":%q}`, projDir)
+	var stderr bytes.Buffer
+	if code := HandleStop(strings.NewReader(stop), &stderr, &bytes.Buffer{}, ""); code != 0 {
+		t.Fatalf("配置解析失败应 fail-open 返回 0，got %d", code)
+	}
+}
+
 // writeCaptureConfig 写入只含 [capture] 的配置（无 [[enforce]]）。
 func writeCaptureConfig(t *testing.T, kbRoot, mode string, interval int) {
 	t.Helper()

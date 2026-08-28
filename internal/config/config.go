@@ -308,7 +308,10 @@ func Load(path string) (Config, error) {
 
 // LoadMerged 合并配置：内置默认 ← globalPath ← projectPath，后者覆盖前者。
 // profiles 数组例外：toml 对数组整体替换，这里按 name 合并（项目级同名覆盖，
-// 不删除全局独有项）。两个文件都可以不存在（视为空）。
+// 不删除全局独有项）。[[enforce]] 数组同样例外：全局与项目规则追加合并（全局
+// 在前）——GUI 规则卡写全局 config.toml，用户手改项目 config.toml 补的规则也
+// 必须生效，替换语义会把全局规则顶掉使"全局生效"落空。
+// 两个文件都可以不存在（视为空）。
 func LoadMerged(projectPath, globalPath string) (Config, error) {
 	cfg := Default()
 	for _, path := range []string{globalPath, projectPath} {
@@ -319,13 +322,24 @@ func LoadMerged(projectPath, globalPath string) (Config, error) {
 		if err != nil {
 			return cfg, err
 		}
-		prev := cfg.Embedding.Profiles
+		// 先克隆再 Decode：toml 解码数组会复用原切片的底层数组（含 []string 字段
+		// 的内层数组），解码后再拷贝拿到的已是被覆盖的新值——曾致 enforce 合并
+		// 结果出现"全局规则的 message 配项目规则的 globs"的串扰。
+		prev := append([]EmbeddingProfile{}, cfg.Embedding.Profiles...)
+		prevEnforce := make([]EnforceRule, len(cfg.Enforce))
+		for i, r := range cfg.Enforce {
+			prevEnforce[i] = EnforceRule{Type: r.Type, CodeGlobs: append([]string{}, r.CodeGlobs...),
+				ChangelogGlob: r.ChangelogGlob, Message: r.Message}
+		}
 		md, err := toml.Decode(string(data), &cfg)
 		if err != nil {
 			return cfg, fmt.Errorf("解析 %s: %w", path, err)
 		}
+		if md.IsDefined("enforce") && len(prevEnforce) > 0 {
+			cfg.Enforce = append(prevEnforce, cfg.Enforce...)
+		}
 		if md.IsDefined("embedding", "profiles") && len(prev) > 0 {
-			merged := append([]EmbeddingProfile{}, prev...)
+			merged := prev
 			for _, p := range cfg.Embedding.Profiles {
 				found := false
 				for i := range merged {

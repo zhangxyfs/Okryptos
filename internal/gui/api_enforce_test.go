@@ -46,10 +46,10 @@ func TestEnforceRulesAPI(t *testing.T) {
 		t.Fatalf("initial rules must be empty array: %s", data)
 	}
 
-	// POST 2 条 → 200；GET 复读到 2 条
+	// POST 2 条 → 200；GET 复读到 2 条（type 与 hook 评估口径一致：changelog_required）
 	two := []rule{
-		{Type: "changelog", CodeGlobs: []string{"**/*.go"}, ChangelogGlob: "docs/changelogs/**", Message: "改代码必须写变更日志"},
-		{Type: "changelog", CodeGlobs: []string{"web/**"}, ChangelogGlob: "docs/changelogs/**", Message: "前端也要写"},
+		{Type: "changelog_required", CodeGlobs: []string{"**/*.go"}, ChangelogGlob: "docs/changelogs/**", Message: "改代码必须写变更日志"},
+		{Type: "changelog_required", CodeGlobs: []string{"web/**"}, ChangelogGlob: "docs/changelogs/**", Message: "前端也要写"},
 	}
 	code, data = do(t, "POST", srv.URL+"/api/enforce/rules", testToken, map[string]any{"project": "demo", "rules": two})
 	if code != 200 {
@@ -60,11 +60,12 @@ func TestEnforceRulesAPI(t *testing.T) {
 		t.Fatalf("get after post: code=%d rules=%+v", code, rules)
 	}
 
-	// 校验：type 非法 / code_globs 空 / message 空 → 400
+	// 校验：type 非法（含旧 GUI 的短写法 changelog）/ code_globs 空 / message 空 → 400
 	badBodies := []map[string]any{
 		{"project": "demo", "rules": []rule{{Type: "bogus", CodeGlobs: []string{"**/*.go"}, Message: "x"}}},
-		{"project": "demo", "rules": []rule{{Type: "changelog", Message: "x"}}},
-		{"project": "demo", "rules": []rule{{Type: "changelog", CodeGlobs: []string{"**/*.go"}}}},
+		{"project": "demo", "rules": []rule{{Type: "changelog", CodeGlobs: []string{"**/*.go"}, Message: "x"}}},
+		{"project": "demo", "rules": []rule{{Type: "changelog_required", Message: "x"}}},
+		{"project": "demo", "rules": []rule{{Type: "changelog_required", CodeGlobs: []string{"**/*.go"}}}},
 	}
 	for _, body := range badBodies {
 		if code, data := do(t, "POST", srv.URL+"/api/enforce/rules", testToken, body); code != 400 {
@@ -104,7 +105,7 @@ func TestEnforceRulesGlobalDefault(t *testing.T) {
 	// 缺省 POST → 全局落盘
 	code, data = do(t, "POST", srv.URL+"/api/enforce/rules", testToken,
 		map[string]any{"rules": []map[string]any{{
-			"type": "changelog", "code_globs": []string{"**/*.go"},
+			"type": "changelog_required", "code_globs": []string{"**/*.go"},
 			"changelog_glob": "docs/changelogs/**", "message": "改代码必须写变更日志",
 		}}})
 	if code != 200 {

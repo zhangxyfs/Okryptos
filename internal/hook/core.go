@@ -438,7 +438,9 @@ func CheckStopTurn(pc *project.Context, sessionID string, countTurn bool) (reaso
 			return
 		}
 		for _, rule := range pc.Config.Enforce {
-			if rule.Type != "changelog_required" {
+			// "changelog" 是 2026-08-22~08-27 GUI 规则卡误用的短写法（存量
+			// config.toml 可能带它），作别名兼容；新写入一律 changelog_required。
+			if rule.Type != "changelog_required" && rule.Type != "changelog" {
 				continue
 			}
 			block, why, err := enforce.EvalChangelog(rule, st)

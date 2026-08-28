@@ -34,8 +34,8 @@ func (h *Handler) apiEnforceRulesGet(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiEnforceRulesSet 整体重写 config.toml 的 [[enforce]]：逐条校验
-// （type 仅允许 changelog、code_globs 非空、message 非空，违反 400）；
-// 空数组合法（清空规则）。校验全过才落盘，失败不动既有配置。
+// （type 仅允许 changelog_required——与 hook 评估口径一致，code_globs 非空、
+// message 非空，违反 400）；空数组合法（清空规则）。校验全过才落盘，失败不动既有配置。
 // project 缺省 = 写全局 config.toml；显式 project = 写项目 config.toml（旧行为）。
 // 本端点只按行重写 [[enforce]] 小节、不读配置，故 project 解析只取落盘路径。
 func (h *Handler) apiEnforceRulesSet(w http.ResponseWriter, r *http.Request) {
@@ -57,8 +57,8 @@ func (h *Handler) apiEnforceRulesSet(w http.ResponseWriter, r *http.Request) {
 		cfgPath = st.ConfigPath()
 	}
 	for _, rule := range req.Rules {
-		if rule.Type != "changelog" {
-			writeErr(w, http.StatusBadRequest, fmt.Sprintf("非法 type %q（仅允许 changelog）", rule.Type))
+		if rule.Type != "changelog_required" {
+			writeErr(w, http.StatusBadRequest, fmt.Sprintf("非法 type %q（仅允许 changelog_required）", rule.Type))
 			return
 		}
 		if len(rule.CodeGlobs) == 0 {
