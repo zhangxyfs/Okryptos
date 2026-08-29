@@ -51,13 +51,19 @@ func (r *Repo) ResolveFile(file, content string) error {
 // 注意：不能用 rev-parse --verify REBASE_HEAD——rebase 成功结束后该引用仍残留
 // （仅 --abort 会清除），会误判为仍在进行中。rebase 以 rebase-merge/rebase-apply
 // 状态目录为准，merge 以 MERGE_HEAD 为准。
+// 状态路径经 rev-parse --git-path 取（linked worktree 下 .git 是文件，硬拼
+// .git/<name> 会假阴）；git 可能返回绝对路径，需 IsAbs 判断后再决定是否 Join。
 func (r *Repo) MergeInProgress() bool {
 	for _, name := range []string{"rebase-merge", "rebase-apply", "MERGE_HEAD"} {
 		out, err := execGit(r.Dir, localTimeout, "rev-parse", "--git-path", name)
-		if err != nil {
+		if err != nil || out == "" {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(r.Dir, out)); err == nil {
+		path := out
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(r.Dir, path)
+		}
+		if _, err := os.Stat(path); err == nil {
 			return true
 		}
 	}
