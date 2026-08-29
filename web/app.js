@@ -192,7 +192,7 @@ const I18N = {
     syncNavConflict:"解决同步冲突",
     syncInitConfirm:"该项目尚未初始化同步。无服务器建仓入口（属后续版本）；要用仅本地历史初始化吗？请先阅读文档或在终端执行 ok sync init。",
     /* P1-B：冲突解决页（卡片流 + 钉住操作条，Task 6） */
-    cfTitle:"解决同步冲突", cfResolved:"已解决", cfReady:"可以完成同步了",
+    cfTitle:"解决同步冲突", cfResolved:"已解决", cfReady:"（可以完成同步了）",
     cfFinish:"完成同步", cfFinishHint:"全部冲突解决后才可完成同步", cfFinishOk:"同步已完成并推送",
     cfAbort:"放弃本次同步", cfAbortConfirm:"放弃本次同步？将回滚到同步前状态，本地内容原样保留。", cfAbortOk:"已放弃本次同步",
     cfAcceptMe:"Accept Me（保留我的）", cfAcceptTheirs:"Accept Theirs（采用远端）", cfMerge:"Merge",
@@ -351,7 +351,7 @@ const I18N = {
     syncNavConflict:"Resolve sync conflict",
     syncInitConfirm:"Sync is not initialized for this project. Server-side provisioning comes in a later version; initialize with local history via 'ok sync init' in terminal.",
     /* P1-B: conflict resolution page (card flow + pinned action bar, Task 6) */
-    cfTitle:"Resolve sync conflict", cfResolved:"Resolved", cfReady:"ready to finish",
+    cfTitle:"Resolve sync conflict", cfResolved:"Resolved", cfReady:"(ready to finish)",
     cfFinish:"Finish sync", cfFinishHint:"All conflicts must be resolved before finishing", cfFinishOk:"Sync finished and pushed",
     cfAbort:"Abort this sync", cfAbortConfirm:"Abort this sync? Rolls back to the pre-sync state; local content is kept as-is.", cfAbortOk:"Sync aborted",
     cfAcceptMe:"Accept Me", cfAcceptTheirs:"Accept Theirs", cfMerge:"Merge",
@@ -1839,7 +1839,7 @@ async function renderSyncConflict(main){
   const total = CF.list.length;
   const done = CF.list.filter(f=>CF.resolved[f]).length;
   stick.innerHTML = '<div class="cf-title">'+esc(t("cfTitle"))+' · <b>'+esc(project)+'</b></div>'+
-    '<div class="cf-prog">'+t("cfResolved")+" "+done+" / "+total+(done===total&&total>0?"（"+t("cfReady")+"）":"")+'</div>';
+    '<div class="cf-prog">'+t("cfResolved")+" "+done+" / "+total+(done===total&&total>0?t("cfReady"):"")+'</div>';
   const fin = el("button","btn-primary cf-fin");
   fin.textContent = t("cfFinish");
   fin.disabled = !(total > 0 && done === total);
@@ -1858,13 +1858,14 @@ async function renderSyncConflict(main){
   abo.textContent = t("cfAbort");
   abo.onclick = async ()=>{
     if(!confirm(t("cfAbortConfirm"))) return;
+    abo.disabled = true;   // await 期间置灰防重复 POST（对齐 AI 合并按钮先例）
     try{
       await api("/api/project/sync/abort", { method:"POST", body:{ project: project } });
       toast(t("cfAbortOk"));
       state.syncConflict = null; CF.project = "";
       location.hash = "manage";
       refreshManage();
-    }catch(err){ toast(err.message, true); }
+    }catch(err){ toast(err.message, true); abo.disabled = false; }
   };
   stick.appendChild(fin); stick.appendChild(abo);
   wrap.appendChild(stick);
@@ -1877,6 +1878,8 @@ async function renderSyncConflict(main){
   // main 里已有侧栏（renderBody 先建 side 再分发）——只清内容区，保留侧栏逃生口
   [...main.children].forEach(n=>{ if(!n.classList.contains("side")) n.remove(); });
   main.appendChild(wrap);
+  // render() 的同步恢复循环在首个 await 前就跑完了（此刻旧 .cfwrap 已清、新的未挂）——这里用记下的位置自行恢复
+  wrap.scrollTop = (render._keep && render._keep["cfwrap"]) || 0;
 }
 
 async function conflictCard(project, file){
@@ -1898,14 +1901,17 @@ async function conflictCard(project, file){
   const foot = el("div","cf-card-foot");
   const mk = (label, cls, fn) => { const b = el("button",cls); b.textContent = label; b.onclick = fn; return b; };
   const doResolve = async (action) => {
+    bMe.disabled = bTheirs.disabled = true;   // await 期间置灰防重复 POST（对齐 AI 合并按钮先例）；成功路径随 render() 重建 DOM
     try{
       await api("/api/project/sync/resolve", { method:"POST", body:{ project: project, file: file, action: action } });
       CF.resolved[file] = true;
       render(); // 重渲走 renderSyncConflict（CF 缓存不重复拉列表/版本）
-    }catch(err){ toast(err.message, true); }
+    }catch(err){ toast(err.message, true); bMe.disabled = bTheirs.disabled = false; }
   };
-  foot.appendChild(mk(t("cfAcceptMe"), "btn", ()=>doResolve("me")));
-  foot.appendChild(mk(t("cfAcceptTheirs"), "btn", ()=>doResolve("theirs")));
+  const bMe = mk(t("cfAcceptMe"), "btn", ()=>doResolve("me"));
+  const bTheirs = mk(t("cfAcceptTheirs"), "btn", ()=>doResolve("theirs"));
+  foot.appendChild(bMe);
+  foot.appendChild(bTheirs);
   foot.appendChild(mk(t("cfMerge"), "btn", ()=>{ state.merge = { project: project, file: file }; render(); }));
   const ai = mk(t("cfAI"), "btn", null);
   ai.onclick = async ()=>{
@@ -4941,6 +4947,7 @@ function render(){
   app.querySelectorAll(".prefs,.setup,.detail,.tree-scroll,.misc,.cfwrap").forEach(n=>{
     keep[n.className.split(" ")[0]] = n.scrollTop;
   });
+  render._keep = keep;   // async 子页（冲突/合并）首个 await 后才挂 DOM，下面的同步恢复循环够不到——挂出来留子页自行恢复
   renderBody(app);
   Object.entries(keep).forEach(([cls,top])=>{
     const n = app.querySelector("."+cls);
