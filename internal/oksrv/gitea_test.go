@@ -1,0 +1,216 @@
+package oksrv
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+// fakeGitea 镜像核实后的 Gitea API 形状（内存态）。
+// 核实来源：docs.gitea.com swagger-22.json / swagger-latest.json + go-gitea/gitea 源码（v1.22.0、main）。
+// 与 Task 4 简报表格的偏差（按真实形状调整）：
+//   - 发 token：真实端点是 POST /users/{username}/tokens 且强制 Basic auth（reqBasicOrRevProxyAuth），
+//     admin API token 直接调会 401——这里对非 Basic 请求返回 401 钉死该语义；
+//   - 组织加成员：真实无 /orgs/{org}/membership/{username}，须 GET /orgs/{org}/teams 拿
+//     建组织时自动创建的 Owners 队 id，再 PUT /teams/{id}/members/{username}；
+//   - 组织减成员：真实路径是 DELETE /orgs/{org}/members/{username}；
+//   - PATCH /admin/users/{username} 真实返回 200 + User（非 204）。
+func fakeGitea(t *testing.T) *httptest.Server {
+	t.Helper()
+	type user struct{ active bool }
+	users := map[string]*user{}
+	repos := map[string]bool{}
+	orgs := map[string]map[string]bool{}
+	orgTeam := map[string]int64{}  // org → Owners 队 id（真实 Gitea 建组织自动创建）
+	teamOrg := map[int64]string{}  // team id → org
+	var nextTeamID int64
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/version", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"version": "1.22.0"})
+	})
+	mux.HandleFunc("POST /api/v1/admin/users", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Username string `json:"username"`
+			Email    string `json:"email"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Username == "" || req.Email == "" {
+			w.WriteHeader(422) // 真实 Gitea：username/email 必填
+			return
+		}
+		if users[req.Username] != nil {
+			w.WriteHeader(422)
+			return
+		}
+		users[req.Username] = &user{active: true}
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode(map[string]any{"username": req.Username})
+	})
+	mux.HandleFunc("POST /api/v1/users/{username}/tokens", func(w http.ResponseWriter, r *http.Request) {
+		if _, _, ok := r.BasicAuth(); !ok {
+			w.WriteHeader(401) // 真实 Gitea：reqBasicOrRevProxyAuth
+			return
+		}
+		u := r.PathValue("username")
+		if users[u] == nil {
+			w.WriteHeader(404)
+			return
+		}
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode(map[string]string{"sha1": "tok-" + u})
+	})
+	mux.HandleFunc("PATCH /api/v1/admin/users/{username}", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Active   bool   `json:"active"`
+			SourceID int64  `json:"source_id"`
+			Login    string `json:"login_name"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		u := r.PathValue("username")
+		if users[u] == nil {
+			w.WriteHeader(404)
+			return
+		}
+		users[u].active = req.Active
+		json.NewEncoder(w).Encode(map[string]any{"username": u, "active": req.Active})
+	})
+	mux.HandleFunc("POST /api/v1/admin/users/{username}/repos", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Name    string `json:"name"`
+			Private bool   `json:"private"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		owner := r.PathValue("username")
+		key := owner + "/" + req.Name
+		if repos[key] {
+			w.WriteHeader(409)
+			return
+		}
+		repos[key] = true
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode(map[string]any{"clone_url": "http://gitea.test/" + key + ".git"})
+	})
+	mux.HandleFunc("POST /api/v1/orgs", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Username string `json:"username"` }
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if orgs[req.Username] != nil {
+			w.WriteHeader(422)
+			return
+		}
+		orgs[req.Username] = map[string]bool{}
+		nextTeamID++
+		orgTeam[req.Username] = nextTeamID
+		teamOrg[nextTeamID] = req.Username
+		w.WriteHeader(201)
+	})
+	mux.HandleFunc("GET /api/v1/orgs/{org}/teams", func(w http.ResponseWriter, r *http.Request) {
+		org := r.PathValue("org")
+		if orgs[org] == nil {
+			w.WriteHeader(404)
+			return
+		}
+		json.NewEncoder(w).Encode([]map[string]any{{"id": orgTeam[org], "name": "Owners"}})
+	})
+	mux.HandleFunc("PUT /api/v1/teams/{id}/members/{username}", func(w http.ResponseWriter, r *http.Request) {
+		var id int64
+		if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &id); err != nil {
+			w.WriteHeader(404)
+			return
+		}
+		org, ok := teamOrg[id]
+		u := r.PathValue("username")
+		if !ok || users[u] == nil {
+			w.WriteHeader(404)
+			return
+		}
+		orgs[org][u] = true
+		w.WriteHeader(204)
+	})
+	mux.HandleFunc("DELETE /api/v1/orgs/{org}/members/{username}", func(w http.ResponseWriter, r *http.Request) {
+		org := r.PathValue("org")
+		u := r.PathValue("username")
+		if orgs[org] == nil || !orgs[org][u] {
+			w.WriteHeader(404)
+			return
+		}
+		delete(orgs[org], u)
+		w.WriteHeader(204)
+	})
+	mux.HandleFunc("POST /api/v1/orgs/{org}/repos", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Name string `json:"name"` }
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		key := r.PathValue("org") + "/" + req.Name
+		repos[key] = true
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode(map[string]any{"clone_url": "http://gitea.test/" + key + ".git"})
+	})
+	mux.HandleFunc("GET /api/v1/repos/{owner}/{repo}", func(w http.ResponseWriter, r *http.Request) {
+		if !repos[r.PathValue("owner")+"/"+r.PathValue("repo")] {
+			w.WriteHeader(404)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"name": r.PathValue("repo")})
+	})
+	return httptest.NewServer(mux)
+}
+
+func TestGiteaBackend(t *testing.T) {
+	srv := fakeGitea(t)
+	defer srv.Close()
+	b := NewGitea(srv.URL, "admin-token")
+	ctx := context.Background()
+
+	v, err := b.Ping(ctx)
+	if err != nil || v != "1.22.0" {
+		t.Fatalf("ping: %v %q", err, v)
+	}
+	if err := b.CreateUser(ctx, "alice", "pw"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := b.CreateUser(ctx, "alice", "pw"); err == nil {
+		t.Fatal("dup must fail")
+	}
+	tok, err := b.CreateUserToken(ctx, "alice", "ok-sync")
+	if err != nil || tok != "tok-alice" {
+		t.Fatalf("token: %v %q", err, tok)
+	}
+	r, err := b.CreatePersonalRepo(ctx, "alice", "ok-demo")
+	if err != nil || !strings.Contains(r.CloneURL, "alice/ok-demo.git") {
+		t.Fatalf("repo: %+v %v", r, err)
+	}
+	ok, _ := b.RepoExists(ctx, "alice", "ok-demo")
+	if !ok {
+		t.Fatal("repo should exist")
+	}
+	if err := b.CreateOrg(ctx, "ok-acme", "Acme"); err != nil {
+		t.Fatalf("org: %v", err)
+	}
+	if err := b.AddOrgMember(ctx, "ok-acme", "alice"); err != nil {
+		t.Fatalf("member: %v", err)
+	}
+	if _, err := b.CreateOrgRepo(ctx, "ok-acme", "demo"); err != nil {
+		t.Fatalf("org repo: %v", err)
+	}
+	if err := b.SetUserActive(ctx, "alice", false); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+}
+
+// TestGiteaAuthHeader 假 server 断言每个请求带 admin token。
+func TestGiteaAuthHeader(t *testing.T) {
+	var sawAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		json.NewEncoder(w).Encode(map[string]string{"version": "x"})
+	}))
+	defer srv.Close()
+	b := NewGitea(srv.URL, "admin-token")
+	_, _ = b.Ping(context.Background())
+	if sawAuth != "token admin-token" {
+		t.Fatalf("auth header: %q", sawAuth)
+	}
+}
