@@ -19,7 +19,8 @@ const (
 var ErrRemoteNotEmpty = errors.New("远端仓已有内容，需手动合并一次")
 
 // InitForSync 执行三情形编排。hasContent 由调用方判定（knowledge/ 下有无 .md）。
-// 成功路径才会动 remote/config；ErrRemoteNotEmpty 时仓已 init+commit+关联 remote，
+// remote/config 只在两条成功路径落：克隆成功，或本地 init+commit+SetRemote 后 Push 成功。
+// ErrRemoteNotEmpty 属"部分完成"：仓已 init+commit+关联 remote（Push 撞 non-fast-forward），
 // 用户手动合并后 ok sync 即可续上。
 func (r *Repo) InitForSync(remote string, hasContent bool, commitMsg string) (InitKind, error) {
 	if remote == "" {

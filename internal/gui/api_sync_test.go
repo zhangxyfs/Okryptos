@@ -386,6 +386,89 @@ func TestApiSyncConflictAbortFlow(t *testing.T) {
 	}
 }
 
+// TestApiSyncPartialResolveStatus C1 契约固化：部分解决后（resolve 一个文件、不 finish）
+// GET status 的 conflicts 只含未决项（仓态动态列表——此处应为空数组，唯一冲突文件已解决），
+// conflict 仍为 true（rebase 半途）；已解决文件再 GET conflict-file 必 409。
+// 前端依据该契约：fresh 加载只显示未解决卡，不会拿到必 409 的已解决文件而白屏。
+func TestApiSyncPartialResolveStatus(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	name, _ := mkSyncProject(t, okHome)
+	st := stFor(t, okHome, name)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	mkConflictFor(t, st, name) // rebase 半途，knowledge/k.md 冲突
+	defer func() { _ = syncx.Open(st.Root).AbortRebase() }()
+
+	// HTTP resolve（action=theirs）：文件落盘 + git add，stage 坍塌
+	code, body := do(t, "POST", srv.URL+"/api/project/sync/resolve", testToken, map[string]any{
+		"project": name, "file": "knowledge/k.md", "action": "theirs",
+	})
+	if code != 204 {
+		t.Fatalf("resolve: %d %s", code, body)
+	}
+
+	// 不 finish，直接 GET status：conflicts 应为空数组（未决列表），conflict 仍为 true
+	code, body = do(t, "GET", srv.URL+"/api/project/sync/status?project="+name, testToken, nil)
+	if code != 200 {
+		t.Fatalf("status: %d %s", code, body)
+	}
+	var ss struct {
+		Conflict  bool     `json:"conflict"`
+		Conflicts []string `json:"conflicts"`
+	}
+	if err := json.Unmarshal(body, &ss); err != nil {
+		t.Fatal(err)
+	}
+	if !ss.Conflict {
+		t.Fatalf("rebase 半途 conflict 应为 true: %s", body)
+	}
+	if len(ss.Conflicts) != 0 {
+		t.Fatalf("conflicts 应只含未决项（此处已空）: %s", body)
+	}
+	if !strings.Contains(string(body), `"conflicts":[]`) {
+		t.Fatalf("conflicts 应为 [] 而非 null/残留: %s", body)
+	}
+
+	// 已解决文件 conflict-file 必 409（stage 坍塌）
+	code, _ = do(t, "GET", srv.URL+"/api/project/sync/conflict-file?project="+name+"&file="+url.QueryEscape("knowledge/k.md"), testToken, nil)
+	if code != http.StatusConflict {
+		t.Fatalf("conflict-file on resolved: want 409, got %d", code)
+	}
+}
+
+// TestApiSyncGitPathGuard I1 契约：.git 路径纵深——conflict-file/resolve/ai-merge 三端点
+// 一律拒绝 Clean 后首段为 .git 的参数（大小写不敏感，正反斜杠都算）。
+func TestApiSyncGitPathGuard(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	name, _ := mkSyncProject(t, okHome)
+	st := stFor(t, okHome, name)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	mkConflictFor(t, st, name)
+	defer func() { _ = syncx.Open(st.Root).AbortRebase() }()
+
+	for _, file := range []string{".git/config", ".GIT/HEAD", ".git\\hooks\\x"} {
+		code, _ := do(t, "GET", srv.URL+"/api/project/sync/conflict-file?project="+name+"&file="+url.QueryEscape(file), testToken, nil)
+		if code != http.StatusBadRequest {
+			t.Fatalf("conflict-file %q: want 400, got %d", file, code)
+		}
+		code, _ = do(t, "POST", srv.URL+"/api/project/sync/resolve", testToken, map[string]any{
+			"project": name, "file": file, "action": "merged", "content": "x",
+		})
+		if code != http.StatusBadRequest {
+			t.Fatalf("resolve %q: want 400, got %d", file, code)
+		}
+		code, _ = do(t, "POST", srv.URL+"/api/project/sync/ai-merge", testToken, map[string]any{
+			"project": name, "file": file,
+		})
+		if code != http.StatusBadRequest {
+			t.Fatalf("ai-merge %q: want 400, got %d", file, code)
+		}
+	}
+}
+
 // TestApiSyncAIMergeOK ai-merge 200 成功路径：httptest 假 OpenAI 兼容 LLM
 // （/v1/chat/completions 回固定 merged 文本）+ 真 HTTP 配置并激活指向它的
 // LLM profile（落盘隔离 OK_HOME/config.toml）。断言 {merged} 含假 server 文本、

@@ -37,8 +37,13 @@ type syncRequest struct {
 }
 
 // validSyncFileParam 校验冲突文件参数：拒绝空串、".." 穿越与绝对路径（conflict-file/resolve 共用）。
+// 纵深加固：Clean 后首段为 .git（大小写不敏感，正反斜杠都算）同样拒绝。
 func validSyncFileParam(file string) bool {
-	return file != "" && !strings.Contains(file, "..") && !filepath.IsAbs(file)
+	if file == "" || strings.Contains(file, "..") || filepath.IsAbs(file) {
+		return false
+	}
+	first := strings.SplitN(filepath.ToSlash(filepath.Clean(file)), "/", 2)[0]
+	return !strings.EqualFold(first, ".git")
 }
 
 func syncCommitMsg() string {
@@ -144,8 +149,9 @@ func (h *Handler) apiSyncStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	conflicts, _ := syncx.ReadConflictFiles(st.StateDir())
 	repo := syncx.Open(st.Root)
-	// rebase 半途但状态文件还没写（极窗口）时以仓态为准
-	if !l.Conflict && repo.MergeInProgress() {
+	// rebase 半途以仓态为准：conflicts 返回动态未决列表（仍未解决的），与 sync-conflict.json 解耦。
+	// 部分解决后只剩未解决项——fresh 加载的冲突页不会拿到已解决文件（其 conflict-file 必 409）。
+	if repo.MergeInProgress() {
 		l.Conflict = true
 		conflicts = repo.ConflictFiles()
 	}
@@ -348,6 +354,10 @@ func (h *Handler) apiSyncAIMerge(w http.ResponseWriter, r *http.Request) {
 	}
 	st := resolveProject(w, req.Project)
 	if st == nil {
+		return
+	}
+	if !validSyncFileParam(req.File) {
+		writeErr(w, http.StatusBadRequest, "非法文件参数")
 		return
 	}
 	client, timeout, errCode := h.llmAssistMode(st)

@@ -617,6 +617,7 @@ textarea.ef-body { flex:1; min-height:0; resize:none; font:13px/1.7 Consolas,"Ca
 .cf-pane-t{ font-size:12px; color:var(--muted,#656d76); padding:6px 14px 2px; }
 .cf-pane pre{ margin:0; padding:6px 14px 10px; font-size:12px; overflow:auto; max-height:180px; }
 .cf-card-foot{ display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--border,#d0d7de); }
+.cf-resolved-note{ padding:10px 14px; font-size:13px; color:var(--muted,#656d76); }
 
 /* ---------- P1-B：三向合并编辑器（marker 块采纳三栏，Task 7） ---------- */
 /* .mgwrap 自身是滚动容器（同 .cfwrap 惯例），复用的 .cf-stick 钉顶才有滚动上下文 */

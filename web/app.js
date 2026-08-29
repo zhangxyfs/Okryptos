@@ -190,7 +190,7 @@ const I18N = {
     syncToastLatest:"已是最新", syncToastLocal:"已初始化（仅本地历史）", syncToastFail:"同步失败：",
     syncDotSynced:"已同步", syncDotAhead:"有未同步变更", syncDotOff:"未启用同步", syncDotConflict:"同步冲突",
     syncNavConflict:"解决同步冲突",
-    syncInitConfirm:"该项目尚未初始化同步。无服务器建仓入口（属后续版本）；要用仅本地历史初始化吗？请先阅读文档或在终端执行 ok sync init。",
+    syncInitGuide:"该项目尚未初始化同步：请在终端执行 ok sync init [remote-url] 完成建仓绑定",
     /* P1-B：冲突解决页（卡片流 + 钉住操作条，Task 6） */
     cfTitle:"解决同步冲突", cfResolved:"已解决", cfReady:"（可以完成同步了）",
     cfFinish:"完成同步", cfFinishHint:"全部冲突解决后才可完成同步", cfFinishOk:"同步已完成并推送",
@@ -198,6 +198,7 @@ const I18N = {
     cfAcceptMe:"Accept Me（保留我的）", cfAcceptTheirs:"Accept Theirs（采用远端）", cfMerge:"Merge",
     cfAI:"AI 合并", cfAIRunning:"AI 合并中…", cfAIUnavailable:"AI 合并不可用：未配置本地 LLM 或服务不可达",
     cfLocal:"本地版本", cfRemote:"远端版本", cfUnresolved:"未解决", cfResolvedMark:"已解决",
+    cfResolvedNote:"该文件已解决 / 状态已变化，无需再处理。",
     cfBack:"← 返回冲突列表",
     /* P1-B：三向合并编辑器（marker 块采纳三栏，Task 7） */
     mgTitle:"三向合并", mgResult:"合并结果（可编辑）", mgApply:"应用合并结果",
@@ -206,6 +207,7 @@ const I18N = {
     mgNoBlocks:"无冲突标记块（AI 预填或手动编辑）",
     mgTakeLocal:"采纳本地", mgTakeRemote:"采纳远端",
     mgAINote:"AI 合并结果未经确认不落盘",
+    mgMarkerWarn:"合并结果仍含冲突标记（<<<<<<<），确认要原样落盘吗？",
   },
   en: {
     manage:"Manage", setup:"Setup", prefs:"Settings", logs:"Logs", misc:"Misc",
@@ -356,7 +358,7 @@ const I18N = {
     syncToastLatest:"Up to date", syncToastLocal:"Initialized (local history only)", syncToastFail:"Sync failed: ",
     syncDotSynced:"Synced", syncDotAhead:"Unsynced changes", syncDotOff:"Sync disabled", syncDotConflict:"Sync conflict",
     syncNavConflict:"Resolve sync conflict",
-    syncInitConfirm:"Sync is not initialized for this project. Server-side provisioning comes in a later version; initialize with local history via 'ok sync init' in terminal.",
+    syncInitGuide:"Sync is not initialized for this project: run 'ok sync init [remote-url]' in terminal to set it up",
     /* P1-B: conflict resolution page (card flow + pinned action bar, Task 6) */
     cfTitle:"Resolve sync conflict", cfResolved:"Resolved", cfReady:"(ready to finish)",
     cfFinish:"Finish sync", cfFinishHint:"All conflicts must be resolved before finishing", cfFinishOk:"Sync finished and pushed",
@@ -364,6 +366,7 @@ const I18N = {
     cfAcceptMe:"Accept Me", cfAcceptTheirs:"Accept Theirs", cfMerge:"Merge",
     cfAI:"AI Merge", cfAIRunning:"AI merging…", cfAIUnavailable:"AI merge unavailable: no local LLM configured or server unreachable",
     cfLocal:"Local", cfRemote:"Remote", cfUnresolved:"Unresolved", cfResolvedMark:"Resolved",
+    cfResolvedNote:"This file is already resolved / its state has changed; no action needed.",
     cfBack:"← Back to conflict list",
     /* P1-B: three-way merge editor (marker-block take, three panes, Task 7) */
     mgTitle:"Three-way merge", mgResult:"Merge result (editable)", mgApply:"Apply merge result",
@@ -372,6 +375,7 @@ const I18N = {
     mgNoBlocks:"No conflict marker blocks (AI prefill or manual edit)",
     mgTakeLocal:"Take local", mgTakeRemote:"Take remote",
     mgAINote:"AI merge result is not written to disk until confirmed",
+    mgMarkerWarn:"The merge result still contains conflict markers (<<<<<<<). Write to disk as-is?",
   },
 };
 
@@ -1813,12 +1817,8 @@ async function doProjectSync(project, btn){
       return;
     }
     if(r.status === "not_repo"){
-      // 未初始化：确认卡（本期简化为确认框；服务器建仓选项属 Plan C）
-      if(confirm(t("syncInitConfirm"))){
-        const r2 = await api("/api/project/sync", { method:"POST", body:{ project: project, remote: "" } });
-        // remote 空时后端会回 not_repo；真正的建仓入口在服务器页（Plan C）。本分支只提示。
-        void r2;
-      }
+      // 未初始化：纯指引 toast（建仓入口在终端/服务器页；杜绝假功能按钮——不再发必失败的二次 POST）
+      toast(t("syncInitGuide"), true);
       return;
     }
     if(r.status === "error"){ toast(t("syncToastFail") + (r.message || ""), true); return; }
@@ -1844,7 +1844,17 @@ async function renderSyncConflict(main){
   if(!project){ state.syncConflict = null; render(); return; }
   if(CF.project !== project){
     CF.project = project; CF.resolved = {}; CF.versions = {};
-    const st = await api("/api/project/sync/status?project=" + encodeURIComponent(project));
+    let st;
+    try{
+      st = await api("/api/project/sync/status?project=" + encodeURIComponent(project));
+    }catch(err){
+      // status 拉取失败（如项目已删/服务异常）——toast 后回管理页，防 unhandled rejection 白屏
+      toast(err.message, true);
+      state.syncConflict = null; CF.project = "";
+      location.hash = "manage";
+      refreshManage();
+      return;
+    }
     CF.list = st.conflicts || [];
   }
   const wrap = el("div","cfwrap");
@@ -1889,6 +1899,13 @@ async function renderSyncConflict(main){
     list.appendChild(await conflictCard(project, f));
   }
   wrap.appendChild(list);
+  // 409 兜底路径（陈旧列表里的已解决文件）在卡片循环中新标记 resolved——顶条进度/完成按钮以循环后状态重算
+  const doneAfter = CF.list.filter(f=>CF.resolved[f]).length;
+  if(doneAfter !== done){
+    stick.querySelector(".cf-prog").textContent = t("cfResolved")+" "+doneAfter+" / "+total+(doneAfter===total&&total>0?t("cfReady"):"");
+    fin.disabled = !(total > 0 && doneAfter === total);
+    if(fin.disabled) fin.title = t("cfFinishHint"); else fin.removeAttribute("title");
+  }
   // main 里已有侧栏（renderBody 先建 side 再分发）——只清内容区，保留侧栏逃生口
   [...main.children].forEach(n=>{ if(!n.classList.contains("side")) n.remove(); });
   main.appendChild(wrap);
@@ -1904,8 +1921,23 @@ async function conflictCard(project, file){
   card.appendChild(head);
   let v = CF.versions[file];
   if(!v){
-    v = await api("/api/project/sync/conflict-file?project="+encodeURIComponent(project)+"&file="+encodeURIComponent(file));
-    CF.versions[file] = v;
+    try{
+      v = await api("/api/project/sync/conflict-file?project="+encodeURIComponent(project)+"&file="+encodeURIComponent(file));
+      CF.versions[file] = v;
+    }catch(err){
+      // 409 = 文件已被解决/状态已变化（resolve 后 stage 坍塌，conflict-file 必 409；
+      // 部分解决后刷新时 status 列表可能残留该文件）——视作已解决，渲染紧凑卡，不再 reject 中断卡片循环
+      if(err.status === 409){
+        CF.resolved[file] = true;
+        card.classList.add("resolved");
+        head.querySelector(".cf-state").textContent = "✓ "+t("cfResolvedMark");
+        const note = el("div","cf-resolved-note");
+        note.textContent = t("cfResolvedNote");
+        card.appendChild(note);
+        return card;
+      }
+      throw err;
+    }
   }
   const prev = el("div","cf-prev");
   const snippet = s => (s||"").split("\n").slice(0,10).join("\n");
@@ -2045,6 +2077,8 @@ async function renderMerge(main){
       const aligned = MG.blocks.every(b => wl[b.start] !== undefined && wl[b.start].startsWith("<<<<<<<"));
       if(aligned) finalText = applyMergeBlocks(MG.working, MG.blocks, MG.choices);
     }
+    // 残留 marker 保护：退化路径（块行号漂移以 textarea 全文为准）或手编可能留下 <<<<<<< ——确认才落盘
+    if(finalText.indexOf("<<<<<<<") >= 0 && !confirm(t("mgMarkerWarn"))) return;
     apply.disabled = true;   // await 期间置灰防重复 POST（对齐 AI 合并按钮先例）
     try{
       await api("/api/project/sync/resolve", { method:"POST", body:{ project: m.project, file: m.file, action:"merged", content: finalText } });
@@ -5181,7 +5215,7 @@ function renderBody(app){
                 + '<span class="tip">'+t(m.key)+'</span>';
     b.onclick = ()=>{
       exitEdit();
-      state.syncConflict=null; state.merge=null;   // 冲突/合并子页逃生口：点侧栏即退出，防分发链弹回死局
+      state.syncConflict=null; state.merge=null; CF.project="";   // 冲突/合并子页逃生口：点侧栏即退出，防分发链弹回死局；CF 缓存一并清——重进以仓态为准，消"缓存态重进"困惑
       state.menu=m.key; location.hash=m.key;
       // 跨页缓存联动（Task 4 评审约定）：切到其他页重拉项目列表缓存；切到管理页重拉树数据
       if(m.key==="misc" && MISC) refreshMisc();
