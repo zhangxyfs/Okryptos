@@ -460,6 +460,8 @@ func setEnforceRulesLocked(path, block string) error {
 
 // SetSync 行级更新 path 的 [sync] 段（enabled/remote/auto_interval_min 三行），
 // 保留文件其余内容；照 SetEnforceRules 的读-改-写先例，fsx 锁内完成。
+// llm_assist 是手写键（GUI 不设）：s.LLMAssist 非空时按值重写；为空且旧段体里
+// 有该键时原样行保留进新段，否则整段重写会把它静默丢掉。
 func SetSync(path string, s Sync) error {
 	return fsx.WithFileLock(path, func() error {
 		data, _ := os.ReadFile(path)
@@ -467,6 +469,7 @@ func SetSync(path string, s Sync) error {
 		var out []string
 		inSync := false
 		wrote := false
+		llmLine := "" // 旧 [sync] 段体里的 llm_assist 原样行（仅首个）
 		section := []string{
 			"[sync]",
 			fmt.Sprintf("enabled = %t", s.Enabled),
@@ -475,11 +478,21 @@ func SetSync(path string, s Sync) error {
 			section = append(section, fmt.Sprintf("remote = %q", s.Remote))
 		}
 		section = append(section, fmt.Sprintf("auto_interval_min = %d", s.AutoIntervalMin))
+		if s.LLMAssist != "" {
+			section = append(section, fmt.Sprintf("llm_assist = %q", s.LLMAssist))
+		}
+		// writeSection 在写点前把保留的 llm_assist 行补进新段；只会被调用一次。
+		writeSection := func() {
+			if s.LLMAssist == "" && llmLine != "" {
+				section = append(section, llmLine)
+			}
+			out = append(out, section...)
+		}
 		for _, line := range lines {
 			trim := strings.TrimSpace(line)
 			if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
 				if inSync && !wrote {
-					out = append(out, section...)
+					writeSection()
 					wrote = true
 				}
 				inSync = trim == "[sync]"
@@ -487,19 +500,22 @@ func SetSync(path string, s Sync) error {
 					continue // 跳过旧 [sync] 段头，由 section 重写
 				}
 			} else if inSync {
+				if llmLine == "" && strings.HasPrefix(trim, "llm_assist") && strings.Contains(trim, "=") {
+					llmLine = line
+				}
 				continue // 丢弃旧 [sync] 段体
 			}
 			out = append(out, line)
 		}
 		if !wrote {
 			if inSync {
-				out = append(out, section...)
+				writeSection()
 			} else {
 				for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
 					out = out[:len(out)-1]
 				}
 				out = append(out, "")
-				out = append(out, section...)
+				writeSection()
 			}
 		}
 		return fsx.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)

@@ -580,3 +580,30 @@ func TestSyncLLMAssist(t *testing.T) {
 		t.Fatalf("%v %+v", err, cfg.Sync)
 	}
 }
+
+// SetSync 重写 [sync] 段时不得丢掉段内手写的 llm_assist 行
+// （Sync.LLMAssist 为空 = 未显式指定，旧键原样保留；评审移交修复项）。
+func TestSetSyncPreservesLLMAssist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[sync]\nenabled = true\nremote = \"http://nas/u/ok-x.git\"\nauto_interval_min = 5\nllm_assist = \"off\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 改 remote：新传入的 Sync 不带 llm_assist，手写的 llm_assist 行必须原样保留
+	if err := SetSync(path, Sync{Enabled: true, Remote: "http://nas/v2/ok-x.git", AutoIntervalMin: 5}); err != nil {
+		t.Fatalf("SetSync: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "llm_assist = \"off\"") {
+		t.Fatalf("llm_assist 行丢失:\n%s", data)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Sync.LLMAssist != "off" || cfg.Sync.Remote != "http://nas/v2/ok-x.git" {
+		t.Fatalf("after SetSync: %+v", cfg.Sync)
+	}
+}

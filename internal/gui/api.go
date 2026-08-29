@@ -34,6 +34,7 @@ import (
 	"openknowledge/internal/retrieve"
 	"openknowledge/internal/setupx"
 	"openknowledge/internal/store"
+	"openknowledge/internal/syncx"
 	"openknowledge/internal/version"
 	"openknowledge/internal/wiki"
 )
@@ -100,6 +101,8 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/entry/optimize", h.apiEntryOptimize)
 	api("GET /api/project/branch-info", h.apiProjectBranchInfo)
 	api("GET /api/project/readme", h.apiProjectReadme)
+	// 同步端点（api_sync.go；设计文档 §11.4）
+	h.registerSyncAPI(api)
 	// README 相对路径图片直链：<img src> 无法带 X-Ok-Token 头，改一次性短时票据——
 	// 前端先 POST 申领 ticket（走 withAuth）再拼 ?ticket= src，长期 token 不进
 	// URL（浏览器历史/书签会留 query，L-07）
@@ -335,10 +338,39 @@ func cliExePath() (string, error) {
 
 // ---------- JSON 类型 ----------
 
+// syncStatusJSON 是 /api/projects 项目对象内嵌的同步状态（行内状态点数据源）。
+type syncStatusJSON struct {
+	Enabled  bool `json:"enabled"`
+	IsRepo   bool `json:"is_repo"`
+	Ahead    int  `json:"ahead"`
+	Behind   int  `json:"behind"`
+	Conflict bool `json:"conflict"`
+}
+
 type projectJSON struct {
-	Name       string   `json:"name"`
-	Paths      []string `json:"paths"`
-	LastUpdate int64    `json:"last_update"` // kb.db mtime（unix 秒），无索引库为 0；项目下拉按它降序
+	Name       string          `json:"name"`
+	Paths      []string        `json:"paths"`
+	LastUpdate int64           `json:"last_update"` // kb.db mtime（unix 秒），无索引库为 0；项目下拉按它降序
+	Sync       *syncStatusJSON `json:"sync,omitempty"`
+}
+
+// projectSyncStatus 读项目同步状态；fail-open——任何读失败都给零值，
+// 绝不让列表接口 500。
+func projectSyncStatus(st *store.Store) *syncStatusJSON {
+	repo := syncx.Open(st.Root)
+	// LoadStatus 读文件失败会返回 nil（fail-open）
+	l := &syncx.LayerStatus{}
+	if sf, err := syncx.LoadStatus(st.StateDir()); err == nil {
+		l = sf.Layer("personal")
+	}
+	cfg, cerr := config.LoadMerged(st.ConfigPath(), "")
+	return &syncStatusJSON{
+		Enabled:  cerr == nil && cfg.Sync.Enabled,
+		IsRepo:   repo.IsRepo(),
+		Ahead:    l.Ahead,
+		Behind:   l.Behind,
+		Conflict: l.Conflict || repo.MergeInProgress(),
+	}
 }
 
 // listProjects 汇总注册表项目：附带 kb.db mtime 作为最近更新时间，按它降序
@@ -351,7 +383,9 @@ func listProjects(reg *registry.Registry) []projectJSON {
 		if fi, err := os.Stat(kb); err == nil {
 			last = fi.ModTime().Unix()
 		}
-		projects = append(projects, projectJSON{Name: p.Name, Paths: p.Paths, LastUpdate: last})
+		pj := projectJSON{Name: p.Name, Paths: p.Paths, LastUpdate: last}
+		pj.Sync = projectSyncStatus(store.New(filepath.Join(registry.Home(), "projects", p.Name)))
+		projects = append(projects, pj)
 	}
 	sort.SliceStable(projects, func(i, j int) bool {
 		if projects[i].LastUpdate != projects[j].LastUpdate {
