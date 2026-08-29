@@ -35,6 +35,14 @@ func TestMain(m *testing.M) {
 	if out, err := build.CombinedOutput(); err != nil {
 		panic(fmt.Sprintf("build okd failed: %v\n%s", err, out))
 	}
+	okserverPath = filepath.Join(dir, "okserver")
+	if runtime.GOOS == "windows" {
+		okserverPath += ".exe"
+	}
+	build = exec.Command("go", "build", "-o", okserverPath, "openknowledge/cmd/okserver")
+	if out, err := build.CombinedOutput(); err != nil {
+		panic(fmt.Sprintf("build okserver failed: %v\n%s", err, out))
+	}
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
