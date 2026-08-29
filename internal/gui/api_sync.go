@@ -33,6 +33,11 @@ type syncRequest struct {
 	Content string `json:"content"`
 }
 
+// validSyncFileParam 校验冲突文件参数：拒绝空串、".." 穿越与绝对路径（conflict-file/resolve 共用）。
+func validSyncFileParam(file string) bool {
+	return file != "" && !strings.Contains(file, "..") && !filepath.IsAbs(file)
+}
+
 func syncCommitMsg() string {
 	host, _ := os.Hostname()
 	return fmt.Sprintf("sync: %s %s", host, time.Now().Format(time.RFC3339))
@@ -141,6 +146,10 @@ func (h *Handler) apiSyncStatus(w http.ResponseWriter, r *http.Request) {
 		l.Conflict = true
 		conflicts = repo.ConflictFiles()
 	}
+	// 归一化 null → []：前端 conflicts.map 依赖数组
+	if conflicts == nil {
+		conflicts = []string{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled":    err == nil && cfg.Sync.Enabled,
 		"is_repo":    repo.IsRepo(),
@@ -160,7 +169,7 @@ func (h *Handler) apiSyncConflictFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	file := r.URL.Query().Get("file")
-	if file == "" || strings.Contains(file, "..") || filepath.IsAbs(file) {
+	if !validSyncFileParam(file) {
 		writeErr(w, http.StatusBadRequest, "非法文件参数")
 		return
 	}
@@ -183,6 +192,10 @@ func (h *Handler) apiSyncResolve(w http.ResponseWriter, r *http.Request) {
 	}
 	st := resolveProject(w, req.Project)
 	if st == nil {
+		return
+	}
+	if !validSyncFileParam(req.File) {
+		writeErr(w, http.StatusBadRequest, "非法文件参数")
 		return
 	}
 	repo := syncx.Open(st.Root)

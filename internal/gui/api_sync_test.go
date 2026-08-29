@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"openknowledge/internal/store"
@@ -66,10 +67,34 @@ func TestApiSyncStatus(t *testing.T) {
 	if !st.Enabled || !st.IsRepo || st.Conflict {
 		t.Fatalf("unexpected: %+v", st)
 	}
+	// 无冲突时 conflicts 归一化为 [] 而非 null（前端 conflicts.map 依赖数组）
+	if !strings.Contains(string(body), `"conflicts":[]`) {
+		t.Fatalf("conflicts 应为 []: %s", body)
+	}
 	// 未注册项目 404
 	code, _ = do(t, "GET", srv.URL+"/api/project/sync/status?project=nope", testToken, nil)
 	if code != http.StatusNotFound {
 		t.Fatalf("nope: %d", code)
+	}
+}
+
+// TestApiSyncResolveTraversal：resolve 端点拒绝 ".." 路径穿越，仓外文件不得被创建。
+func TestApiSyncResolveTraversal(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	name, _ := mkSyncProject(t, okHome)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, body := do(t, "POST", srv.URL+"/api/project/sync/resolve", testToken, map[string]any{
+		"project": name, "file": "../../evil.txt", "action": "merged", "content": "pwned",
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("traversal: want 400, got %d %s", code, body)
+	}
+	st := stFor(t, okHome, name)
+	evil := filepath.Join(st.Root, "..", "..", "evil.txt")
+	if _, err := os.Stat(evil); !os.IsNotExist(err) {
+		t.Fatalf("仓外文件不应被创建: %s (err=%v)", evil, err)
 	}
 }
 
