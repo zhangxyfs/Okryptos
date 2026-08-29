@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenKnowledge okserver
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/okserver
+Environment=OKSERVER_LISTEN=:3100
+Environment=OKSERVER_DATA_DIR=/var/lib/okserver
+Environment=OKSERVER_GITEA_URL=http://127.0.0.1:3000
+EnvironmentFile=/etc/okserver/env
+Restart=always
+User=okserver
+
+[Install]
+WantedBy=multi-user.target

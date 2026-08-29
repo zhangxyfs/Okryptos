@@ -1,0 +1,19 @@
+# Gitea 官方 systemd 示例（https://docs.gitea.com/installation/install-from-binary）
+# 前置：useradd -r -m git；二进制在 /usr/local/bin/gitea；工作目录 /var/lib/gitea
+[Unit]
+Description=Gitea (Git with a cup of tea)
+After=syslog.target
+After=network.target
+
+[Service]
+RestartSec=2s
+Type=simple
+User=git
+Group=git
+WorkingDirectory=/var/lib/gitea/
+ExecStart=/usr/local/bin/gitea web --config /etc/gitea/app.ini
+Restart=always
+Environment=USER=git HOME=/home/git GITEA_WORK_DIR=/var/lib/gitea
+
+[Install]
+WantedBy=multi-user.target

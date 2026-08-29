@@ -1,0 +1,29 @@
+# OpenKnowledge 服务端：okserver + Gitea 双容器（设计文档 §9.1）
+# 用法：cp .env.example .env 并填入 GITEA_ADMIN_TOKEN，然后 docker compose up -d
+services:
+  gitea:
+    image: gitea/gitea:latest
+    restart: unless-stopped
+    volumes:
+      - ./gitea-data:/data
+    environment:
+      - GITEA__service__DISABLE_REGISTRATION=true        # 治理配置①：关闭开放注册
+      - GITEA__repository__MAX_CREATION_LIMIT=0          # 治理配置②：禁普通用户建仓
+      - GITEA__repository__DEFAULT_PRIVATE=private       # 治理配置③：默认私有
+      - GITEA__server__ROOT_URL=${GITEA_ROOT_URL:-http://localhost:3000/}  # 治理配置④：clone URL 地址
+    ports:
+      - "${GITEA_HTTP_PORT:-3000}:3000"
+      - "${GITEA_SSH_PORT:-2222}:22"   # 可选（v1 git 走 HTTPS+token）
+  okserver:
+    image: ${OKSERVER_IMAGE:-openknowledge/okserver:latest}
+    restart: unless-stopped
+    depends_on: [gitea]
+    volumes:
+      - ./okserver-data:/data
+    environment:
+      - OKSERVER_LISTEN=:3100
+      - OKSERVER_DATA_DIR=/data
+      - OKSERVER_GITEA_URL=http://gitea:3000
+      - OKSERVER_GITEA_ADMIN_TOKEN=${GITEA_ADMIN_TOKEN:?在 .env 里填入}
+    ports:
+      - "${OKSERVER_PORT:-3100}:3100"
