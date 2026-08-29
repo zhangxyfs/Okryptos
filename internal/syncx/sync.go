@@ -22,7 +22,7 @@ type Outcome struct {
 func (r *Repo) PullRebase() ([]string, error) {
 	if _, err := execGit(r.Dir, networkTimeout, "pull", "--rebase"); err != nil {
 		// rebase 进行中 → 结构化冲突而非错误
-		if _, rbErr := execGit(r.Dir, localTimeout, "rev-parse", "--verify", "--quiet", "REBASE_HEAD"); rbErr == nil {
+		if r.MergeInProgress() {
 			out, _ := execGit(r.Dir, localTimeout, "diff", "--name-only", "--diff-filter=U")
 			var files []string
 			if out != "" {
@@ -45,14 +45,7 @@ func (r *Repo) Sync(msg string) (o Outcome) {
 	// 否则 CommitAll 会把冲突标记 add -A 提交进历史（冲突期应等人解决，设计文档 §7）。
 	// MERGE_HEAD 同样拦：ok sync init 情形 3 指引用户手工 merge --allow-unrelated-histories，
 	// 该 merge 冲突中途也必须禁止 Sync。
-	midRebase := false
-	if _, err := execGit(r.Dir, localTimeout, "rev-parse", "--verify", "--quiet", "REBASE_HEAD"); err == nil {
-		midRebase = true
-	}
-	if _, err := execGit(r.Dir, localTimeout, "rev-parse", "--verify", "--quiet", "MERGE_HEAD"); err == nil {
-		midRebase = true
-	}
-	if midRebase {
+	if r.MergeInProgress() {
 		out, _ := execGit(r.Dir, localTimeout, "diff", "--name-only", "--diff-filter=U")
 		if out != "" {
 			o.Conflicts = strings.Split(out, "\n")

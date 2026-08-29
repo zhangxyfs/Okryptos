@@ -104,6 +104,30 @@ func TestAbortRebase(t *testing.T) {
 	}
 }
 
+// TestSyncAfterResolvedConflict 回归：冲突解决并 continue 后，再次 Sync 必须正常工作
+//（REBASE_HEAD 残留不得让守卫误判）。
+func TestSyncAfterResolvedConflict(t *testing.T) {
+	dirB, _ := mkConflict(t)
+	r := Open(dirB)
+	if err := r.ResolveFile("k.md", "base 行\n合并完成\n"); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if err := r.ContinueRebase(); err != nil {
+		t.Fatalf("continue: %v", err)
+	}
+	if err := r.Push(); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	// 再次 Sync：应为已是最新（无 Conflicts、无 Err、Committed=false）
+	o := r.Sync("sync: after")
+	if o.Err != nil {
+		t.Fatalf("sync after resolved: %v", o.Err)
+	}
+	if len(o.Conflicts) > 0 {
+		t.Fatalf("phantom conflict after resolved: %v", o.Conflicts)
+	}
+}
+
 func TestConflictFilesIdle(t *testing.T) {
 	_, dirA, _ := mkPair(t)
 	if got := Open(dirA).ConflictFiles(); got != nil {
