@@ -580,3 +580,19 @@ textarea.ef-body { flex:1; min-height:0; resize:none; font:13px/1.7 Consolas,"Ca
 .g-back { height:30px; padding:0 12px; border:1px solid #d1d5db; border-radius:6px;
   background:#fff; font-size:13px; color:#374151; cursor:pointer; flex:none; }
 .g-back:hover { background:#f3f4f6; }
+
+/* ---------- P1-B：toast（同步反馈） ---------- */
+.toast{ position:fixed; left:50%; bottom:30px; transform:translateX(-50%) translateY(8px); background:var(--fg,#1f2328); color:#fff; padding:8px 16px; border-radius:18px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .18s, transform .18s; z-index:9999; box-shadow:0 4px 16px rgba(0,0,0,.18); }
+.toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+.toast.err{ background:#c93c37; }
+
+/* ---------- P1-B：项目行同步状态点 + 按钮 ---------- */
+.pj-sync-dot{ width:7px; height:7px; border-radius:50%; margin:0 2px 0 4px; flex:none; align-self:center; }
+.pj-sync-dot.off{ background:var(--border,#d0d7de); }
+.pj-sync-dot.synced{ background:#2da44e; }
+.pj-sync-dot.ahead{ background:#d4a72c; }
+.pj-sync-dot.conflict{ background:#cf222e; }
+.pj-sync-btn{ width:22px; height:22px; padding:2px; opacity:.55; flex:none; align-self:center; }
+.pj-sync-btn:hover{ opacity:1; }
+.pj-sync-btn.spinning svg{ animation:okspin 1s linear infinite; }
+@keyframes okspin{ to{ transform:rotate(360deg); } }

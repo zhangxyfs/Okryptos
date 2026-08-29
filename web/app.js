@@ -184,6 +184,13 @@ const I18N = {
     /* 需求 5：树类目分组 */
     catDraft:"草稿", catMandatory:"注入", catReference:"参考", catNote:"笔记",
     catPitfall:"踩坑", catRule:"规则", catArchived:"归档", catOther:"其他",
+    /* P1-B：项目同步（状态点/同步按钮/toast/冲突页） */
+    mgSync:"同步", mgSyncConflict:"同步冲突，待解决",
+    syncToastPull:"已拉取 {n} 个提交", syncToastPush:"已推送 {n} 个提交",
+    syncToastLatest:"已是最新", syncToastLocal:"已初始化（仅本地历史）", syncToastFail:"同步失败：",
+    syncDotSynced:"已同步", syncDotAhead:"有未同步变更", syncDotOff:"未启用同步", syncDotConflict:"同步冲突",
+    syncNavConflict:"解决同步冲突",
+    syncInitConfirm:"该项目尚未初始化同步。无服务器建仓入口（属后续版本）；要用仅本地历史初始化吗？请先阅读文档或在终端执行 ok sync init。",
   },
   en: {
     manage:"Manage", setup:"Setup", prefs:"Settings", logs:"Logs", misc:"Misc",
@@ -328,6 +335,13 @@ const I18N = {
     /* Requirement 5: tree category groups */
     catDraft:"Drafts", catMandatory:"Injected", catReference:"Reference", catNote:"Notes",
     catPitfall:"Pitfalls", catRule:"Rules", catArchived:"Archived", catOther:"Other",
+    /* P1-B: project sync (status dot / sync button / toast / conflict page) */
+    mgSync:"Sync", mgSyncConflict:"Sync conflict, resolution needed",
+    syncToastPull:"Pulled {n} commits", syncToastPush:"Pushed {n} commits",
+    syncToastLatest:"Up to date", syncToastLocal:"Initialized (local history only)", syncToastFail:"Sync failed: ",
+    syncDotSynced:"Synced", syncDotAhead:"Unsynced changes", syncDotOff:"Sync disabled", syncDotConflict:"Sync conflict",
+    syncNavConflict:"Resolve sync conflict",
+    syncInitConfirm:"Sync is not initialized for this project. Server-side provisioning comes in a later version; initialize with local history via 'ok sync init' in terminal.",
   },
 };
 
@@ -351,6 +365,7 @@ const ICON = {
   moon:   svg('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'),
   sun:    svg('<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'),
   graph:  svg('<circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M8.5 7.5 15 16M9 6h6"/>'),
+  sync:   svg('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><polyline points="20 4 20 9 15 9"/>', 20),   // P1-B：循环箭头（同步）
 };
 const MENUS = [
   { key:"manage", ico:ICON.manage }, { key:"graph", ico:ICON.graph }, { key:"setup", ico:ICON.setup }, { key:"prefs", ico:ICON.prefs },
@@ -676,7 +691,8 @@ const state = { menu:"manage", lang:"zh", theme:"light", collapsed:false,
                 edView:"read",   // 详情区态：read 只读 | edit 内联编辑 | cmp 优化对照
                 layout:loadLayout(), cfgOpen:false, cfgDraft:null,            // 需求 4：栏目布局 + 设置弹窗
                 logSrc:{ ok:true, daemon:false, sidecar:false }, logSem:false, logQ:"",
-                logAuto:true, logStick:true, miscFb:null };
+                logAuto:true, logStick:true, miscFb:null,
+                syncConflict:null, merge:null };   // P1-B 同步：冲突页/合并页会话态（带参 hash 路由读回）
 const t = k => I18N[state.lang][k];
 
 /* 设置卡脏态/已保存反馈（pcard/pDirtyLive/pSave 用）；prefsErr 驻留保存失败的后端错误（400 信息等） */
@@ -1051,8 +1067,8 @@ function refreshManage(){
   api("/api/projects").then(ps=>{
     return Promise.all((ps||[]).map(p=>
       api("/api/entries?project="+encodeURIComponent(p.name))
-        .then(es=>({ name:p.name, paths:p.paths||[], lastUpdate:p.last_update||0, entries:es||[] }))
-        .catch(err=>({ name:p.name, paths:p.paths||[], lastUpdate:p.last_update||0, entries:[], err:err.message }))));
+        .then(es=>({ name:p.name, paths:p.paths||[], lastUpdate:p.last_update||0, entries:es||[], sync:p.sync||null }))
+        .catch(err=>({ name:p.name, paths:p.paths||[], lastUpdate:p.last_update||0, entries:[], err:err.message, sync:p.sync||null }))));
   }).then(list=>{
     list.sort((a,b)=>(b.lastUpdate||0)-(a.lastUpdate||0) || (a.name<b.name?-1:a.name>b.name?1:0));
     MGMT = { list:list };
@@ -1707,6 +1723,16 @@ function fillTree(scroll){
       render();
     };
     pj.appendChild(tg); pj.appendChild(nm);
+    // 同步状态点 + 同步按钮（P1-B；sync 字段由 /api/projects 带，fail-open）
+    const sy = p.sync || null;
+    const dot = el("span","pj-sync-dot "+syncDotClass(sy));
+    dot.title = t(syncDotKey(sy));
+    pj.appendChild(dot);
+    const sb = el("button","icon-btn pj-sync-btn");
+    sb.innerHTML = ICON.sync;
+    sb.title = t("mgSync");
+    sb.onclick = ev=>{ ev.stopPropagation(); doProjectSync(p.name, sb); };
+    pj.appendChild(sb);
     scroll.appendChild(pj);
     if(open){
       const kids = el("div","tn-kids");
@@ -1720,6 +1746,52 @@ function fillTree(scroll){
   });
   if(filtering && !hits)   // 需求 2：过滤无命中时给空态提示
     scroll.appendChild(Object.assign(el("div","tree-empty"),{textContent:t("noHit")}));
+}
+/* ---- P1-B 项目同步：状态点四态 + 行内同步按钮 ---- */
+function syncDotClass(sy){
+  if(!sy || !sy.enabled || !sy.is_repo) return "off";
+  if(sy.conflict) return "conflict";
+  if(sy.ahead > 0 || sy.behind > 0) return "ahead";
+  return "synced";
+}
+function syncDotKey(sy){
+  if(!sy || !sy.enabled || !sy.is_repo) return "syncDotOff";
+  if(sy.conflict) return "syncDotConflict";
+  if(sy.ahead > 0 || sy.behind > 0) return "syncDotAhead";
+  return "syncDotSynced";
+}
+
+/* 项目行同步按钮：即点即执行 + 转圈 + toast（动作类纪律） */
+async function doProjectSync(project, btn){
+  if(btn.classList.contains("spinning")) return; // 防连点
+  btn.classList.add("spinning");
+  try{
+    const r = await api("/api/project/sync", { method:"POST", body:{ project: project } });
+    if(r.status === "conflict"){
+      toast(r.message || t("mgSyncConflict"), true);
+      state.syncConflict = { project: project };
+      location.hash = "sync-conflict?project=" + encodeURIComponent(project);
+      render();
+      return;
+    }
+    if(r.status === "not_repo"){
+      // 未初始化：确认卡（本期简化为确认框；服务器建仓选项属 Plan C）
+      if(confirm(t("syncInitConfirm"))){
+        const r2 = await api("/api/project/sync", { method:"POST", body:{ project: project, remote: "" } });
+        // remote 空时后端会回 not_repo；真正的建仓入口在服务器页（Plan C）。本分支只提示。
+        void r2;
+      }
+      return;
+    }
+    if(r.status === "error"){ toast(t("syncToastFail") + (r.message || ""), true); return; }
+    toast(r.message || t("syncToastLatest"));
+  }catch(err){
+    if(err && err.name === "AbortError") throw err;
+    toast(t("syncToastFail") + (err.message || ""), true);
+  }finally{
+    btn.classList.remove("spinning");
+    refreshManage(); // 状态点即时刷新
+  }
 }
 // growTreeShown 懒加载追加（反馈7 + 需求 5 下沉到类目）：第一个还有未渲条目的展开类目步进
 // LAZY_STEP，原位重填树；追加在列表尾部，scrollTop 天然不变。
@@ -4720,6 +4792,17 @@ function renderDelModal(name){
 /* ================= 渲染 ================= */
 function el(tag, cls){ const n=document.createElement(tag); if(cls) n.className=cls; return n; }
 
+/* toast：动作类按钮的可见反馈（纪律：假功能按钮必须有可见反馈）——底部居中胶囊，2.5s 自消 */
+let toastTimer = null;
+function toast(msg, isErr){
+  let node = document.querySelector(".toast");
+  if(!node){ node = el("div","toast"); document.body.appendChild(node); }
+  node.textContent = msg;
+  node.className = "toast" + (isErr ? " err" : "") + " show";
+  if(toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{ node.classList.remove("show"); }, 2500);
+}
+
 function render(){
   document.documentElement.dataset.theme = state.theme;
   const app = document.getElementById("app");
@@ -4799,6 +4882,9 @@ function renderBody(app){
 
   // 五页均已接入真实数据：管理（Task 5）、引导（Task 7）、设置（Task 6）、日志（Task 3）、其他（Task 4）
   // （占位分支已随 Task 7 引导页接入移除；notImpl 键同步删除）
+  // P1-B 同步子页优先于普通菜单页（渲染器由 Task 6/7 提供；存在性守卫防中间态白屏）
+  if(state.syncConflict && typeof renderSyncConflict === "function"){ renderSyncConflict(main); return; }
+  if(state.merge && typeof renderMerge === "function"){ renderMerge(main); return; }
   if(state.menu==="manage"){
     loadManage();
     renderManageLayout(main);   // 需求 4：三栏目（树/详情/终端）按槽位配置渲染
@@ -4823,10 +4909,18 @@ function renderBody(app){
   if(state.cfgOpen) app.appendChild(renderCfgModal());   // 需求 4：界面设置弹窗（顶栏级，不限当前页）
 }
 
-/* 刷新恢复选中菜单：菜单点击时写入 location.hash，启动时读回（非法值回退 manage） */
+/* 刷新恢复选中菜单：菜单点击时写入 location.hash，启动时读回（非法值回退 manage）。
+   P1-B：带参 hash（#/sync-conflict?project=<name>）→ 落 manage 菜单 + 置 state.syncConflict */
 (function(){
-  const h = location.hash.replace(/^#/,"");
-  if(MENUS.some(m=>m.key===h)) state.menu = h;
+  const raw = location.hash.replace(/^#\/?/, "");
+  const [name, qs] = raw.split("?");
+  if(name === "sync-conflict"){
+    const p = new URLSearchParams(qs || "").get("project") || "";
+    state.menu = "manage";
+    state.syncConflict = p ? { project: p } : null;
+    return;
+  }
+  if(MENUS.some(m=>m.key===name)) state.menu = name;
 })();
 
 render();
