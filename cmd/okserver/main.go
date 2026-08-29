@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"openknowledge/internal/logx"
 	"openknowledge/internal/oksrv"
@@ -33,9 +34,9 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "root 初始化失败: %v\n", err)
 		return 1
 	} else if created {
-		initFile := dataDir + string(os.PathSeparator) + "INITIAL_ROOT_PASSWORD"
+		initFile := filepath.Join(dataDir, "INITIAL_ROOT_PASSWORD")
 		if err := os.WriteFile(initFile, []byte(pw+"\n"), 0o600); err != nil {
-			fmt.Fprintf(os.Stderr, "root 初始密码落盘失败: %v\n", err)
+			fmt.Fprintf(os.Stderr, "root 初始密码落盘失败: %v（数据目录尚新时删除数据目录重跑即可重新生成）\n", err)
 			return 1
 		}
 		log.Write([]byte(fmt.Sprintf("root 初始密码已生成并写入 %s（取走后请删除该文件）\n", initFile)))

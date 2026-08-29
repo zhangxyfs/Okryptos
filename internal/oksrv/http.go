@@ -187,13 +187,14 @@ func (s *server) apiPersonalRepo(w http.ResponseWriter, r *http.Request, u *User
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// 审计随事实落库：仓已建成，与下文 token 下发成败无关。
+	s.st.Audit(u.Username, "create-personal-repo", u.Username+"/"+in.Project, repo.CloneURL)
 	// token 失败不阻断建仓结果（仓已登记，幂等重试不再补发——同上 v1.1 语义）。
 	token, err := s.backend.CreateUserToken(r.Context(), u.Username, "ok-sync-"+in.Project)
 	if err != nil {
 		backendErr(w, err)
 		return
 	}
-	s.st.Audit(u.Username, "create-personal-repo", u.Username+"/"+in.Project, repo.CloneURL)
 	writeJSON(w, http.StatusOK, map[string]any{"repo": gitRepoJSON(repo), "git_token": token})
 }
 
@@ -293,6 +294,7 @@ func (s *server) apiUserResetPassword(w http.ResponseWriter, r *http.Request, u 
 }
 
 // apiUserDisable 禁用/启用账号（root 不可禁用——store 层另有最后防线）。
+// 双写顺序 fail-closed：先断 git 侧再写本库；本库失败残留"能登录不能推"，重试可自愈。
 func (s *server) apiUserDisable(disable bool) func(http.ResponseWriter, *http.Request, *User) {
 	return func(w http.ResponseWriter, r *http.Request, u *User) {
 		name := r.PathValue("name")
@@ -305,12 +307,12 @@ func (s *server) apiUserDisable(disable bool) func(http.ResponseWriter, *http.Re
 			writeErr(w, http.StatusForbidden, "root 不可禁用")
 			return
 		}
-		if err := s.st.SetUserDisabled(name, disable); err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
-			return
-		}
 		if err := s.backend.SetUserActive(r.Context(), name, !disable); err != nil {
 			backendErr(w, err)
+			return
+		}
+		if err := s.st.SetUserDisabled(name, disable); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		action := "enable-user"

@@ -2,7 +2,7 @@
 # 用法：cp .env.example .env 并填入 GITEA_ADMIN_TOKEN，然后 docker compose up -d
 services:
   gitea:
-    image: gitea/gitea:latest
+    image: gitea/gitea:1.22
     restart: unless-stopped
     volumes:
       - ./gitea-data:/data

@@ -169,7 +169,7 @@ services:
 | `GET /api/v1/meta` | 公开 | `{version, initialized, git_backend: {type, ok}}`——GUI 向导第一步探测用 |
 | `POST /api/v1/login` | 公开（限流） | `{username, password}` → `{token, user: {name, role}}` |
 | `GET /api/v1/me` | 登录 | 我的身份、所属组织、可见仓库列表 |
-| `POST /api/v1/repos/personal` `{project}` | 登录 | 建/取我的个人仓 `<user>/ok-<project>`（幂等）；**git token 仅首次建仓时下发**，重复调用只返回仓信息（防 token 堆积），token 丢失走重置流程 |
+| `POST /api/v1/repos/personal` `{project}` | 登录 | 建/取我的个人仓 `<user>/ok-<project>`（幂等）；**git token 仅首次建仓时下发**，重复调用只返回仓信息（防 token 堆积），token 丢失本期需重建仓，v1.1 走重置联动重发 |
 | `GET /api/v1/repos` | root/admin | 全量仓列表（层/owner/项目/创建人/创建时间）——§10.2 仓库总览卡数据源 |
 | `GET /api/v1/users` / `POST /api/v1/users` `{username}` | root/admin | 用户列表 / 建用户（生成初始密码 + Gitea 账号与 git token，**一次性返回明文**） |
 | `POST /api/v1/users/{name}/reset-password` | root/admin | 重置密码，新密码一次性返回 |

@@ -173,6 +173,92 @@ func TestFullManagementFlow(t *testing.T) {
 	}
 }
 
+// TestAdminWriteEndpoints 覆盖管理写端点：admin 越权拒止、disable/enable 联动登录、
+// 组织成员移除、审计动作落库（reset-password / disable-user / enable-user / remove-org-member）。
+func TestAdminWriteEndpoints(t *testing.T) {
+	srv, st := newTestServer(t)
+	defer srv.Close()
+	rootTok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
+
+	// root 建 admin
+	code, out := call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "op1", "role": "admin"})
+	if code != 200 {
+		t.Fatalf("create admin: %d %v", code, out)
+	}
+	adminTok := login(t, srv, "op1", out["password"].(string))
+
+	// admin reset root 密码必须 403（root 保护）
+	code, _ = call(t, srv, "POST", "/api/v1/users/root/reset-password", adminTok, nil)
+	if code != 403 {
+		t.Fatalf("admin reset root must be 403: %d", code)
+	}
+
+	// root 建 member
+	code, out = call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "m1"})
+	if code != 200 {
+		t.Fatalf("create m1: %d %v", code, out)
+	}
+	m1pw := out["password"].(string)
+	login(t, srv, "m1", m1pw)
+
+	// admin disable m1 → 204；m1 登录 401
+	code, _ = call(t, srv, "POST", "/api/v1/users/m1/disable", adminTok, nil)
+	if code != 204 {
+		t.Fatalf("disable m1: %d", code)
+	}
+	code, _ = call(t, srv, "POST", "/api/v1/login", "", map[string]string{"username": "m1", "password": m1pw})
+	if code != 401 {
+		t.Fatalf("disabled login must be 401: %d", code)
+	}
+	// admin enable m1 → 204；恢复可登录
+	code, _ = call(t, srv, "POST", "/api/v1/users/m1/enable", adminTok, nil)
+	if code != 204 {
+		t.Fatalf("enable m1: %d", code)
+	}
+	login(t, srv, "m1", m1pw)
+
+	// root reset m1 密码 → 200，新密码可登录（产出 reset-password 审计）
+	code, out = call(t, srv, "POST", "/api/v1/users/m1/reset-password", rootTok, nil)
+	if code != 200 || out["password"].(string) == "" {
+		t.Fatalf("reset m1: %d %v", code, out)
+	}
+	login(t, srv, "m1", out["password"].(string))
+
+	// root 移除组织成员 → 204，且 ListOrgMembers 不再含该成员
+	code, _ = call(t, srv, "POST", "/api/v1/orgs", rootTok, map[string]string{"name": "acme2"})
+	if code != 201 {
+		t.Fatalf("create org: %d", code)
+	}
+	code, _ = call(t, srv, "POST", "/api/v1/orgs/acme2/members", rootTok, map[string]string{"username": "m1"})
+	if code != 204 {
+		t.Fatalf("add member: %d", code)
+	}
+	code, _ = call(t, srv, "DELETE", "/api/v1/orgs/acme2/members/m1", rootTok, nil)
+	if code != 204 {
+		t.Fatalf("remove member: %d", code)
+	}
+	for _, m := range st.ListOrgMembers("acme2") {
+		if m.Username == "m1" {
+			t.Fatalf("m1 must be removed from acme2: %+v", m)
+		}
+	}
+
+	// 审计含 reset/disable/enable/remove 动作
+	code, out = call(t, srv, "GET", "/api/v1/audit?limit=100", rootTok, nil)
+	if code != 200 {
+		t.Fatalf("audit: %d", code)
+	}
+	actions := map[string]bool{}
+	for _, e := range out["entries"].([]any) {
+		actions[e.(map[string]any)["action"].(string)] = true
+	}
+	for _, want := range []string{"reset-password", "disable-user", "enable-user", "remove-org-member"} {
+		if !actions[want] {
+			t.Fatalf("audit missing %s: %v", want, actions)
+		}
+	}
+}
+
 func getenv(t *testing.T, key string) string {
 	t.Helper()
 	v := ""

@@ -125,6 +125,8 @@ Docker 路径：四项已由 `docker-compose.yml` 的 `GITEA__*` 环境变量注
 
 经 okserver 加入组织的成员，在 **git 侧进的是 Gitea org 的 Owners 队（全权）**——org 内仓库的读写在 git 层不做细分；okserver 自有角色（root / admin / member）只在 **okserver 应用层 API** 生效。这是 v1 刻意从简的语义（org 内角色下放留待 v1.1），**适用于内网受信团队**；若有"成员只能读部分仓"的诉求，v1 做不到，部署前知悉。
 
+另一已知限制：**v1 无 git token 重发**——建仓/建用户时 token 下发失败或 token 丢失，只能重建仓或待 v1.1（reset 联动重发）。
+
 ## 6. 升级
 
 ```bash
@@ -174,6 +176,7 @@ okserver 镜像多架构（`linux/amd64` + `linux/arm64`——ARM NAS 是常态�
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 \
+  --build-arg VERSION=<版本> \
   -f server/nas/Dockerfile -t openknowledge/okserver:<版本> --push .
 ```
 
