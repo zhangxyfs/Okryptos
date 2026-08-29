@@ -191,6 +191,14 @@ const I18N = {
     syncDotSynced:"已同步", syncDotAhead:"有未同步变更", syncDotOff:"未启用同步", syncDotConflict:"同步冲突",
     syncNavConflict:"解决同步冲突",
     syncInitConfirm:"该项目尚未初始化同步。无服务器建仓入口（属后续版本）；要用仅本地历史初始化吗？请先阅读文档或在终端执行 ok sync init。",
+    /* P1-B：冲突解决页（卡片流 + 钉住操作条，Task 6） */
+    cfTitle:"解决同步冲突", cfResolved:"已解决", cfReady:"可以完成同步了",
+    cfFinish:"完成同步", cfFinishHint:"全部冲突解决后才可完成同步", cfFinishOk:"同步已完成并推送",
+    cfAbort:"放弃本次同步", cfAbortConfirm:"放弃本次同步？将回滚到同步前状态，本地内容原样保留。", cfAbortOk:"已放弃本次同步",
+    cfAcceptMe:"Accept Me（保留我的）", cfAcceptTheirs:"Accept Theirs（采用远端）", cfMerge:"Merge",
+    cfAI:"AI 合并", cfAIRunning:"AI 合并中…", cfAIUnavailable:"AI 合并不可用：未配置本地 LLM 或服务不可达",
+    cfLocal:"本地版本", cfRemote:"远端版本", cfUnresolved:"未解决", cfResolvedMark:"已解决",
+    cfBack:"← 返回冲突列表",
   },
   en: {
     manage:"Manage", setup:"Setup", prefs:"Settings", logs:"Logs", misc:"Misc",
@@ -342,6 +350,14 @@ const I18N = {
     syncDotSynced:"Synced", syncDotAhead:"Unsynced changes", syncDotOff:"Sync disabled", syncDotConflict:"Sync conflict",
     syncNavConflict:"Resolve sync conflict",
     syncInitConfirm:"Sync is not initialized for this project. Server-side provisioning comes in a later version; initialize with local history via 'ok sync init' in terminal.",
+    /* P1-B: conflict resolution page (card flow + pinned action bar, Task 6) */
+    cfTitle:"Resolve sync conflict", cfResolved:"Resolved", cfReady:"ready to finish",
+    cfFinish:"Finish sync", cfFinishHint:"All conflicts must be resolved before finishing", cfFinishOk:"Sync finished and pushed",
+    cfAbort:"Abort this sync", cfAbortConfirm:"Abort this sync? Rolls back to the pre-sync state; local content is kept as-is.", cfAbortOk:"Sync aborted",
+    cfAcceptMe:"Accept Me", cfAcceptTheirs:"Accept Theirs", cfMerge:"Merge",
+    cfAI:"AI Merge", cfAIRunning:"AI merging…", cfAIUnavailable:"AI merge unavailable: no local LLM configured or server unreachable",
+    cfLocal:"Local", cfRemote:"Remote", cfUnresolved:"Unresolved", cfResolvedMark:"Resolved",
+    cfBack:"← Back to conflict list",
   },
 };
 
@@ -1727,6 +1743,11 @@ function fillTree(scroll){
     const sy = p.sync || null;
     const dot = el("span","pj-sync-dot "+syncDotClass(sy));
     dot.title = t(syncDotKey(sy));
+    if(sy && sy.conflict){   // 红点 = 冲突页入口（逃生口的回程）：点击进冲突解决页
+      dot.classList.add("clickable");
+      dot.title = t("syncNavConflict");
+      dot.onclick = ev=>{ ev.stopPropagation(); state.syncConflict = { project: p.name }; location.hash = "sync-conflict?project=" + encodeURIComponent(p.name); render(); };
+    }
     pj.appendChild(dot);
     const sb = el("button","icon-btn pj-sync-btn");
     sb.innerHTML = ICON.sync;
@@ -1761,9 +1782,12 @@ function syncDotKey(sy){
   return "syncDotSynced";
 }
 
-/* 项目行同步按钮：即点即执行 + 转圈 + toast（动作类纪律） */
+/* 项目行同步按钮：即点即执行 + 转圈 + toast（动作类纪律）
+   防连点：模块级 inflight 集合——spinning class 在轮询重渲后随按钮节点替换丢失，仅作视觉 */
+const syncInflight = {};
 async function doProjectSync(project, btn){
-  if(btn.classList.contains("spinning")) return; // 防连点
+  if(syncInflight[project]) return; // 防连点
+  syncInflight[project] = true;
   btn.classList.add("spinning");
   try{
     const r = await api("/api/project/sync", { method:"POST", body:{ project: project } });
@@ -1789,9 +1813,115 @@ async function doProjectSync(project, btn){
     if(err && err.name === "AbortError") throw err;
     toast(t("syncToastFail") + (err.message || ""), true);
   }finally{
+    delete syncInflight[project];
     btn.classList.remove("spinning");
     refreshManage(); // 状态点即时刷新
   }
+}
+
+/* ================= 冲突解决页（卡片流 + 顶部钉住操作条） =================
+   视觉对齐 docs/prototypes/prototype-sync-p1-final.html 的 conflict 页（变体 C 卡片流 + .cf-stick 钉顶）。
+   render() 整页重渲会重走 renderSyncConflict——CF.project 相同不重拉列表；conflict-file 结果缓存进
+   CF.versions[file]，重渲复用，避免逐卡重拉闪烁。 */
+const CF = { list: [], resolved: {}, versions: {}, project: "" };
+
+async function renderSyncConflict(main){
+  const project = state.syncConflict && state.syncConflict.project;
+  if(!project){ state.syncConflict = null; render(); return; }
+  if(CF.project !== project){
+    CF.project = project; CF.resolved = {}; CF.versions = {};
+    const st = await api("/api/project/sync/status?project=" + encodeURIComponent(project));
+    CF.list = st.conflicts || [];
+  }
+  const wrap = el("div","cfwrap");
+  // 顶部钉住操作条
+  const stick = el("div","cf-stick");
+  const total = CF.list.length;
+  const done = CF.list.filter(f=>CF.resolved[f]).length;
+  stick.innerHTML = '<div class="cf-title">'+esc(t("cfTitle"))+' · <b>'+esc(project)+'</b></div>'+
+    '<div class="cf-prog">'+t("cfResolved")+" "+done+" / "+total+(done===total&&total>0?"（"+t("cfReady")+"）":"")+'</div>';
+  const fin = el("button","btn-primary cf-fin");
+  fin.textContent = t("cfFinish");
+  fin.disabled = !(total > 0 && done === total);
+  if(fin.disabled) fin.title = t("cfFinishHint");
+  fin.onclick = async ()=>{
+    fin.disabled = true;
+    try{
+      await api("/api/project/sync/finish", { method:"POST", body:{ project: project } });
+      toast(t("cfFinishOk"));
+      state.syncConflict = null; CF.project = "";
+      location.hash = "manage";
+      refreshManage();
+    }catch(err){ toast(err.message, true); fin.disabled = false; }
+  };
+  const abo = el("button","btn cf-abort");
+  abo.textContent = t("cfAbort");
+  abo.onclick = async ()=>{
+    if(!confirm(t("cfAbortConfirm"))) return;
+    try{
+      await api("/api/project/sync/abort", { method:"POST", body:{ project: project } });
+      toast(t("cfAbortOk"));
+      state.syncConflict = null; CF.project = "";
+      location.hash = "manage";
+      refreshManage();
+    }catch(err){ toast(err.message, true); }
+  };
+  stick.appendChild(fin); stick.appendChild(abo);
+  wrap.appendChild(stick);
+  // 卡片流
+  const list = el("div","cf-list");
+  for(const f of CF.list){
+    list.appendChild(await conflictCard(project, f));
+  }
+  wrap.appendChild(list);
+  // main 里已有侧栏（renderBody 先建 side 再分发）——只清内容区，保留侧栏逃生口
+  [...main.children].forEach(n=>{ if(!n.classList.contains("side")) n.remove(); });
+  main.appendChild(wrap);
+}
+
+async function conflictCard(project, file){
+  const card = el("div","cf-card" + (CF.resolved[file] ? " resolved" : ""));
+  const head = el("div","cf-card-head");
+  head.innerHTML = '<span class="cf-file">'+esc(file)+'</span><span class="cf-state">'+
+    (CF.resolved[file] ? "✓ "+t("cfResolvedMark") : t("cfUnresolved"))+'</span>';
+  card.appendChild(head);
+  let v = CF.versions[file];
+  if(!v){
+    v = await api("/api/project/sync/conflict-file?project="+encodeURIComponent(project)+"&file="+encodeURIComponent(file));
+    CF.versions[file] = v;
+  }
+  const prev = el("div","cf-prev");
+  const snippet = s => (s||"").split("\n").slice(0,10).join("\n");
+  prev.innerHTML = '<div class="cf-pane"><div class="cf-pane-t">'+t("cfLocal")+'</div><pre>'+esc(snippet(v.local))+'</pre></div>'+
+    '<div class="cf-pane"><div class="cf-pane-t">'+t("cfRemote")+'</div><pre>'+esc(snippet(v.remote))+'</pre></div>';
+  card.appendChild(prev);
+  const foot = el("div","cf-card-foot");
+  const mk = (label, cls, fn) => { const b = el("button",cls); b.textContent = label; b.onclick = fn; return b; };
+  const doResolve = async (action) => {
+    try{
+      await api("/api/project/sync/resolve", { method:"POST", body:{ project: project, file: file, action: action } });
+      CF.resolved[file] = true;
+      render(); // 重渲走 renderSyncConflict（CF 缓存不重复拉列表/版本）
+    }catch(err){ toast(err.message, true); }
+  };
+  foot.appendChild(mk(t("cfAcceptMe"), "btn", ()=>doResolve("me")));
+  foot.appendChild(mk(t("cfAcceptTheirs"), "btn", ()=>doResolve("theirs")));
+  foot.appendChild(mk(t("cfMerge"), "btn", ()=>{ state.merge = { project: project, file: file }; render(); }));
+  const ai = mk(t("cfAI"), "btn", null);
+  ai.onclick = async ()=>{
+    ai.disabled = true; ai.textContent = t("cfAIRunning");
+    try{
+      const r = await api("/api/project/sync/ai-merge", { method:"POST", body:{ project: project, file: file } });
+      state.merge = { project: project, file: file, ai: r.merged };
+      render();
+    }catch(err){
+      ai.disabled = false; ai.textContent = t("cfAI");
+      toast(err.status === 409 ? t("cfAIUnavailable") : err.message, true);
+    }
+  };
+  foot.appendChild(ai);
+  card.appendChild(foot);
+  return card;
 }
 // growTreeShown 懒加载追加（反馈7 + 需求 5 下沉到类目）：第一个还有未渲条目的展开类目步进
 // LAZY_STEP，原位重填树；追加在列表尾部，scrollTop 天然不变。
@@ -4808,7 +4938,7 @@ function render(){
   const app = document.getElementById("app");
   // 整页重渲不丢滚动：重渲前记住各滚动容器位置，重渲后同步恢复
   const keep = {};
-  app.querySelectorAll(".prefs,.setup,.detail,.tree-scroll,.misc").forEach(n=>{
+  app.querySelectorAll(".prefs,.setup,.detail,.tree-scroll,.misc,.cfwrap").forEach(n=>{
     keep[n.className.split(" ")[0]] = n.scrollTop;
   });
   renderBody(app);
@@ -4861,6 +4991,7 @@ function renderBody(app){
                 + '<span class="tip">'+t(m.key)+'</span>';
     b.onclick = ()=>{
       exitEdit();
+      state.syncConflict=null; state.merge=null;   // 冲突/合并子页逃生口：点侧栏即退出，防分发链弹回死局
       state.menu=m.key; location.hash=m.key;
       // 跨页缓存联动（Task 4 评审约定）：切到其他页重拉项目列表缓存；切到管理页重拉树数据
       if(m.key==="misc" && MISC) refreshMisc();

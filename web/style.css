@@ -596,3 +596,24 @@ textarea.ef-body { flex:1; min-height:0; resize:none; font:13px/1.7 Consolas,"Ca
 .pj-sync-btn:hover{ opacity:1; }
 .pj-sync-btn.spinning svg{ animation:okspin 1s linear infinite; }
 @keyframes okspin{ to{ transform:rotate(360deg); } }
+
+/* ---------- P1-B：红点可点（冲突页入口） ---------- */
+.pj-sync-dot.clickable{ cursor:pointer; }
+
+/* ---------- P1-B：冲突解决页（卡片流 + 顶部钉住操作条，语义对齐原型 cf-*） ---------- */
+/* .cfwrap 自身是滚动容器（同 .detail/.misc 惯例），.cf-stick 的 sticky 才有滚动上下文 */
+.cfwrap{ flex:1; overflow-y:auto; padding:0 24px 40px; }
+.cf-stick{ position:sticky; top:0; z-index:50; display:flex; align-items:center; gap:14px; padding:12px 24px; margin:0 -24px 16px; background:var(--bg,#fff); border-bottom:1px solid var(--border,#d0d7de); box-shadow:0 1px 4px rgba(0,0,0,.06); }
+.cf-title{ font-size:15px; }
+.cf-prog{ color:var(--muted,#656d76); font-size:13px; flex:1; }
+.cf-fin:disabled{ opacity:.45; cursor:not-allowed; }
+.cf-card{ border:1px solid var(--border,#d0d7de); border-radius:8px; margin-bottom:16px; background:var(--card,#fff); }
+.cf-card.resolved{ opacity:.62; }
+.cf-card-head{ display:flex; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border,#d0d7de); font-size:13px; }
+.cf-state{ color:#cf222e; }
+.cf-card.resolved .cf-state{ color:#2da44e; }
+.cf-prev{ display:flex; gap:1px; }
+.cf-pane{ flex:1; min-width:0; }
+.cf-pane-t{ font-size:12px; color:var(--muted,#656d76); padding:6px 14px 2px; }
+.cf-pane pre{ margin:0; padding:6px 14px 10px; font-size:12px; overflow:auto; max-height:180px; }
+.cf-card-foot{ display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--border,#d0d7de); }
