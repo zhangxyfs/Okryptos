@@ -199,6 +199,13 @@ const I18N = {
     cfAI:"AI 合并", cfAIRunning:"AI 合并中…", cfAIUnavailable:"AI 合并不可用：未配置本地 LLM 或服务不可达",
     cfLocal:"本地版本", cfRemote:"远端版本", cfUnresolved:"未解决", cfResolvedMark:"已解决",
     cfBack:"← 返回冲突列表",
+    /* P1-B：三向合并编辑器（marker 块采纳三栏，Task 7） */
+    mgTitle:"三向合并", mgResult:"合并结果（可编辑）", mgApply:"应用合并结果",
+    mgApplyHint:"所有冲突块采纳后才可应用", mgApplyOk:"已应用合并结果并标记已解决",
+    mgCancel:"取消", mgBlock:"冲突块", mgBlocks:"已采纳",
+    mgNoBlocks:"无冲突标记块（AI 预填或手动编辑）",
+    mgTakeLocal:"采纳本地", mgTakeRemote:"采纳远端",
+    mgAINote:"AI 合并结果未经确认不落盘",
   },
   en: {
     manage:"Manage", setup:"Setup", prefs:"Settings", logs:"Logs", misc:"Misc",
@@ -358,6 +365,13 @@ const I18N = {
     cfAI:"AI Merge", cfAIRunning:"AI merging…", cfAIUnavailable:"AI merge unavailable: no local LLM configured or server unreachable",
     cfLocal:"Local", cfRemote:"Remote", cfUnresolved:"Unresolved", cfResolvedMark:"Resolved",
     cfBack:"← Back to conflict list",
+    /* P1-B: three-way merge editor (marker-block take, three panes, Task 7) */
+    mgTitle:"Three-way merge", mgResult:"Merge result (editable)", mgApply:"Apply merge result",
+    mgApplyHint:"All conflict blocks must be resolved before applying", mgApplyOk:"Merge result applied and marked resolved",
+    mgCancel:"Cancel", mgBlock:"Block", mgBlocks:"Resolved",
+    mgNoBlocks:"No conflict marker blocks (AI prefill or manual edit)",
+    mgTakeLocal:"Take local", mgTakeRemote:"Take remote",
+    mgAINote:"AI merge result is not written to disk until confirmed",
   },
 };
 
@@ -1912,13 +1926,18 @@ async function conflictCard(project, file){
   const bTheirs = mk(t("cfAcceptTheirs"), "btn", ()=>doResolve("theirs"));
   foot.appendChild(bMe);
   foot.appendChild(bTheirs);
-  foot.appendChild(mk(t("cfMerge"), "btn", ()=>{ state.merge = { project: project, file: file }; render(); }));
+  foot.appendChild(mk(t("cfMerge"), "btn", ()=>{
+    state.merge = { project: project, file: file };
+    state.syncConflict = null;   // 分发链 syncConflict 优先——进合并页必须让路（CF 缓存保留，返回时恢复）
+    render();
+  }));
   const ai = mk(t("cfAI"), "btn", null);
   ai.onclick = async ()=>{
     ai.disabled = true; ai.textContent = t("cfAIRunning");
     try{
       const r = await api("/api/project/sync/ai-merge", { method:"POST", body:{ project: project, file: file } });
       state.merge = { project: project, file: file, ai: r.merged };
+      state.syncConflict = null;   // 分发链 syncConflict 优先——进合并页必须让路（CF 缓存保留，返回时恢复）
       render();
     }catch(err){
       ai.disabled = false; ai.textContent = t("cfAI");
@@ -1928,6 +1947,170 @@ async function conflictCard(project, file){
   foot.appendChild(ai);
   card.appendChild(foot);
   return card;
+}
+
+/* ================= 三向合并编辑器（仿 Android Studio 三栏） =================
+   v1 简化（对 §11.3 收敛）：冲突块以 git 冲突标记解析为准——不做行级 LCS diff；
+   左/右栏只读展示 local/remote 全文，中间栏可编辑（textarea），每个标记块给
+   "采纳远端/采纳本地"按钮。反转纪律：<<<<<<< 到 ======= 半 = 远端，下半 = 本地。 */
+const MG = { project:"", file:"", blocks:null };
+
+// parseConflictBlocks 解析 working 里的 git 冲突标记块。
+// 返回 [{start,end,remote,local}]（行号区间含标记行；remote=HEAD 半、local=下半，反转纪律）。
+function parseConflictBlocks(working){
+  const lines = working.split("\n");
+  const blocks = [];
+  let i = 0;
+  while(i < lines.length){
+    if(lines[i].startsWith("<<<<<<<")){
+      const start = i;
+      let sep = -1, end = -1;
+      for(let j = i+1; j < lines.length; j++){
+        if(lines[j].startsWith("=======") && sep < 0){ sep = j; }
+        if(lines[j].startsWith(">>>>>>>")){ end = j; break; }
+      }
+      if(sep > 0 && end > 0){
+        blocks.push({
+          start: start, end: end,
+          remote: lines.slice(start+1, sep).join("\n"),
+          local: lines.slice(sep+1, end).join("\n"),
+        });
+        i = end + 1;
+        continue;
+      }
+    }
+    i++;
+  }
+  return blocks;
+}
+
+// applyMergeBlocks 把未采纳块剔除/采纳块替换后生成最终文本。
+function applyMergeBlocks(working, blocks, choices){
+  // choices[i] = "local" | "remote" | null（null = 保留标记原文——应用前必须无 null）
+  const lines = working.split("\n");
+  let out = [];
+  let bi = 0, i = 0;
+  while(i < lines.length){
+    if(bi < blocks.length && i === blocks[bi].start){
+      const b = blocks[bi];
+      out.push(choices[bi] === "remote" ? b.remote : b.local);
+      i = b.end + 1;
+      bi++;
+      continue;
+    }
+    out.push(lines[i]);
+    i++;
+  }
+  return out.join("\n");
+}
+
+async function renderMerge(main){
+  const m = state.merge;
+  if(!m){ render(); return; }
+  if(MG.file !== m.file || MG.project !== m.project){
+    MG.project = m.project; MG.file = m.file;
+    let v;
+    try{
+      v = await api("/api/project/sync/conflict-file?project="+encodeURIComponent(m.project)+"&file="+encodeURIComponent(m.file));
+    }catch(err){
+      // 文件已不在冲突态（如已解决卡上再点 Merge，409）——提示并回冲突页，防 unhandled rejection 留白
+      toast(err.message, true);
+      state.merge = null; MG.file = "";
+      state.syncConflict = { project: m.project };
+      render();
+      return;
+    }
+    MG.local = v.local; MG.remote = v.remote;
+    MG.working = m.ai != null ? m.ai : v.working;  // AI 合并预填中间栏
+    MG.blocks = m.ai != null ? [] : parseConflictBlocks(v.working);
+    MG.choices = MG.blocks.map(()=>null);
+    MG.aiNote = m.ai != null;
+  }
+  const wrap = el("div","mgwrap");
+  const bar = el("div","cf-stick");
+  bar.innerHTML = '<div class="cf-title">'+esc(t("mgTitle"))+' · <b>'+esc(m.file)+'</b>'+(MG.aiNote?' <span class="mg-ai-note">'+t("mgAINote")+'</span>':'')+'</div>';
+  const rest = MG.choices.filter(c=>!c).length;
+  const prog = el("div","cf-prog");
+  prog.textContent = MG.blocks.length ? t("mgBlocks")+" "+(MG.blocks.length - rest)+" / "+MG.blocks.length : t("mgNoBlocks");
+  bar.appendChild(prog);
+  const apply = el("button","btn-primary");
+  apply.textContent = t("mgApply");
+  apply.disabled = rest > 0;
+  if(apply.disabled) apply.title = t("mgApplyHint");
+  apply.onclick = async ()=>{
+    // 退化判断：用户手编可能让块行号漂移——校验每个块的标记行仍在原位，失配则以 textarea 全文为准
+    let finalText = MG.working;
+    if(MG.blocks.length){
+      const wl = MG.working.split("\n");
+      const aligned = MG.blocks.every(b => wl[b.start] !== undefined && wl[b.start].startsWith("<<<<<<<"));
+      if(aligned) finalText = applyMergeBlocks(MG.working, MG.blocks, MG.choices);
+    }
+    apply.disabled = true;   // await 期间置灰防重复 POST（对齐 AI 合并按钮先例）
+    try{
+      await api("/api/project/sync/resolve", { method:"POST", body:{ project: m.project, file: m.file, action:"merged", content: finalText } });
+      CF.resolved[m.file] = true;
+      toast(t("mgApplyOk"));
+      state.merge = null; MG.file = "";
+      state.syncConflict = { project: m.project };   // 回冲突页（CF 缓存不清——resolved 标记真实）
+      render();
+    }catch(err){ toast(err.message, true); apply.disabled = false; }
+  };
+  const cancel = el("button","btn");
+  cancel.textContent = t("mgCancel");
+  cancel.onclick = ()=>{
+    state.merge = null; MG.file = "";
+    state.syncConflict = { project: m.project };   // 回冲突页（CF 缓存不清——resolved 标记真实）
+    render();
+  };
+  bar.appendChild(apply); bar.appendChild(cancel);
+  wrap.appendChild(bar);
+
+  const tri = el("div","mg-tri");
+  // 左：本地（只读）
+  const lp = el("div","mg-pane");
+  lp.innerHTML = '<div class="cf-pane-t">'+t("cfLocal")+'</div>';
+  const lpre = el("pre","mg-text"); lpre.textContent = MG.local;
+  lp.appendChild(lpre);
+  // 中：结果（可编辑 textarea）
+  const mp = el("div","mg-pane");
+  mp.innerHTML = '<div class="cf-pane-t">'+t("mgResult")+'</div>';
+  const ta = el("textarea","mg-text mg-edit");
+  ta.value = MG.working;
+  ta.spellcheck = false;
+  ta.oninput = ()=>{ MG.working = ta.value; };   // 实时同步——采纳块重渲重建 textarea 不丢手编
+  mp.appendChild(ta);
+  // 右：远端（只读）
+  const rp = el("div","mg-pane");
+  rp.innerHTML = '<div class="cf-pane-t">'+t("cfRemote")+'</div>';
+  const rpre = el("pre","mg-text"); rpre.textContent = MG.remote;
+  rp.appendChild(rpre);
+  tri.appendChild(lp); tri.appendChild(mp); tri.appendChild(rp);
+  wrap.appendChild(tri);
+
+  // 冲突块采纳条（列在三栏下方，逐块两个按钮）
+  if(MG.blocks.length){
+    const bl = el("div","mg-blocks");
+    MG.blocks.forEach((b, i)=>{
+      const row = el("div","mg-block"+(MG.choices[i] ? " done" : ""));
+      row.innerHTML = '<span class="mg-block-t">'+t("mgBlock")+" "+(i+1)+'</span>';
+      const br = el("button","btn mg-take"); br.textContent = t("mgTakeRemote");
+      br.onclick = ()=>{ MG.choices[i] = "remote"; render(); };
+      const bl2 = el("button","btn mg-take"); bl2.textContent = t("mgTakeLocal");
+      bl2.onclick = ()=>{ MG.choices[i] = "local"; render(); };
+      row.appendChild(br); row.appendChild(bl2);
+      const diff = el("div","mg-block-diff");
+      diff.innerHTML = '<div class="mg-half"><div class="cf-pane-t">'+t("cfRemote")+'</div><pre>'+esc(b.remote)+'</pre></div>'+
+        '<div class="mg-half"><div class="cf-pane-t">'+t("cfLocal")+'</div><pre>'+esc(b.local)+'</pre></div>';
+      row.appendChild(diff);
+      bl.appendChild(row);
+    });
+    wrap.appendChild(bl);
+  }
+  // main 里已有侧栏（renderBody 先建 side 再分发）——只清内容区，保留侧栏逃生口（同 renderSyncConflict）
+  [...main.children].forEach(n=>{ if(!n.classList.contains("side")) n.remove(); });
+  main.appendChild(wrap);
+  // async 挂载在 render() 同步恢复循环之后——用记下的位置自行恢复（同 renderSyncConflict）
+  wrap.scrollTop = (render._keep && render._keep["mgwrap"]) || 0;
 }
 // growTreeShown 懒加载追加（反馈7 + 需求 5 下沉到类目）：第一个还有未渲条目的展开类目步进
 // LAZY_STEP，原位重填树；追加在列表尾部，scrollTop 天然不变。
@@ -4944,7 +5127,7 @@ function render(){
   const app = document.getElementById("app");
   // 整页重渲不丢滚动：重渲前记住各滚动容器位置，重渲后同步恢复
   const keep = {};
-  app.querySelectorAll(".prefs,.setup,.detail,.tree-scroll,.misc,.cfwrap").forEach(n=>{
+  app.querySelectorAll(".prefs,.setup,.detail,.tree-scroll,.misc,.cfwrap,.mgwrap").forEach(n=>{
     keep[n.className.split(" ")[0]] = n.scrollTop;
   });
   render._keep = keep;   // async 子页（冲突/合并）首个 await 后才挂 DOM，下面的同步恢复循环够不到——挂出来留子页自行恢复
@@ -5021,8 +5204,9 @@ function renderBody(app){
   // 五页均已接入真实数据：管理（Task 5）、引导（Task 7）、设置（Task 6）、日志（Task 3）、其他（Task 4）
   // （占位分支已随 Task 7 引导页接入移除；notImpl 键同步删除）
   // P1-B 同步子页优先于普通菜单页（渲染器由 Task 6/7 提供；存在性守卫防中间态白屏）
-  if(state.syncConflict && typeof renderSyncConflict === "function"){ renderSyncConflict(main); return; }
+  // merge 分支在 syncConflict 之前（双保险：进入合并页时已清 syncConflict，此处再防一手残留态截胡）
   if(state.merge && typeof renderMerge === "function"){ renderMerge(main); return; }
+  if(state.syncConflict && typeof renderSyncConflict === "function"){ renderSyncConflict(main); return; }
   if(state.menu==="manage"){
     loadManage();
     renderManageLayout(main);   // 需求 4：三栏目（树/详情/终端）按槽位配置渲染
