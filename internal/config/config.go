@@ -262,6 +262,9 @@ type Sync struct {
 	Enabled         bool   `toml:"enabled"`
 	Remote          string `toml:"remote"`
 	AutoIntervalMin int    `toml:"auto_interval_min"`
+	// LLMAssist：off|local|server。空 = auto（有本地 LLM 则 local，否则 off）；
+	// server 档本期不开放（okserver 管理面无 LLM，设计文档 §11.2）。
+	LLMAssist       string `toml:"llm_assist"`
 }
 
 type Config struct {

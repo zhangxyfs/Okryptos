@@ -564,3 +564,19 @@ func TestSetSync(t *testing.T) {
 		t.Fatalf("duplicate [sync] section:\n%s", data)
 	}
 }
+
+func TestSyncLLMAssist(t *testing.T) {
+	cfg := Default()
+	if cfg.Sync.LLMAssist != "" {
+		t.Fatalf("default llm_assist = %q, want empty (auto)", cfg.Sync.LLMAssist)
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(p, []byte("[sync]\nllm_assist = \"off\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil || cfg.Sync.LLMAssist != "off" {
+		t.Fatalf("%v %+v", err, cfg.Sync)
+	}
+}
