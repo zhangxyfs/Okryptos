@@ -267,6 +267,13 @@ type Sync struct {
 	LLMAssist       string `toml:"llm_assist"`
 }
 
+// Server 是全局 [server] 段：okserver 管理面连接配置。
+type Server struct {
+	URL      string `toml:"url"`
+	Username string `toml:"username"`
+	Token    string `toml:"token"`
+}
+
 type Config struct {
 	Embedding  Embedding     `toml:"embedding"`
 	Inject     Inject        `toml:"inject"`
@@ -282,6 +289,8 @@ type Config struct {
 	// Sync 同步配置。内部即按 personal 层建模——团队版演进为
 	// [sync.personal]+[sync.team] 时本结构平移到层下（设计文档 §13 口子 1）。
 	Sync Sync `toml:"sync"`
+	// Server [server] 段，仅存全局 config.toml（okserver 管理面连接，设计文档 §12）。
+	Server Server `toml:"server"`
 }
 
 func Default() Config {
@@ -516,6 +525,76 @@ func SetSync(path string, s Sync) error {
 				}
 				out = append(out, "")
 				writeSection()
+			}
+		}
+		return fsx.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+	})
+}
+
+// SetServer 行级更新 path 的 [server] 段（url/username/token）。
+// token 传空串 = 不改动旧 token（GUI 脱敏回写语义）；url/username 空串则省略该行。
+func SetServer(path string, s Server) error {
+	return fsx.WithFileLock(path, func() error {
+		data, _ := os.ReadFile(path)
+		lines := strings.Split(string(data), "\n")
+		// 先摘旧 token（token 空串时保留）
+		oldToken := ""
+		inOld := false
+		for _, line := range lines {
+			trim := strings.TrimSpace(line)
+			if strings.HasPrefix(trim, "[") {
+				inOld = trim == "[server]"
+				continue
+			}
+			if inOld && strings.HasPrefix(trim, "token") {
+				if _, v, ok := strings.Cut(trim, "="); ok {
+					oldToken = strings.Trim(strings.TrimSpace(v), "\"")
+				}
+			}
+		}
+		if s.Token == "" {
+			s.Token = oldToken
+		}
+		var section []string
+		section = append(section, "[server]")
+		if s.URL != "" {
+			section = append(section, fmt.Sprintf("url = %q", s.URL))
+		}
+		if s.Username != "" {
+			section = append(section, fmt.Sprintf("username = %q", s.Username))
+		}
+		if s.Token != "" {
+			section = append(section, fmt.Sprintf("token = %q", s.Token))
+		}
+		// 行级替换（与 SetSync 同形态）
+		var out []string
+		inSync := false
+		wrote := false
+		for _, line := range lines {
+			trim := strings.TrimSpace(line)
+			if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
+				if inSync && !wrote {
+					out = append(out, section...)
+					wrote = true
+				}
+				inSync = trim == "[server]"
+				if inSync {
+					continue
+				}
+			} else if inSync {
+				continue
+			}
+			out = append(out, line)
+		}
+		if !wrote {
+			if inSync {
+				out = append(out, section...)
+			} else {
+				for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
+					out = out[:len(out)-1]
+				}
+				out = append(out, "")
+				out = append(out, section...)
 			}
 		}
 		return fsx.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)

@@ -607,3 +607,56 @@ func TestSetSyncPreservesLLMAssist(t *testing.T) {
 		t.Fatalf("after SetSync: %+v", cfg.Sync)
 	}
 }
+
+func TestServerSection(t *testing.T) {
+	// 零值即未配置
+	if Default().Server.URL != "" {
+		t.Fatal("default server should be empty")
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("# 注释\n[retrieve]\ntop_n = 5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 写入
+	if err := SetServer(path, Server{URL: "http://nas:3100", Username: "alice", Token: "tok-1"}); err != nil {
+		t.Fatalf("SetServer: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.URL != "http://nas:3100" || cfg.Server.Username != "alice" || cfg.Server.Token != "tok-1" {
+		t.Fatalf("loaded: %+v", cfg.Server)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "# 注释") || !strings.Contains(string(data), "[retrieve]") {
+		t.Fatalf("other content lost:\n%s", data)
+	}
+	if strings.Count(string(data), "[server]") != 1 {
+		t.Fatalf("dup section:\n%s", data)
+	}
+	// 脱敏回写：token 空串 → 保留旧 token
+	if err := SetServer(path, Server{URL: "http://nas2:3100", Username: "alice", Token: ""}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = Load(path)
+	if cfg.Server.Token != "tok-1" || cfg.Server.URL != "http://nas2:3100" {
+		t.Fatalf("token should be preserved: %+v", cfg.Server)
+	}
+	// LoadMerged：全局段不被项目文件顶掉（项目文件无 [server] 段时继承全局）
+	global := filepath.Join(t.TempDir(), "global.toml")
+	project := filepath.Join(t.TempDir(), "project.toml")
+	if err := SetServer(global, Server{URL: "http://nas:3100", Username: "alice", Token: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte("[retrieve]\ntop_n = 9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Server.URL != "http://nas:3100" || merged.Retrieve.TopN != 9 {
+		t.Fatalf("merged: %+v", merged.Server)
+	}
+}
