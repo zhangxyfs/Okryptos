@@ -3,6 +3,7 @@
 package gui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"openknowledge/internal/config"
+	"openknowledge/internal/llmx"
 	"openknowledge/internal/store"
 	"openknowledge/internal/syncx"
 )
@@ -23,6 +25,7 @@ func (h *Handler) registerSyncAPI(api func(string, http.HandlerFunc)) {
 	api("POST /api/project/sync/resolve", h.apiSyncResolve)
 	api("POST /api/project/sync/finish", h.apiSyncFinish)
 	api("POST /api/project/sync/abort", h.apiSyncAbort)
+	api("POST /api/project/sync/ai-merge", h.apiSyncAIMerge)
 }
 
 type syncRequest struct {
@@ -285,4 +288,89 @@ func (h *Handler) apiSyncAbort(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = syncx.ClearConflictFiles(st.StateDir())
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ai-merge：LLM 按三版本语义合并正文（front matter 不让 LLM 碰，取 local 版）。
+// 纪律：只返回不落盘（落盘走 resolve）；超时按场景区分；temperature 缺省不传。
+
+const aiMergeSystemPrompt = `你是合并助手。给定同一条知识笔记正文的三个版本——base（共同祖先）、local（本机修改）、remote（远端修改）——输出语义合并后的正文。规则：两边的信息都尽量保留；同义近重复只留一份；冲突表述取较具体者；只输出合并后的正文本身，不要任何解释、不要用 markdown 代码围栏包裹。`
+
+const aiMergeMaxTokens = 4096
+
+// splitFrontMatter 拆 "---\n...\n---\n" 头部。无头部时 fm=""。
+// fm 连同规范空行分隔（Serialize 的 "---\n\n<body>" 形态）一起带走，
+// 拼回时 fm+body 仍保持规范格式。
+func splitFrontMatter(content string) (fm, body string) {
+	if !strings.HasPrefix(content, "---\n") {
+		return "", content
+	}
+	rest := content[4:]
+	idx := strings.Index(rest, "\n---\n")
+	if idx < 0 {
+		return "", content
+	}
+	end := idx + 5 // "\n---\n" 之后
+	if end < len(rest) && rest[end] == '\n' {
+		end++ // 吞掉分隔空行
+	}
+	return content[:4+end], rest[end:]
+}
+
+// llmAssistMode 判定 ai-merge 可用性（设计文档 §12）：off/server 档明确 409；
+// local/空(auto) 看全局 LLM 配置。
+func (h *Handler) llmAssistMode(st *store.Store) (client *llmx.Client, timeout time.Duration, errCode string) {
+	cfg, _ := config.LoadMerged(st.ConfigPath(), "")
+	switch cfg.Sync.LLMAssist {
+	case "off":
+		return nil, 0, "no_llm"
+	case "server":
+		return nil, 0, "server_not_available"
+	}
+	gcfg, err := loadGlobalConfig()
+	if err != nil {
+		return nil, 0, "no_llm"
+	}
+	prof := gcfg.LLM.ActiveProfile()
+	if prof == nil {
+		return nil, 0, "no_llm"
+	}
+	timeout = time.Duration(gcfg.LLM.TimeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 60 * time.Second // GUI 交互场景
+	}
+	return llmx.New(*prof, timeout), timeout, ""
+}
+
+func (h *Handler) apiSyncAIMerge(w http.ResponseWriter, r *http.Request) {
+	var req syncRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	st := resolveProject(w, req.Project)
+	if st == nil {
+		return
+	}
+	client, timeout, errCode := h.llmAssistMode(st)
+	if errCode != "" {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": errCode})
+		return
+	}
+	base, local, remote, err := syncx.Open(st.Root).ConflictVersions(req.File)
+	if err != nil {
+		writeErr(w, http.StatusConflict, "取冲突版本失败："+err.Error())
+		return
+	}
+	// 三版本剥离 front matter；fm 取 local（本机最新），LLM 只合并正文
+	fmLocal, bodyLocal := splitFrontMatter(local)
+	_, bodyBase := splitFrontMatter(base)
+	_, bodyRemote := splitFrontMatter(remote)
+	user := "【base】\n" + bodyBase + "\n【local】\n" + bodyLocal + "\n【remote】\n" + bodyRemote
+	ctx, cancel := context.WithTimeout(r.Context(), timeout+15*time.Second)
+	defer cancel()
+	rep, err := client.Chat(ctx, aiMergeSystemPrompt, user, aiMergeMaxTokens)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "LLM 合并失败："+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"merged": fmLocal + rep.Text})
 }

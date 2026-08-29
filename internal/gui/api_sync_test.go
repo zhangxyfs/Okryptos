@@ -174,3 +174,89 @@ func stFor(t *testing.T, okHome, name string) *store.Store {
 	t.Helper()
 	return store.New(filepath.Join(okHome, "projects", name))
 }
+
+func TestApiSyncAIMergeNoLLM(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	name, _ := mkSyncProject(t, okHome)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// 制造冲突（直接驱动 syncx，HTTP 全链路在 Task 8）
+	st := stFor(t, okHome, name)
+	mkConflictFor(t, st, name)
+
+	res, body := do(t, "POST", srv.URL+"/api/project/sync/ai-merge", testToken, map[string]any{"project": name, "file": "k.md"})
+	// 无 LLM 配置 → 409 no_llm
+	if res != http.StatusConflict || !strings.Contains(string(body), "no_llm") {
+		t.Fatalf("ai-merge no llm: %d %s", res, body)
+	}
+	// 纪律断言：没落盘——k.md 仍含冲突标记
+	data, _ := os.ReadFile(filepath.Join(st.KnowledgeDir(), "k.md"))
+	if !strings.Contains(string(data), "<<<<<<<") {
+		t.Fatal("ai-merge must not write to disk")
+	}
+	// 清理
+	_ = syncx.Open(st.Root).AbortRebase()
+}
+
+func TestApiSyncAIMergeOff(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	name, _ := mkSyncProject(t, okHome)
+	st := stFor(t, okHome, name)
+	// llm_assist = off
+	cfgPath := st.ConfigPath()
+	data, _ := os.ReadFile(cfgPath)
+	_ = os.WriteFile(cfgPath, append(data, []byte("llm_assist = \"off\"\n")...), 0o644)
+	mkConflictFor(t, st, name)
+	defer func() { _ = syncx.Open(st.Root).AbortRebase() }()
+
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	res, body := do(t, "POST", srv.URL+"/api/project/sync/ai-merge", testToken, map[string]any{"project": name, "file": "k.md"})
+	if res != http.StatusConflict || !strings.Contains(string(body), "no_llm") {
+		t.Fatalf("ai-merge off: %d %s", res, body)
+	}
+}
+
+func TestSplitFrontMatter(t *testing.T) {
+	fm, body := splitFrontMatter("---\ntitle: 测试\n---\n\n正文内容\n")
+	if !strings.Contains(fm, "title: 测试") || body != "正文内容\n" {
+		t.Fatalf("fm=%q body=%q", fm, body)
+	}
+	fm, body = splitFrontMatter("无头部正文\n")
+	if fm != "" || body != "无头部正文\n" {
+		t.Fatalf("no fm: fm=%q body=%q", fm, body)
+	}
+}
+
+// mkConflictFor 直接经 syncx 制造 k.md 冲突态（A 推 v2a、本地改 v2b）。
+func mkConflictFor(t *testing.T, st *store.Store, name string) {
+	t.Helper()
+	r := syncx.Open(st.Root)
+	// 第二台设备：clone bare 后改动推回
+	dir2 := t.TempDir()
+	if err := syncx.Open(dir2).CloneToDir(r.RemoteURL()); err != nil {
+		t.Fatalf("clone: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir2, "knowledge", "k.md"), []byte("v2a 远端修改\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r2 := syncx.Open(dir2)
+	if _, err := r2.CommitAll("sync: other"); err != nil {
+		t.Fatalf("commit2: %v", err)
+	}
+	if err := r2.Push(); err != nil {
+		t.Fatalf("push2: %v", err)
+	}
+	// 本机改同文件
+	if err := os.WriteFile(filepath.Join(st.KnowledgeDir(), "k.md"), []byte("v2b 本机修改\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.CommitAll("sync: local"); err != nil {
+		t.Fatalf("commit local: %v", err)
+	}
+	conflicts, err := r.PullRebase()
+	if err != nil || len(conflicts) != 1 {
+		t.Fatalf("should conflict: %v %v", conflicts, err)
+	}
+}
