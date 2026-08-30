@@ -125,6 +125,7 @@ func Probe(ctx context.Context, ex Executor, sudoPw string) (*ProbeResult, error
 	r.PortGiteaBusy = owner("3000")
 	r.PortOKBusy = owner("3100")
 
+	existingName := ""
 	for _, ln := range strings.Split(containers, "\n") {
 		parts := strings.Split(ln, "|")
 		if len(parts) != 4 {
@@ -135,15 +136,27 @@ func Probe(ctx context.Context, ex Executor, sudoPw string) (*ProbeResult, error
 			r.GiteaFound = true
 			r.GiteaDetail = name + "（" + image + "，" + parts[2] + "）"
 		}
-		if name == "okserver" {
+		if okserverContainer(name, image) {
 			r.Existing = true
+			existingName = name
 		}
 	}
 	if r.Existing {
-		dir, code := runQuiet(ctx, ex, `docker inspect okserver --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'`)
+		dir, code := runQuiet(ctx, ex, `docker inspect '`+existingName+`' --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'`)
 		if code == 0 {
 			r.DeployDir = strings.TrimSpace(dir)
 		}
 	}
 	return r, nil
+}
+
+// okserverContainer 识别 okserver 容器。compose 未指定 name:/-p 时项目名取部署目录
+// basename，真机容器名是 openknowledge-okserver-1 而非裸 okserver（2026-08-30 实测
+// Existing 检测因此落空）；镜像名含 okserver（z7dream/openknowledge-okserver、
+// ghcr …/openknowledge/okserver）作兜底。
+func okserverContainer(name, image string) bool {
+	if name == "okserver" || strings.HasPrefix(name, "okserver-") || strings.Contains(name, "-okserver-") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(image), "okserver")
 }

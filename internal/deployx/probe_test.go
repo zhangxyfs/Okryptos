@@ -104,13 +104,35 @@ func TestProbeExistingDeploy(t *testing.T) {
 		{match: "docker compose version", code: 0, stdout: "2.23.0"},
 		{match: "ss -ltn", code: 0, stdout: "LISTEN 0 4096 0.0.0.0:3100 0.0.0.0:*"},
 		{match: "docker ps -a", code: 0, stdout: "okserver|z7dream/openknowledge-okserver:v2.23.0|Up 2 hours|0.0.0.0:3100->3100/tcp\ngitea|gitea/gitea:1.22|Up 2 hours|0.0.0.0:3000->3000/tcp"},
-		{match: "docker inspect okserver", code: 0, stdout: "/root/openknowledge"},
+		{match: "docker inspect 'okserver'", code: 0, stdout: "/root/openknowledge"},
 	}}
 	r, err := Probe(context.Background(), fx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !r.Existing || r.DeployDir != "/root/openknowledge" || !r.GiteaFound {
+		t.Fatalf("%+v", r)
+	}
+	fx.Done()
+}
+
+// compose 默认命名（项目名=部署目录 basename）：容器名 openknowledge-okserver-1
+// 而非裸 okserver——2026-08-30 真机实测 Existing 检测落空，探测页走错分支。
+func TestProbeExistingDeployComposeName(t *testing.T) {
+	fx := &fakeExec{t: t, steps: []fakeStep{
+		{match: "uname -m", code: 0, stdout: "x86_64"},
+		{match: "command -v docker", code: 0, stdout: "/usr/bin/docker"},
+		{match: "docker version", code: 0, stdout: "24.0.7"},
+		{match: "docker compose version", code: 0, stdout: "2.23.0"},
+		{match: "ss -ltn", code: 0, stdout: "LISTEN 0 4096 0.0.0.0:3100 0.0.0.0:*"},
+		{match: "docker ps -a", code: 0, stdout: "openknowledge-okserver-1|z7dream/openknowledge-okserver:v2.22.3|Up 2 hours|0.0.0.0:3100->3100/tcp\nopenknowledge-gitea-1|gitea/gitea:1.22|Up 2 hours|0.0.0.0:3001->3000/tcp"},
+		{match: "docker inspect 'openknowledge-okserver-1'", code: 0, stdout: "/volume3/docker/Cache/openknowledge"},
+	}}
+	r, err := Probe(context.Background(), fx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Existing || r.DeployDir != "/volume3/docker/Cache/openknowledge" || !r.GiteaFound {
 		t.Fatalf("%+v", r)
 	}
 	fx.Done()
