@@ -5472,6 +5472,8 @@ function connectCard(){
 }
 
 async function srvTestConnect(addr, port){
+  // 容忍粘贴完整 URL：剥掉 scheme 与尾部斜杠（"http://192.168.3.16" → 纯主机名）
+  addr = (addr||"").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
   if(!addr){ toast(t("srvAddr")+" ?", true); return; }
   const url = "http://"+addr+":"+port;
   SRV.testing = true; render();
