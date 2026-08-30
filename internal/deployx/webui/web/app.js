@@ -88,6 +88,12 @@ function mountLogPane(container, onEvent, heightCls) {
   S.logES = new EventSource("/api/logs/stream?token=" + encodeURIComponent(window.OK_TOKEN));
   S.logES.onmessage = (m) => {
     const ev = JSON.parse(m.data);
+    // 每行带 HH:MM:SS 时间戳：超时类问题需要对时间轴
+    const d = ev.ts ? new Date(ev.ts) : new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const t = el("span", "ts");
+    t.textContent = pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()) + " ";
+    body.append(t);
     if (ev.step) {
       const s = el("span", "step");
       s.textContent = "[" + ev.step + "] ";

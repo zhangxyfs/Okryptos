@@ -118,6 +118,7 @@ a:hover { text-decoration:underline; }
 .log .r { color:#f87171; }
 .log .y { color:#fbbf24; }
 .log .step { color:#60a5fa; }
+.log .ts { color:#6b7280; }
 .pwd-card { border:2px solid var(--warn); background:#fffbeb; border-radius:10px;
             padding:18px 22px; margin:18px 0 14px; text-align:center; }
 .pwd-card .pw { font:700 22px/1.4 Consolas,"Cascadia Code",monospace; letter-spacing:1px;

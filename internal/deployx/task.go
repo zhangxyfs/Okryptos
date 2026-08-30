@@ -52,9 +52,14 @@ func runCmd(ctx context.Context, e *Env, step, cmd string) (string, error) {
 }
 
 // runCmdMask 同 runCmd，但日志里显示 display（用于掩去命令行中的 token/密码）。
+// 超时策略：调用方已带 deadline（如 PullTimeout）就尊重它，否则兜底 CmdTimeout
+// ——不能无条件再包一层 WithTimeout(CmdTimeout)，那会把 pull 类长操作也掐死在 60s。
 func runCmdMask(ctx context.Context, e *Env, step, display, cmd string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, CmdTimeout)
-	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, CmdTimeout)
+		defer cancel()
+	}
 	e.Hub.Publish(step, "info", "$ "+display)
 	var out, errLines []string
 	code, err := e.Ex.Run(ctx, cmd, nil, func(stream, line string) {
