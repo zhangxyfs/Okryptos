@@ -637,6 +637,7 @@ textarea.mg-edit{ border:0; resize:none; font-family:inherit; outline:none; back
 .mg-half pre{ margin:0; padding:6px 10px; font-size:12px; background:var(--bg,#f6f8fa); overflow:auto; max-height:140px; }
 
 /* 服务器页（P1-C2：stepper 三步向导 + 管理/成员视图） */
+.srvwrap{ flex:1; overflow-y:auto; padding:20px 28px 60px; }
 .stepper{ display:flex; align-items:center; gap:0; margin:6px 0 18px; }
 .stp{ display:flex; align-items:center; gap:8px; border:none; background:none; cursor:default; padding:4px 2px; font:inherit; color:inherit; }
 .stp.clickable{ cursor:pointer; }
