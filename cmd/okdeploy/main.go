@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -36,13 +37,17 @@ func run(stderr *os.File) int {
 	port := ln.Addr().(*net.TCPAddr).Port
 	url := fmt.Sprintf("http://127.0.0.1:%d/#token=%s", port, token)
 	fmt.Fprintf(stderr, "okdeploy %s 管理界面：%s\n", version.Version, url)
-	// 先起服务再开浏览器：OpenBrowser 内部会同步轮询窗口标题做最大化兜底，
-	// 若先开浏览器，轮询期间页面无人应答，用户会看到长时间白屏。
+	// 先起服务再开窗口（OpenBrowser 内部会同步轮询窗口标题做最大化兜底，
+	// 若先开窗口，轮询期间页面无人应答，用户会看到长时间白屏）。
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- http.Serve(ln, srv.Handler(webui.WebFS())) }()
-	gui.BrowserWindowTitle = "OpenKnowledge 服务端部署" // 页面 <title>（尺寸模式下不轮询，仅兜底语义）
-	gui.BrowserWindowSize = "972,686"                   // 部署向导是窄表单，固定尺寸比最大化更合适
-	gui.OpenBrowser(url)
+	gui.BrowserWindowTitle = "OpenKnowledge 服务端部署" // 回退浏览器路径用（尺寸模式下不轮询）
+	gui.BrowserWindowSize = "972,686"
+	return openUI(url, serveErr, stderr)
+}
+
+// waitServe 回退路径：浏览器打开后驻留 HTTP 服务直至出错或进程被杀。
+func waitServe(serveErr chan error, stderr io.Writer) int {
 	if err := <-serveErr; err != nil {
 		fmt.Fprintln(stderr, "服务退出：", err)
 		return 1
