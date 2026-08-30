@@ -14,6 +14,11 @@ name: Docker
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch: # 手动单发：Actions → Docker → Run workflow，填镜像 tag
+    inputs:
+      tag:
+        description: "镜像 tag（带 v 前缀，如 v2.22.3）"
+        required: true
 
 permissions:
   contents: read
@@ -37,15 +42,19 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       # 镜像 tag 与 okdeploy 的"镜像版本"输入保持同一格式：带 v 前缀（v2.22.3），
       # 同时发 latest。VERSION 构建参数同格式（与 NAS 本机构建命令一致）。
+      # 手动触发时取 inputs.tag，tag 推送时取 github.ref_name。
+      - name: 解析镜像 tag
+        id: t
+        run: echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: server/nas/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ steps.t.outputs.tag }}
           tags: |
-            ghcr.io/zhangxyfs/openknowledge/okserver:${{ github.ref_name }}
+            ghcr.io/zhangxyfs/openknowledge/okserver:${{ steps.t.outputs.tag }}
             ghcr.io/zhangxyfs/openknowledge/okserver:latest
-            openknowledge/okserver:${{ github.ref_name }}
+            openknowledge/okserver:${{ steps.t.outputs.tag }}
             openknowledge/okserver:latest
