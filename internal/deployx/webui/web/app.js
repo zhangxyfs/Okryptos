@@ -217,6 +217,16 @@ function pageConnect(content) {
   card.append(head, sub);
   const errSlot = el("div");
   card.append(errSlot);
+  // 从探测/部署页回退回来时会话还在：给快捷入口，不必重连 SSH
+  if (S.connStr) {
+    const go = el("div", "small");
+    go.style.cssText = "text-align:center;margin-bottom:12px";
+    const a = el("a", "", "已连接 " + S.connStr + "，直接进入环境探测 →");
+    a.href = "javascript:void(0)";
+    a.onclick = () => { location.hash = "#/probe"; };
+    go.append(a);
+    card.append(go);
+  }
 
   const hostI = pinput("mono", "", "290px");
   hostI.placeholder = "<user>@<ip> 或 <ip>";
@@ -346,6 +356,11 @@ function pageProbe(content) {
   again.href = "javascript:void(0)";
   again.onclick = () => route();
   sub.append(again);
+  sub.append(document.createTextNode(" · "));
+  const back = el("a", "", "返回连接页");
+  back.href = "javascript:void(0)";
+  back.onclick = () => { location.hash = "#/connect"; };
+  sub.append(back);
   content.append(sub);
   const slot = el("div");
   content.append(slot);
@@ -502,6 +517,11 @@ function pageDeploy(content, query) {
     content.append(el("h2", "pagehead", "全新部署"));
     content.append(el("div", "pagesub", "将在 NAS 上创建 okserver + Gitea 双容器（docker compose）"));
   }
+  // 未正式开始部署前可回退上一步（开始部署后 runDeployView 清屏锁表单）
+  const backProbe = el("a", "small", "← 返回探测页");
+  backProbe.href = "javascript:void(0)";
+  backProbe.onclick = () => { location.hash = "#/probe"; };
+  content.append(backProbe);
 
   const errSlot = el("div");
   content.append(errSlot);
@@ -694,6 +714,11 @@ function runDeployView(content, spec) {
       done = true;
       st.textContent = "✗ 部署失败";
       doneSlot.append(alertBar("err", "✗ " + ev.text + "（可修正后重试，已完成步骤会保留）"));
+      // 失败即任务结束：允许回表单改配置重试（hash 未变，直接重跑 route 渲染表单）
+      const backBtn = el("button", "btn", "← 返回修改配置");
+      backBtn.style.marginTop = "10px";
+      backBtn.onclick = () => route();
+      doneSlot.append(backBtn);
     }
   });
 }
