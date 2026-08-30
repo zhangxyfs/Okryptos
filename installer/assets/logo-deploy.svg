@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="okdeploy">
+  <!-- okdeploy 变体：客户端书形 mark 同族，左页青色（#0D9488）区分 -->
+  <rect x="2" y="2" width="92" height="92" rx="20" fill="#FFFFFF" stroke="#E5E7EB" stroke-width="3"/>
+  <g transform="translate(-3.5,4.1) scale(0.92)">
+    <path d="M54 22 Q20 14 14 26 L14 70 Q20 82 54 74 Z" fill="#0D9488"/>
+    <circle cx="34" cy="48" r="11" fill="none" stroke="#FFFFFF" stroke-width="5"/>
+    <path d="M58 22 Q92 14 98 26 L98 70 Q92 82 58 74 Z" fill="#1F2937"/>
+    <path d="M72 34 V62 M72 50 L86 34 M76 46 L88 62" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
+  </g>
+</svg>

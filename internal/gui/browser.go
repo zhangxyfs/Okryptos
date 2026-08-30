@@ -11,6 +11,10 @@ import (
 // 会空轮询满 10s——且调用方若先开浏览器再起 HTTP 服务，用户会看到长时间白屏。
 var BrowserWindowTitle = "OkManager"
 
+// BrowserWindowSize 非空时（形如 "980,700"），app 窗口按该尺寸打开且不做最大化
+// （跳过 --start-maximized 与 ShowWindow 兜底）；空串保持默认最大化行为（ok gui）。
+var BrowserWindowSize = ""
+
 // safeAppURL 判定可安全交给浏览器启动命令的应用 URL：仅 http/https、主机为
 // 本机回环，且不含可击穿 Windows PowerShell 单引号包裹的字符（单双引号、
 // 控制字符）。URL 由 daemon 自生成（http://127.0.0.1:<port>/?token=<hex>），

@@ -23,10 +23,18 @@ func OpenBrowser(url string) uintptr {
 		return 0 // 非回环 http(s) 或含击穿引号的 URL：拒绝进入 PowerShell 命令串
 	}
 	for _, browser := range []string{"msedge", "chrome"} {
-		ps := fmt.Sprintf("Start-Process %s -ArgumentList '--app=%s --start-maximized' -WindowStyle Maximized", browser, url)
+		args := "--app=" + url + " --start-maximized"
+		if BrowserWindowSize != "" {
+			// 固定窗口尺寸模式（okdeploy）：不最大化，跳过标题轮询兜底
+			args = "--app=" + url + " --window-size=" + BrowserWindowSize
+		}
+		ps := fmt.Sprintf("Start-Process %s -ArgumentList '%s' -WindowStyle Maximized", browser, args)
 		cmd := exec.Command("powershell", "-NoProfile", "-Command", ps)
 		procx.HideWindow(cmd)
 		if err := cmd.Run(); err == nil {
+			if BrowserWindowSize != "" {
+				return 0
+			}
 			return maximizeWindowByTitle(BrowserWindowTitle, 10*time.Second)
 		}
 	}
@@ -35,5 +43,8 @@ func OpenBrowser(url string) uintptr {
 	fallback := exec.Command("explorer.exe", url)
 	procx.HideWindow(fallback)
 	_ = fallback.Run()
+	if BrowserWindowSize != "" {
+		return 0
+	}
 	return maximizeWindowByTitle(BrowserWindowTitle, 10*time.Second)
 }

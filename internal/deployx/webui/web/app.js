@@ -203,7 +203,7 @@ function openDirPicker(input) {
 function pageConnect(content) {
   content.className = "content narrow";
   const wrap = el("div");
-  wrap.style.cssText = "width:420px;margin-top:48px";
+  wrap.style.cssText = "width:640px;margin-top:48px";
   const card = el("div", "pcard");
   card.style.padding = "24px 28px";
   const head = el("h2", "pagehead", "连接到 NAS");
@@ -214,13 +214,30 @@ function pageConnect(content) {
   const errSlot = el("div");
   card.append(errSlot);
 
-  const hostI = pinput("mono", "", "138px");
-  hostI.placeholder = "192.168.1.10";
+  const hostI = pinput("mono", "", "290px");
+  hostI.placeholder = "zhangxyfs@192.168.1.10 或 192.168.1.10";
   const portI = pinput("mono", "22", "56px");
   card.append(prow("SSH 地址", [hostI, el("span", "muted small", "端口"), portI]));
-  const userI = pinput("", "", "230px");
-  userI.placeholder = "admin";
+  const userI = pinput("", "", "290px");
+  userI.placeholder = "地址里写了 user@ 可留空";
   card.append(prow("用户名", [userI]));
+
+  // user@host 一把输：地址含 @ 时自动拆出用户名（用户名框已有值则以框内为准）
+  function splitUserHost() {
+    const v = hostI.value.trim();
+    const at = v.indexOf("@");
+    if (at > 0) {
+      if (!userI.value.trim()) userI.value = v.slice(0, at);
+      return { host: v.slice(at + 1), user: userI.value.trim() };
+    }
+    return { host: v, user: userI.value.trim() };
+  }
+  hostI.addEventListener("change", () => {
+    const at = hostI.value.trim().indexOf("@");
+    if (at > 0 && !userI.value.trim()) {
+      userI.value = hostI.value.trim().slice(0, at);
+    }
+  });
 
   // 认证方式 tabs：密码 / 私钥（二选一）
   const authRow = prow("认证方式", []);
@@ -234,8 +251,8 @@ function pageConnect(content) {
   card.append(tabs);
   const authSlot = el("div");
   card.append(authSlot);
-  const pwdI = pinput("", "", "230px", "password");
-  const keyI = pinput("mono", "", "230px");
+  const pwdI = pinput("", "", "290px", "password");
+  const keyI = pinput("mono", "", "290px");
   keyI.placeholder = "C:\\Users\\admin\\.ssh\\id_ed25519";
   function showAuth(which) {
     tabPwd.className = which === "pwd" ? "on" : "";
@@ -270,18 +287,18 @@ function pageConnect(content) {
     btn.textContent = "";
     const spin = el("span", "spin", "◌");
     btn.append(spin, document.createTextNode("连接中…"));
-    const host = hostI.value.trim(), user = userI.value.trim();
+    const uh = splitUserHost();
     const body = {
-      host: host,
+      host: uh.host,
       port: parseInt(portI.value, 10) || 22,
-      user: user,
+      user: uh.user,
       password: pwdI.value,
       key_path: tabKey.className === "on" ? keyI.value.trim() : "",
     };
     try {
       await api("/api/connect", { method: "POST", body: body });
-      S.connStr = user + "@" + host;
-      S.connHost = host;
+      S.connStr = uh.user + "@" + uh.host;
+      S.connHost = uh.host;
       setBadge(true, "已连接 " + S.connStr);
       location.hash = "#/probe";
     } catch (e) {

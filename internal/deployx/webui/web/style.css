@@ -21,9 +21,8 @@ a:hover { text-decoration:underline; }
 .topbar { display:flex; align-items:center; gap:10px; height:52px; padding:0 18px;
           background:var(--card); border-bottom:1px solid var(--border); }
 .brand { font-weight:700; font-size:15px; display:flex; align-items:center; gap:9px; }
-.brand .logo { width:24px; height:24px; border-radius:6px; background:var(--primary); color:#fff;
-               display:flex; align-items:center; justify-content:center; font-size:10.5px;
-               font-weight:800; letter-spacing:.5px; }
+.brand .logo { width:26px; height:26px; border-radius:7px; display:block;
+               box-shadow:0 1px 3px rgba(15,23,42,.18); }
 .brand .sub { font-weight:400; color:var(--muted); font-size:13px; }
 .topbar .sp { flex:1; }
 .badge { font-size:12px; padding:3px 11px; border-radius:999px; display:inline-flex;
