@@ -103,16 +103,23 @@ func (g *GiteaBackend) CreateUser(ctx context.Context, username, password string
 // CreateUserToken 核实偏差：简报表格的 /admin/users/{username}/tokens 不存在；
 // 真实端点 POST /users/{username}/tokens（body {name}，201 → AccessToken{sha1}），
 // 且路由强制 reqBasicOrRevProxyAuth——admin API token 直接调会 401，故走 Basic 头。
+// body 必须带 scopes：1.22 起缺省空 scope 直接 400 "access token must have a scope"
+// （2026-08-30 真机实证）；git push/pull 只需 write:repository。
 func (g *GiteaBackend) CreateUserToken(ctx context.Context, username, tokenName string) (string, error) {
 	var out struct {
 		SHA1 string `json:"sha1"`
 	}
 	err := g.do(ctx, http.MethodPost, "/users/"+url.PathEscape(username)+"/tokens",
-		map[string]any{"name": tokenName}, &out, true)
+		map[string]any{"name": tokenName, "scopes": []string{"write:repository"}}, &out, true)
 	if err != nil {
 		return "", err
 	}
 	return out.SHA1, nil
+}
+
+// DeleteUser 核实：DELETE /admin/users/{username}（204）。用于建用户流程半途失败的回滚。
+func (g *GiteaBackend) DeleteUser(ctx context.Context, username string) error {
+	return g.call(ctx, http.MethodDelete, "/admin/users/"+url.PathEscape(username), nil, nil)
 }
 
 // SetUserActive 核实：PATCH /admin/users/{username}（EditUserOption 含 active；

@@ -242,22 +242,30 @@ func (s *server) apiUserCreate(w http.ResponseWriter, r *http.Request, u *User) 
 		return
 	}
 	pw := GenerateSecret(16) // 16 字节 → 22 字符
-	if err := s.backend.CreateUser(r.Context(), in.Username, pw); err != nil {
-		backendErr(w, err)
-		return
-	}
 	hash, err := HashPassword(pw)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if _, err := s.st.CreateUser(in.Username, role, hash); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	// 顺序：Gitea 用户 → Gitea token → 本地用户（最后）。任一步失败回滚 Gitea 侧，
+	// 本地用户最后建——保证"用户已存在"闸门（本地库）前的失败不留半截状态，重试可收敛。
+	if err := s.backend.CreateUser(r.Context(), in.Username, pw); err != nil {
+		backendErr(w, err)
 		return
 	}
 	token, err := s.backend.CreateUserToken(r.Context(), in.Username, "ok-sync")
 	if err != nil {
+		if rbErr := s.backend.DeleteUser(r.Context(), in.Username); rbErr != nil {
+			s.st.Audit(u.Username, "create-user-rollback-failed", in.Username, rbErr.Error())
+		}
 		backendErr(w, err)
+		return
+	}
+	if _, err := s.st.CreateUser(in.Username, role, hash); err != nil {
+		if rbErr := s.backend.DeleteUser(r.Context(), in.Username); rbErr != nil {
+			s.st.Audit(u.Username, "create-user-rollback-failed", in.Username, rbErr.Error())
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.st.Audit(u.Username, "create-user", in.Username, "role="+role)

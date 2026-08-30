@@ -55,6 +55,17 @@ func fakeGitea(t *testing.T) *httptest.Server {
 			w.WriteHeader(401) // 真实 Gitea：reqBasicOrRevProxyAuth
 			return
 		}
+		var req struct {
+			Name   string   `json:"name"`
+			Scopes []string `json:"scopes"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if len(req.Scopes) == 0 {
+			// 真实 Gitea 1.22+：缺省空 scope 直接 400 "access token must have a scope"
+			w.WriteHeader(400)
+			json.NewEncoder(w).Encode(map[string]string{"message": "access token must have a scope"})
+			return
+		}
 		u := r.PathValue("username")
 		if users[u] == nil {
 			w.WriteHeader(404)
@@ -62,6 +73,15 @@ func fakeGitea(t *testing.T) *httptest.Server {
 		}
 		w.WriteHeader(201)
 		json.NewEncoder(w).Encode(map[string]string{"sha1": "tok-" + u})
+	})
+	mux.HandleFunc("DELETE /api/v1/admin/users/{username}", func(w http.ResponseWriter, r *http.Request) {
+		u := r.PathValue("username")
+		if users[u] == nil {
+			w.WriteHeader(404)
+			return
+		}
+		delete(users, u)
+		w.WriteHeader(204)
 	})
 	mux.HandleFunc("PATCH /api/v1/admin/users/{username}", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -197,6 +217,13 @@ func TestGiteaBackend(t *testing.T) {
 	}
 	if err := b.SetUserActive(ctx, "alice", false); err != nil {
 		t.Fatalf("disable: %v", err)
+	}
+	// DeleteUser（建用户回滚用）：存在 → 204；不存在 → 404
+	if err := b.DeleteUser(ctx, "alice"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if err := b.DeleteUser(ctx, "alice"); err == nil {
+		t.Fatal("delete missing user must fail")
 	}
 }
 

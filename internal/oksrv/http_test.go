@@ -1,6 +1,7 @@
 package oksrv
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,7 @@ import (
 )
 
 // newTestServer 起完整 mux + fake backend。
-func newTestServer(t *testing.T) (*httptest.Server, *Store) {
+func newTestServer(t *testing.T) (*httptest.Server, *Store, *FakeBackend) {
 	t.Helper()
 	s, err := OpenStore(t.TempDir())
 	if err != nil {
@@ -21,7 +22,8 @@ func newTestServer(t *testing.T) (*httptest.Server, *Store) {
 	}
 	t.Cleanup(func() { s.Close() })
 	testEnv["OK_TEST_ROOT_PW"] = pw // 测试内取用（包级 map，非真 env）
-	return httptest.NewServer(NewMux(s, NewFakeBackend(), "test-version")), s
+	b := NewFakeBackend()
+	return httptest.NewServer(NewMux(s, b, "test-version")), s, b
 }
 
 // call 带鉴权打请求。
@@ -61,7 +63,7 @@ func login(t *testing.T, srv *httptest.Server, username, pw string) string {
 }
 
 func TestMetaAndLogin(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _, _ := newTestServer(t)
 	defer srv.Close()
 
 	code, out := call(t, srv, "GET", "/api/v1/meta", "", nil)
@@ -93,7 +95,7 @@ func TestMetaAndLogin(t *testing.T) {
 }
 
 func TestFullManagementFlow(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _, _ := newTestServer(t)
 	defer srv.Close()
 	rootTok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
 
@@ -176,7 +178,7 @@ func TestFullManagementFlow(t *testing.T) {
 // TestAdminWriteEndpoints 覆盖管理写端点：admin 越权拒止、disable/enable 联动登录、
 // 组织成员移除、审计动作落库（reset-password / disable-user / enable-user / remove-org-member）。
 func TestAdminWriteEndpoints(t *testing.T) {
-	srv, st := newTestServer(t)
+	srv, st, _ := newTestServer(t)
 	defer srv.Close()
 	rootTok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
 
@@ -256,6 +258,37 @@ func TestAdminWriteEndpoints(t *testing.T) {
 		if !actions[want] {
 			t.Fatalf("audit missing %s: %v", want, actions)
 		}
+	}
+}
+
+// TestCreateUserTokenFailureRollback 钉住 2026-08-30 真机 bug：Gitea 发 token 失败
+// （1.22 缺 scope 400）时建用户流程必须回滚 Gitea 侧用户、不留本地半截状态，重试可收敛。
+func TestCreateUserTokenFailureRollback(t *testing.T) {
+	srv, st, backend := newTestServer(t)
+	defer srv.Close()
+	rootTok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
+
+	backend.SetFailTokens(true)
+	code, out := call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "carol"})
+	if code != http.StatusBadGateway {
+		t.Fatalf("token failure must be 502: %d %v", code, out)
+	}
+	// 本地不留半截（否则重试被"用户已存在"闸门挡住——真机第二次报错）
+	if st.GetUser("carol") != nil {
+		t.Fatal("local user must not exist after rollback")
+	}
+	// Gitea 侧用户已回滚删除：直接再调 CreateUser 应成功（没回滚会报已存在）
+	if err := backend.CreateUser(context.Background(), "carol", "pw"); err != nil {
+		t.Fatalf("backend user must be rolled back: %v", err)
+	}
+	if err := backend.DeleteUser(context.Background(), "carol"); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	// 修复后重试全链路成功
+	backend.SetFailTokens(false)
+	code, out = call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "carol"})
+	if code != 200 || out["git_token"].(string) == "" {
+		t.Fatalf("retry after fix must succeed: %d %v", code, out)
 	}
 }
 

@@ -10,12 +10,13 @@ import (
 type fakeRepo struct{ owner, name string }
 
 type FakeBackend struct {
-	mu     sync.Mutex
-	down   bool
-	users  map[string]bool // username → active
-	tokens map[string]int
-	repos  map[fakeRepo]bool
-	orgs   map[string]map[string]bool // org → members
+	mu         sync.Mutex
+	down       bool
+	failTokens bool // 测试注入：CreateUserToken 强制失败（建用户回滚路径用）
+	users      map[string]bool // username → active
+	tokens     map[string]int
+	repos      map[fakeRepo]bool
+	orgs       map[string]map[string]bool // org → members
 }
 
 func NewFakeBackend() *FakeBackend {
@@ -28,6 +29,9 @@ func NewFakeBackend() *FakeBackend {
 }
 
 func (f *FakeBackend) SetDown(down bool) { f.mu.Lock(); f.down = down; f.mu.Unlock() }
+
+// SetFailTokens 测试注入：CreateUserToken 强制失败（镜像 Gitea 1.22 缺 scope 的 400 场景）。
+func (f *FakeBackend) SetFailTokens(fail bool) { f.mu.Lock(); f.failTokens = fail; f.mu.Unlock() }
 
 func (f *FakeBackend) check() error {
 	if f.down {
@@ -64,11 +68,28 @@ func (f *FakeBackend) CreateUserToken(ctx context.Context, username, tokenName s
 	if err := f.check(); err != nil {
 		return "", err
 	}
+	if f.failTokens {
+		return "", fmt.Errorf("access token must have a scope")
+	}
 	if _, ok := f.users[username]; !ok {
 		return "", fmt.Errorf("用户 %q 不存在", username)
 	}
 	f.tokens[username]++
 	return fmt.Sprintf("fake-token-%s-%s-%d", username, tokenName, f.tokens[username]), nil
+}
+
+// DeleteUser 从 users 删除（建用户回滚用）；不存在时报错（尽力而为场景被忽略）。
+func (f *FakeBackend) DeleteUser(ctx context.Context, username string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.check(); err != nil {
+		return err
+	}
+	if _, ok := f.users[username]; !ok {
+		return fmt.Errorf("用户 %q 不存在", username)
+	}
+	delete(f.users, username)
+	return nil
 }
 
 func (f *FakeBackend) SetUserActive(ctx context.Context, username string, active bool) error {
