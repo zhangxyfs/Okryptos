@@ -537,12 +537,12 @@ func SetServer(path string, s Server) error {
 	return fsx.WithFileLock(path, func() error {
 		data, _ := os.ReadFile(path)
 		lines := strings.Split(string(data), "\n")
-		// 先摘旧 token（token 空串时保留）
+		// 先摘旧 token（token 空串时保留）；段头判定与下方重写循环一致（前缀 [ 且后缀 ]）
 		oldToken := ""
 		inOld := false
 		for _, line := range lines {
 			trim := strings.TrimSpace(line)
-			if strings.HasPrefix(trim, "[") {
+			if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
 				inOld = trim == "[server]"
 				continue
 			}

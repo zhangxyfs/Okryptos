@@ -17,12 +17,18 @@ import (
 // approve 会静默丢弃凭据（git 语义），必须显式告知调用方走回退。
 var ErrNoCredentialHelper = errors.New("系统未配置 git credential helper")
 
+// HasCredentialHelper 探测 dir 上下文的 credential.helper 是否非空
+// （仓级配置可见；无 helper 时 approve 会静默丢弃凭据——git 语义）。
+func HasCredentialHelper(dir string) bool {
+	out, err := execGit(dir, localTimeout, "config", "--get", "credential.helper")
+	return err == nil && strings.TrimSpace(out) != ""
+}
+
 // StoreCredential 把 remote URL 的凭据写入系统 credential helper。
 // 在仓库目录 dir 上下文执行（仓级 helper 配置可见）。
 func StoreCredential(dir, remoteURL, username, password string) error {
 	// 先探测 helper（credential.helper 为空则 approve 静默丢弃——git 语义）
-	out, err := execGit(dir, localTimeout, "config", "--get", "credential.helper")
-	if err != nil || strings.TrimSpace(out) == "" {
+	if !HasCredentialHelper(dir) {
 		return ErrNoCredentialHelper
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), localTimeout)
@@ -44,9 +50,10 @@ func StoreCredential(dir, remoteURL, username, password string) error {
 
 // CredentialURLWithAuth 回退：把凭据嵌进 remote URL（无 helper 环境）。
 // token 经 url.PathEscape（UserPassword 内部处理转义）。
+// file:// 等无认证语义的 scheme 原样返回（嵌凭据会把 URL 搞坏，如 file://C:/...）。
 func CredentialURLWithAuth(remoteURL, username, token string) string {
 	u, err := url.Parse(remoteURL)
-	if err != nil || u.Host == "" {
+	if err != nil || u.Host == "" || u.Scheme == "file" {
 		return remoteURL
 	}
 	u.User = url.UserPassword(username, token)

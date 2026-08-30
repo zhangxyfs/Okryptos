@@ -197,12 +197,18 @@ func (h *Handler) apiServerRepos(w http.ResponseWriter, r *http.Request) {
 		if cerr := syncx.StoreCredential(st.Root, pr.Repo.CloneURL, cfgServer.Username, pr.GitToken); cerr != nil {
 			if errors.Is(cerr, syncx.ErrNoCredentialHelper) {
 				remote = syncx.CredentialURLWithAuth(pr.Repo.CloneURL, cfgServer.Username, pr.GitToken)
-				credNote = "（凭据已内嵌 URL：本机未配置 git credential helper）"
+				credNote = "（凭据已内嵌 remote URL（本机无 git credential helper）——注意：项目 config.toml 会随仓同步，凭据将进入远端 git 历史。建议配置 credential helper 后重新绑定）"
 			} else {
 				writeErr(w, http.StatusInternalServerError, "写入 git 凭据失败："+cerr.Error())
 				return
 			}
 		}
+	} else if !syncx.HasCredentialHelper(st.Root) {
+		// 仓已存在（token 仅建仓首发）且本机无 credential helper——内嵌回退也无 token 可用，
+		// 闷头推进必然推送失败且状态半绑定，直接报错给出出路
+		writeJSON(w, http.StatusOK, map[string]any{"status": "error", "clone_url": pr.Repo.CloneURL,
+			"message": "仓已存在但本机无 git 凭据（token 仅建仓首发、本机无 credential helper）：请在终端手工绑定或联系管理员重置密码重发 token"})
+		return
 	}
 	repo := syncx.Open(st.Root)
 	if !repo.IsRepo() {

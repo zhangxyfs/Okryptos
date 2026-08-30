@@ -9,11 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"openknowledge/internal/config"
 	"openknowledge/internal/syncx"
 )
 
 // fakeOKServer 起假 okserver（meta/login/me/repos/personal，校验 Bearer）。
-func fakeOKServer(t *testing.T, cloneURL string) *httptest.Server {
+// gitToken 传空串模拟"仓已存在"语义（token 仅建仓首发）。
+func fakeOKServer(t *testing.T, cloneURL, gitToken string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/meta", func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +52,7 @@ func fakeOKServer(t *testing.T, cloneURL string) *httptest.Server {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"repo":      map[string]string{"layer": "personal", "owner": "alice", "project": req.Project, "name": "ok-" + req.Project, "clone_url": cloneURL},
-			"git_token": "git-tok-1",
+			"git_token": gitToken,
 		})
 	})
 	return httptest.NewServer(mux)
@@ -58,7 +60,7 @@ func fakeOKServer(t *testing.T, cloneURL string) *httptest.Server {
 
 func TestApiServerConfigAndLogin(t *testing.T) {
 	h, _, okHome := newEnv(t)
-	fake := fakeOKServer(t, "http://gitea/alice/ok-x.git")
+	fake := fakeOKServer(t, "http://gitea/alice/ok-x.git", "git-tok-1")
 	defer fake.Close()
 	srv := httptest.NewServer(h)
 	defer srv.Close()
@@ -118,11 +120,15 @@ func TestApiServerConfigAndLogin(t *testing.T) {
 // → POST /api/server/repos → 断言：项目仓已 init + 内容已推到 bare + 项目 [sync] 已落盘。
 func TestApiServerReposFullFlow(t *testing.T) {
 	h, _, okHome := newEnv(t)
+	// 隔离全局/系统 git 配置：防 StoreCredential 往真实 credential store 写假凭据
+	// （无 helper → 走 URL 内嵌回退，file:// 无 host 时 URL 原样）
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "gitconfig-sys"))
 	// "Gitea 侧"：file:// 裸仓
 	bare := t.TempDir()
 	gitRun(t, bare, "init", "--bare", "-b", "main")
 	bareURL := "file://" + filepath.ToSlash(bare)
-	fake := fakeOKServer(t, bareURL)
+	fake := fakeOKServer(t, bareURL, "git-tok-1")
 	defer fake.Close()
 	srv := httptest.NewServer(h)
 	defer srv.Close()
@@ -171,5 +177,78 @@ func TestApiServerReposFullFlow(t *testing.T) {
 	cfgData, _ := os.ReadFile(st.ConfigPath())
 	if !strings.Contains(string(cfgData), "[sync]") || !strings.Contains(string(cfgData), "enabled = true") {
 		t.Fatalf("project config:\n%s", cfgData)
+	}
+}
+
+// TestApiServerReposNoTokenNoHelper 仓已存在（provision 返回空 git_token）且本机无
+// credential helper——不得闷头推进：返回 200 status=error + 出路提示，且项目仓未被 init。
+func TestApiServerReposNoTokenNoHelper(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	// 隔离全局/系统 git 配置 → 无 credential helper
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "gitconfig-sys"))
+	fake := fakeOKServer(t, "http://gitea/alice/ok-x.git", "") // 空 git_token = 仓已存在语义
+	defer fake.Close()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	res, body := do(t, "POST", srv.URL+"/api/server/login", testToken, map[string]any{"url": fake.URL, "username": "alice", "password": "pw"})
+	if res != 200 {
+		t.Fatalf("login: %d %s", res, body)
+	}
+	name := "bindemo2"
+	projDir := filepath.Join(t.TempDir(), "work")
+	mkProjectAt(t, okHome, name, projDir)
+	st := stFor(t, okHome, name)
+
+	res, body = do(t, "POST", srv.URL+"/api/server/repos", testToken, map[string]any{"project": name})
+	if res != 200 {
+		t.Fatalf("repos: %d %s", res, body)
+	}
+	var out struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "error" || !strings.Contains(out.Message, "仓已存在但本机无 git 凭据") {
+		t.Fatalf("out: %s", body)
+	}
+	if syncx.Open(st.Root).IsRepo() {
+		t.Fatal("project must NOT be init'ed when credential path is impossible")
+	}
+}
+
+// TestFwdOrgMemberAdd 成员添加透传薄测试：POST /api/server/orgs/{org}/members
+// （裸路径无尾段——前端曾拼尾斜杠 404）应到达 okserver 的 /orgs/{org}/members。
+func TestFwdOrgMemberAdd(t *testing.T) {
+	h, _, _ := newEnv(t)
+	var gotOrg, gotUser, gotRole string
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/orgs/{org}/members", func(w http.ResponseWriter, r *http.Request) {
+		gotOrg = r.PathValue("org")
+		var req struct {
+			Username string `json:"username"`
+			Role     string `json:"role"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		gotUser, gotRole = req.Username, req.Role
+		w.WriteHeader(http.StatusNoContent)
+	})
+	fake := httptest.NewServer(mux)
+	defer fake.Close()
+	if err := config.SetServer(globalConfigPath(), config.Server{URL: fake.URL, Username: "root", Token: "tok-root"}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	res, body := do(t, "POST", srv.URL+"/api/server/orgs/core/members", testToken, map[string]any{"username": "alice", "role": "member"})
+	if res != 204 {
+		t.Fatalf("member add: %d %s", res, body)
+	}
+	if gotOrg != "core" || gotUser != "alice" || gotRole != "member" {
+		t.Fatalf("forwarded: org=%q user=%q role=%q", gotOrg, gotUser, gotRole)
 	}
 }

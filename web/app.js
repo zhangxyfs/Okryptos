@@ -6,7 +6,9 @@
 
 /* ================= 后端 API ================= */
 // 语义沿用旧 GUI 的 api()：X-Ok-Token 鉴权头；对象 body 自动 JSON + Content-Type；204 → null；
-// 401 视为 daemon 被替换（多 exe 共存/重启）后页面 token 过期，自动刷新一次取新 token
+// 401 分层语义：GUI 自身端点的 401 = X-Ok-Token 过期（daemon 被替换/多 exe 共存重启），自动刷新一次取新 token；
+// opts.skip401Reload = 透传类端点（/api/server/*，401 是 okserver 业务错误如密码错误/token 失效）——
+// 跳过刷新、照常 throw 交调用方处理
 // （sessionStorage 标志防刷新循环，任一成功响应后清除）；网络层错误包装为"网络错误"。
 async function api(path, opts){
   opts = opts || {};
@@ -27,7 +29,7 @@ async function api(path, opts){
   if(res.status === 204) return null;
   const data = await res.json().catch(()=>({}));
   if(!res.ok){
-    if(res.status === 401 && !sessionStorage.getItem("ok-401-reload")){
+    if(res.status === 401 && !opts.skip401Reload && !sessionStorage.getItem("ok-401-reload")){
       sessionStorage.setItem("ok-401-reload", "1");
       setTimeout(()=>{ location.reload(); }, 800);
       return new Promise(()=>{});
@@ -204,7 +206,7 @@ const I18N = {
     srvOnceNote:"创建后弹窗一次性显示初始密码 + git token", srvRole:"角色", srvActions:"操作", srvDisable:"禁用", srvEnable:"启用",
     srvDisabled:"已禁用", srvReset:"重置密码", srvRootNoDisable:"root 不可禁用",
     srvOrgs:"组织", srvOrgsDesc:"点成员 chip 加/减成员；团队仓经 okserver provisioning。", srvOrgName:"组织名称", srvDescOpt:"描述（可选）",
-    srvCreateOrg:"创建组织", srvTeamRepo:"团队仓：", srvNone:"无",
+    srvCreateOrg:"创建组织", srvTeamRepo:"团队仓：", srvTeamRepoBtn:"建团队仓", srvTeamRepoPrompt:"团队仓项目名：", srvNone:"无",
     srvReposAll:"仓库总览", srvLayer:"层", srvOwner:"所有者", srvProject:"项目", srvBy:"创建人", srvAt:"创建时间",
     srvAudit:"审计", srvAuditDesc:"管理操作流水（倒序）。",
     srvBindCard:"我的项目绑定", srvBindDesc:"建仓 = okserver provisioning → init → 首次推送，一键完成。",
@@ -394,7 +396,7 @@ const I18N = {
     srvOnceNote:"A one-time dialog shows the initial password + git token", srvRole:"Role", srvActions:"Actions", srvDisable:"Disable", srvEnable:"Enable",
     srvDisabled:"Disabled", srvReset:"Reset password", srvRootNoDisable:"root cannot be disabled",
     srvOrgs:"Organizations", srvOrgsDesc:"Toggle member chips to add/remove members; team repos are provisioned via okserver.", srvOrgName:"Org name", srvDescOpt:"Description (optional)",
-    srvCreateOrg:"Create org", srvTeamRepo:"Team repos: ", srvNone:"none",
+    srvCreateOrg:"Create org", srvTeamRepo:"Team repos: ", srvTeamRepoBtn:"New team repo", srvTeamRepoPrompt:"Team repo project name:", srvNone:"none",
     srvReposAll:"Repositories", srvLayer:"Layer", srvOwner:"Owner", srvProject:"Project", srvBy:"Created by", srvAt:"Created at",
     srvAudit:"Audit", srvAuditDesc:"Administrative operations (newest first).",
     srvBindCard:"My project bindings", srvBindDesc:"Provision = okserver, init, first push — one click.",
@@ -1863,18 +1865,22 @@ async function doProjectSync(project, btn){
     }
     if(r.status === "not_repo"){
       // 已登录服务器 → 提供"经服务器建仓并初始化"（真动作）；未登录 → 纯指引 toast
+      // catch 只包 config 拉取（判登录态）；repos 建仓的抛错（409/502 等）原样 toast，不吞成误导指引
+      let sc = null;
       try{
-        const sc = await api("/api/server/config");
-        if(sc.logged_in){
-          if(confirm(t("syncServerBindConfirm"))){
-            btn.classList.add("spinning");
-            const r2 = await api("/api/server/repos", { method:"POST", body:{ project: project } });
-            toast(r2.message || t("syncToastLatest"), r2.status === "error");
-            refreshManage();
-          }
-          return;
-        }
+        sc = await api("/api/server/config", { skip401Reload:true });
       }catch(_){ /* 未配置服务器，落纯指引 */ }
+      if(sc && sc.logged_in){
+        if(confirm(t("syncServerBindConfirm"))){
+          btn.classList.add("spinning");
+          try{
+            const r2 = await api("/api/server/repos", { method:"POST", body:{ project: project }, skip401Reload:true });
+            toast(r2.message || t("syncToastLatest"), r2.status === "error");
+          }catch(err2){ toast(err2.message, true); }
+          refreshManage();
+        }
+        return;
+      }
       toast(t("syncInitGuide"), true);
       return;
     }
@@ -5334,10 +5340,17 @@ const SRV = { loaded:false, url:"", username:"", loggedIn:false, user:null, user
 function loadServer(){
   if(SRV.loaded) return;
   SRV.loaded = true;
-  api("/api/server/config").then(cfg=>{
+  api("/api/server/config", { skip401Reload:true }).then(cfg=>{
     SRV.url = cfg.url || ""; SRV.username = cfg.username || ""; SRV.loggedIn = !!cfg.logged_in;
+    if(SRV.url){
+      // 已配置态进页补拉一次 test，回填 srvVer/gitOk（否则状态卡恒显 "—/✗ 异常"）
+      api("/api/server/test", { method:"POST", body:{ url: SRV.url }, skip401Reload:true }).then(r=>{
+        if(r.ok){ SRV.srvVer = r.version || ""; SRV.gitOk = !!r.git_backend_ok; }
+        if(state.menu === "server" && !state.syncConflict && !state.merge) render();
+      }).catch(()=>{});
+    }
     if(SRV.loggedIn){
-      return api("/api/server/me").then(me=>{ SRV.user = me; }).catch(()=>{ SRV.loggedIn = false; SRV.user = null; });
+      return api("/api/server/me", { skip401Reload:true }).then(me=>{ SRV.user = me; }).catch(()=>{ SRV.loggedIn = false; SRV.user = null; });
     }
   }).catch(()=>{ /* 未配置保持空 */ }).finally(()=>{
     if(state.menu === "server" && !state.syncConflict && !state.merge) render();
@@ -5350,14 +5363,16 @@ function loadServerRoleData(){
   const isAdmin = SRV.user.role === "root" || SRV.user.role === "admin";
   const pulls = [];
   if(isAdmin){
-    if(SRV.users === null) pulls.push(api("/api/server/users").then(r=>{ SRV.users = r.users || []; }));
-    if(SRV.orgs === null) pulls.push(api("/api/server/orgs").then(r=>{ SRV.orgs = r.orgs || []; }));
-    if(SRV.repos === null) pulls.push(api("/api/server/repos-all").then(r=>{ SRV.repos = r.repos || []; }));
-    if(SRV.audit === null) pulls.push(api("/api/server/audit?limit=50").then(r=>{ SRV.audit = r.entries || []; }));
+    if(SRV.users === null) pulls.push(api("/api/server/users", { skip401Reload:true }).then(r=>{ SRV.users = r.users || []; }));
+    if(SRV.orgs === null) pulls.push(api("/api/server/orgs", { skip401Reload:true }).then(r=>{ SRV.orgs = r.orgs || []; }));
+    if(SRV.repos === null) pulls.push(api("/api/server/repos-all", { skip401Reload:true }).then(r=>{ SRV.repos = r.repos || []; }));
+    if(SRV.audit === null) pulls.push(api("/api/server/audit?limit=50", { skip401Reload:true }).then(r=>{ SRV.audit = r.entries || []; }));
   } else if(SRV.projects === null){
     pulls.push(api("/api/projects").then(ps=>{ SRV.projects = ps || []; }));
   }
-  if(pulls.length) Promise.all(pulls).then(()=>{ if(state.menu==="server") render(); });
+  if(pulls.length) Promise.all(pulls)
+    .then(()=>{ if(state.menu==="server") render(); })
+    .catch(err=>toast(err.message, true));
 }
 
 function serverCurStep(){ if(!SRV.url) return 1; if(!SRV.user) return 2; return 3; }
@@ -5461,12 +5476,12 @@ async function srvTestConnect(addr, port){
   const url = "http://"+addr+":"+port;
   SRV.testing = true; render();
   try{
-    const r = await api("/api/server/test", { method:"POST", body:{ url: url } });
+    const r = await api("/api/server/test", { method:"POST", body:{ url: url }, skip401Reload:true });
     SRV.testing = false;
     if(r.ok){
       SRV.url = url; SRV.srvVer = r.version || ""; SRV.gitOk = !!r.git_backend_ok;
       SRV.testFb = "okserver "+(r.version||"")+(r.git_backend_ok?" · git ✓":" · git ✗"); SRV.testErr = false;
-      await api("/api/server/config", { method:"PUT", body:{ url: url } });
+      await api("/api/server/config", { method:"PUT", body:{ url: url }, skip401Reload:true });
       toast(t("srvConnOk")+"：okserver "+(r.version||""));
     }else{
       SRV.testFb = t("srvConnFail")+(r.error||""); SRV.testErr = true;
@@ -5479,8 +5494,8 @@ async function srvTestConnect(addr, port){
 }
 
 async function srvDisconnect(){
-  try{ await api("/api/server/logout", { method:"POST" }); }catch(_){}
-  try{ await api("/api/server/config", { method:"PUT", body:{ url:"" } }); }catch(_){}
+  try{ await api("/api/server/logout", { method:"POST", skip401Reload:true }); }catch(_){}
+  try{ await api("/api/server/config", { method:"PUT", body:{ url:"" }, skip401Reload:true }); }catch(_){}
   Object.assign(SRV, { url:"", username:"", loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, wizardStep:null, testFb:null });
   render();
 }
@@ -5516,9 +5531,11 @@ async function srvLogin(username, password){
   if(!username || !password){ toast(t("srvLoginFail"), true); return; }
   SRV.logging = true; render();
   try{
-    const r = await api("/api/server/login", { method:"POST", body:{ url: SRV.url, username: username, password: password } });
+    const r = await api("/api/server/login", { method:"POST", body:{ url: SRV.url, username: username, password: password }, skip401Reload:true });
     SRV.logging = false; SRV.loginFb = null;
     SRV.user = r.user; SRV.username = r.user.name; SRV.loggedIn = true; SRV.wizardStep = null;
+    // login 响应只有 name/role——补拉一次 me 填 orgs（否则"我的组织"恒空）
+    try{ SRV.user = await api("/api/server/me", { skip401Reload:true }); }catch(_){ /* me 失败暂用 login 返回的 user */ }
     toast(t("srvLoginOk")+"："+r.user.name+"（"+r.user.role+"）");
   }catch(err){
     SRV.logging = false;
@@ -5528,7 +5545,7 @@ async function srvLogin(username, password){
 }
 
 async function srvLogout(){
-  try{ await api("/api/server/logout", { method:"POST" }); }catch(_){}
+  try{ await api("/api/server/logout", { method:"POST", skip401Reload:true }); }catch(_){}
   Object.assign(SRV, { loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, wizardStep:2 });
   toast(t("srvLoggedOut"));
   render();
@@ -5562,8 +5579,12 @@ function usersCard(){
   const row = el("div","prow");
   const inp = el("input","pinput"); inp.placeholder = t("srvNewUser");
   row.appendChild(inp);
+  // 角色下拉：admin 选项仅 root 可见（服务端仍有角色门控，这里只是 UI 收窄）
+  const rSel = el("select","pselect");
+  rSel.innerHTML = '<option value="member">member</option>'+(SRV.user && SRV.user.role === "root" ? '<option value="admin">admin</option>' : '');
+  row.appendChild(rSel);
   const btn = el("button","btn btn-primary"); btn.textContent = t("srvCreateUser");
-  btn.onclick = ()=>srvCreateUser(inp.value.trim(), btn);
+  btn.onclick = ()=>srvCreateUser(inp.value.trim(), rSel.value, btn);
   row.appendChild(btn);
   const note = el("span","small muted"); note.textContent = t("srvOnceNote"); row.appendChild(note);
   card.appendChild(row);
@@ -5575,7 +5596,7 @@ function usersCard(){
     const td2 = el("td",""); td2.textContent = u.role;
     const td3 = el("td",""); td3.style.textAlign = "right";
     const tog = el("button","btn"); tog.textContent = u.disabled ? t("srvEnable") : t("srvDisable");
-    tog.onclick = ()=>srvToggleUser(u.name, !u.disabled);
+    tog.onclick = ()=>{ if(confirm(t("srvConfirmDisable"))) srvToggleUser(u.name, !u.disabled); };
     if(u.role === "root"){ tog.disabled = true; tog.title = t("srvRootNoDisable"); }
     const rst = el("button","btn"); rst.textContent = t("srvReset");
     rst.onclick = ()=>srvResetPwd(u.name);
@@ -5588,11 +5609,11 @@ function usersCard(){
   return card;
 }
 
-async function srvCreateUser(name, btn){
+async function srvCreateUser(name, role, btn){
   if(!name) return;
   btn.disabled = true;
   try{
-    const r = await api("/api/server/users", { method:"POST", body:{ username: name } });
+    const r = await api("/api/server/users", { method:"POST", body:{ username: name, role: role || "member" }, skip401Reload:true });
     SRV.users = null; loadServerRoleData();
     srvShowSecret(t("srvUserCreated")+" — "+name, t("srvCopyHint"), [
       [t("srvPwd"), r.password], [t("srvGitTok"), r.git_token],
@@ -5603,7 +5624,7 @@ async function srvCreateUser(name, btn){
 
 async function srvToggleUser(name, disabled){
   try{
-    await api("/api/server/users/"+encodeURIComponent(name)+(disabled?"/disable":"/enable"), { method:"POST" });
+    await api("/api/server/users/"+encodeURIComponent(name)+(disabled?"/disable":"/enable"), { method:"POST", skip401Reload:true });
     SRV.users = null; loadServerRoleData();
     toast((disabled?t("srvDisable"):t("srvEnable"))+" "+name+" ✓");
   }catch(err){ toast(err.message, true); }
@@ -5611,7 +5632,7 @@ async function srvToggleUser(name, disabled){
 
 async function srvResetPwd(name){
   try{
-    const r = await api("/api/server/users/"+encodeURIComponent(name)+"/reset-password", { method:"POST" });
+    const r = await api("/api/server/users/"+encodeURIComponent(name)+"/reset-password", { method:"POST", skip401Reload:true });
     srvShowSecret(t("srvResetDone")+" — "+name, t("srvCopyHint"), [[t("srvNewPwd"), r.password]]);
   }catch(err){ toast(err.message, true); }
 }
@@ -5666,6 +5687,9 @@ function orgsCard(){
       mid.appendChild(document.createTextNode(" "));
     });
     orow.appendChild(mid);
+    const trBtn = el("button","btn"); trBtn.textContent = t("srvTeamRepoBtn");
+    trBtn.onclick = ()=>srvCreateTeamRepo(o.name);
+    orow.appendChild(trBtn);
     card.appendChild(orow);
   });
   return card;
@@ -5675,7 +5699,7 @@ async function srvCreateOrg(name, desc, btn){
   if(!name) return;
   btn.disabled = true;
   try{
-    await api("/api/server/orgs", { method:"POST", body:{ name: name, description: desc } });
+    await api("/api/server/orgs", { method:"POST", body:{ name: name, description: desc }, skip401Reload:true });
     SRV.orgs = null; loadServerRoleData();
     toast(t("srvCreateOrg")+" "+name+" ✓");
   }catch(err){ toast(err.message, true); }
@@ -5684,10 +5708,24 @@ async function srvCreateOrg(name, desc, btn){
 
 async function srvToggleMember(org, user, inOrg){
   try{
-    await api("/api/server/orgs/"+encodeURIComponent(org)+"/members/"+(inOrg?encodeURIComponent(user):""), inOrg
-      ? { method:"DELETE" }
-      : { method:"POST", body:{ username: user, role:"member" } });
+    // add 走裸 /members（ServeMux 注册模式无尾段，尾斜杠会 404）；delete 走 /members/<user>
+    if(inOrg){
+      await api("/api/server/orgs/"+encodeURIComponent(org)+"/members/"+encodeURIComponent(user), { method:"DELETE", skip401Reload:true });
+    }else{
+      await api("/api/server/orgs/"+encodeURIComponent(org)+"/members", { method:"POST", body:{ username: user, role:"member" }, skip401Reload:true });
+    }
     SRV.orgs = null; loadServerRoleData();
+  }catch(err){ toast(err.message, true); }
+}
+
+/* 团队仓创建（组织行按钮 → prompt 项目名 → provisioning → 刷新 orgs/repos） */
+async function srvCreateTeamRepo(org){
+  const project = (prompt(t("srvTeamRepoPrompt")) || "").trim();
+  if(!project) return;
+  try{
+    await api("/api/server/repos/team", { method:"POST", body:{ org: org, project: project }, skip401Reload:true });
+    toast(t("srvTeamRepoBtn")+" "+org+"/"+project+" ✓");
+    SRV.orgs = null; SRV.repos = null; loadServerRoleData();
   }catch(err){ toast(err.message, true); }
 }
 
@@ -5737,10 +5775,8 @@ function bindCard(){
     const td2 = el("td","");
     td2.innerHTML = bound ? '<span class="chip on">'+t("srvBound")+'</span>' : '<span class="chip off">'+t("srvNotCreated")+'</span>';
     const td3 = el("td",""); td3.style.textAlign = "right";
-    if(bound){
-      const s = el("span","small muted mono"); s.textContent = p.sync.remote || "";
-      td3.appendChild(s);
-    }else{
+    // syncStatusJSON 无 remote 字段（恒 undefined）——已绑定态不再显示远端地址 span
+    if(!bound){
       const btn = el("button","btn btn-primary");
       btn.textContent = SRV.bindBusy[p.name] ? t("srvBinding") : t("srvBind");
       btn.disabled = !!SRV.bindBusy[p.name];
@@ -5757,7 +5793,7 @@ function bindCard(){
 async function srvBind(project){
   SRV.bindBusy[project] = true; render();
   try{
-    const r = await api("/api/server/repos", { method:"POST", body:{ project: project } });
+    const r = await api("/api/server/repos", { method:"POST", body:{ project: project }, skip401Reload:true });
     toast(r.message || t("srvBound"), r.status === "error");
     if(r.status === "conflict"){
       state.syncConflict = { project: project };
