@@ -215,7 +215,7 @@ function pageConnect(content) {
   card.append(errSlot);
 
   const hostI = pinput("mono", "", "290px");
-  hostI.placeholder = "zhangxyfs@192.168.1.10 或 192.168.1.10";
+  hostI.placeholder = "<user>@<ip> 或 <ip>";
   const portI = pinput("mono", "22", "56px");
   card.append(prow("SSH 地址", [hostI, el("span", "muted small", "端口"), portI]));
   const userI = pinput("", "", "290px");
