@@ -222,7 +222,23 @@ function pageConnect(content) {
   userI.placeholder = "地址里写了 user@ 可留空";
   card.append(prow("用户名", [userI]));
 
-  // user@host 一把输：地址含 @ 时自动拆出用户名（用户名框已有值则以框内为准）
+  // user@host 一把输：地址框每次输入都实时解析；用户名框的值若等于上次自动填入
+  // 的值（或为空）则继续跟随，一旦用户手动改过就不再覆盖。
+  let lastAutoUser = "";
+  userI.addEventListener("input", () => {
+    lastAutoUser = "__manual__"; // 用户碰过用户名框
+  });
+  hostI.addEventListener("input", () => {
+    const v = hostI.value.trim();
+    const at = v.indexOf("@");
+    if (at > 0) {
+      const u = v.slice(0, at);
+      if (lastAutoUser !== "__manual__" || !userI.value.trim()) {
+        userI.value = u;
+        lastAutoUser = u;
+      }
+    }
+  });
   function splitUserHost() {
     const v = hostI.value.trim();
     const at = v.indexOf("@");
@@ -232,12 +248,6 @@ function pageConnect(content) {
     }
     return { host: v, user: userI.value.trim() };
   }
-  hostI.addEventListener("change", () => {
-    const at = hostI.value.trim().indexOf("@");
-    if (at > 0 && !userI.value.trim()) {
-      userI.value = hostI.value.trim().slice(0, at);
-    }
-  });
 
   // 认证方式 tabs：密码 / 私钥（二选一）
   const authRow = prow("认证方式", []);
