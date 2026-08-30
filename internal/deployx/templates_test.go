@@ -11,7 +11,7 @@ func TestRenderComposeFull(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"gitea/gitea:1.22", "${OKSERVER_IMAGE}", "DISABLE_REGISTRATION=true",
-		"MAX_CREATION_LIMIT=0", "DEFAULT_PRIVATE=private", "INSTALL_LOCK=true", "${GITEA_HTTP_PORT}:3000", "${OKSERVER_PORT}:3100"} {
+		"MAX_CREATION_LIMIT=0", "DEFAULT_PRIVATE=private", "GITEA__security__INSTALL_LOCK=true", "${GITEA_HTTP_PORT}:3000", "${OKSERVER_PORT}:3100"} {
 		if !strings.Contains(c, want) {
 			t.Fatalf("full compose 缺 %q", want)
 		}

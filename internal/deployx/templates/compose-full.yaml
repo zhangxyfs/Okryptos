@@ -6,7 +6,7 @@ services:
     volumes:
       - ./gitea-data:/data
     environment:
-      - GITEA__server__INSTALL_LOCK=true                 # 跳过网页安装向导（无人值守部署）
+      - GITEA__security__INSTALL_LOCK=true               # 跳过网页安装向导（无人值守部署）。注意 1.22 读的是 [security] 段，写 [server] 无效
       - GITEA__database__DB_TYPE=sqlite3
       - GITEA__service__DISABLE_REGISTRATION=true        # 治理配置①：关闭开放注册
       - GITEA__repository__MAX_CREATION_LIMIT=0          # 治理配置②：禁普通用户建仓
