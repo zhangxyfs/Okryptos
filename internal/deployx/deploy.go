@@ -78,10 +78,12 @@ func buildFullTask(s DeploySpec, compose string) Task {
 				"mkdir -p "+s.Dir+"/okserver-data "+s.Dir+"/gitea-data"); err != nil {
 				return err
 			}
-			// chown 失败不致命（非 root 或已授权目录）：降级为警告
+			// chown 失败不致命（非 root 或已授权目录）：降级为警告。
+			// gitea-data 同样给 uid 1000（gitea 容器内 git 用户）——sudo 模式下
+			// 目录由 root 创建，不 chown 两个容器都写不进去。
 			if _, err := runCmd(ctx, e, "创建部署目录",
-				"chown -R 1000:1000 "+s.Dir+"/okserver-data"); err != nil {
-				e.Hub.Publish("创建部署目录", "info", "警告：chown 失败（okserver 可能无法写数据目录）："+err.Error())
+				"chown -R 1000:1000 "+s.Dir+"/okserver-data "+s.Dir+"/gitea-data"); err != nil {
+				e.Hub.Publish("创建部署目录", "info", "警告：chown 失败（容器可能无法写数据目录）："+err.Error())
 			}
 			return nil
 		}},

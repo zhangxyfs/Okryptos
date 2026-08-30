@@ -19,7 +19,9 @@ type Server struct {
 	hub   *LogHub
 
 	mu       sync.Mutex
-	ex       Executor          // 已连接的 SSH 会话（nil=未连接）
+	ex       Executor          // 已连接的 SSH 会话（nil=未连接；sudo 模式下为 WrapSudo 包装）
+	pw       string            // 登录密码（仅内存，供 sudo 回退尝试；私钥登录为空）
+	sudo     bool              // 已切 sudo 包装
 	running  bool              // 任务 single-flight
 	lastVars map[string]string // 最近一次成功任务的 Vars
 }
@@ -50,6 +52,7 @@ func (s *Server) Handler(webFS fs.FS) http.Handler {
 	api("POST /api/connect", s.apiConnect)
 	api("POST /api/disconnect", s.apiDisconnect)
 	api("GET /api/probe", s.apiProbe)
+	api("POST /api/enable-sudo", s.apiEnableSudo)
 	api("POST /api/smoke-external", s.apiSmokeExternal)
 	api("POST /api/deploy", s.apiDeploy)
 	api("GET /api/deploy/result", s.apiDeployResult)
@@ -170,6 +173,8 @@ func (s *Server) apiConnect(w http.ResponseWriter, r *http.Request) {
 		s.ex.Close()
 	}
 	s.ex = ex
+	s.pw = req.Password // 仅内存留存，供 probe 的 sudo 回退尝试
+	s.sudo = false
 	s.mu.Unlock()
 	s.hub.Publish("", "ok", fmt.Sprintf("已连接 %s@%s:%d", req.User, req.Host, req.Port))
 	writeJSON(w, map[string]any{"ok": true})
@@ -181,6 +186,8 @@ func (s *Server) apiDisconnect(w http.ResponseWriter, r *http.Request) {
 		s.ex.Close()
 		s.ex = nil
 	}
+	s.pw = ""
+	s.sudo = false
 	s.mu.Unlock()
 	writeJSON(w, map[string]any{"ok": true})
 }
@@ -190,12 +197,71 @@ func (s *Server) apiProbe(w http.ResponseWriter, r *http.Request) {
 	if ex == nil {
 		return
 	}
-	res, err := Probe(r.Context(), ex)
+	s.mu.Lock()
+	pw := s.pw
+	s.mu.Unlock()
+	res, err := Probe(r.Context(), ex, pw)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	// sudo 回退验证通过 → 会话切到 sudo 包装，后续部署/管理命令全部带 sudo
+	if res.NeedSudo {
+		s.mu.Lock()
+		if !s.sudo {
+			if sx, err := WrapSudo(s.ex, pw); err == nil {
+				s.ex = sx
+				s.sudo = true
+			}
+		}
+		s.mu.Unlock()
+	}
 	writeJSON(w, res)
+}
+
+// apiEnableSudo 显式启用 sudo（私钥登录或 sudo 密码≠登录密码的场景）：
+// 验证通过后会话切到 sudo 包装。
+func (s *Server) apiEnableSudo(w http.ResponseWriter, r *http.Request) {
+	ex := s.session(w)
+	if ex == nil {
+		return
+	}
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	s.mu.Lock()
+	pw := req.Password
+	if pw == "" {
+		pw = s.pw // 未另给密码时回退登录密码
+	}
+	s.mu.Unlock()
+	if pw == "" {
+		writeErr(w, http.StatusBadRequest, "需要 sudo 密码（私钥登录时请显式提供）")
+		return
+	}
+	sx, err := WrapSudo(ex, pw)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	code, err := sx.Run(ctx, "true", nil, nil)
+	if err != nil || code != 0 {
+		writeErr(w, http.StatusBadGateway, "sudo 验证失败（密码错误或 sudo 不可用）")
+		return
+	}
+	s.mu.Lock()
+	s.ex = sx
+	s.sudo = true
+	s.pw = pw
+	s.mu.Unlock()
+	s.hub.Publish("", "ok", "sudo 已启用（密码仅内存留存）")
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 type smokeReq struct {

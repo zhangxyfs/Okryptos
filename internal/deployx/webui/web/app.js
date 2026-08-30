@@ -309,6 +309,7 @@ function pageConnect(content) {
       await api("/api/connect", { method: "POST", body: body });
       S.connStr = uh.user + "@" + uh.host;
       S.connHost = uh.host;
+      S.pwdAuth = pwdI.value !== ""; // 密码登录才可能有登录密码供 sudo 回退
       setBadge(true, "已连接 " + S.connStr);
       location.hash = "#/probe";
     } catch (e) {
@@ -367,6 +368,7 @@ function renderProbeResult(slot, p) {
   else items.append(probeItem("err", "✗", "未检测到 Docker", p.docker_detail || "docker 命令不存在"));
   if (p.compose_ok) items.append(probeItem("ok", "✓", "Compose 插件可用", ""));
   else items.append(probeItem("err", "✗", "未检测到 compose 插件", "docker compose 插件缺失"));
+  if (p.need_sudo) items.append(probeItem("info", "ℹ", "Docker 命令将以 sudo 执行", "已验证通过；密码仅存内存，不落盘"));
   // 端口：已有部署时用 info 中性提示，否则 warn 并预告自动避让
   if (p.port_gitea_busy) {
     if (p.existing) items.append(probeItem("info", "ℹ", "端口 3000 已被占用", "容器 " + p.port_gitea_busy + "（本部署的 Gitea）"));
@@ -413,21 +415,41 @@ function renderProbeResult(slot, p) {
     const ul = el("ul", "small");
     ul.style.cssText = "margin:0;padding-left:20px;line-height:2";
     if (permDenied) {
-      d.textContent = "Docker 已安装，但 SSH 用户无权访问 Docker daemon（不在 docker 组）。在 NAS 上执行以下命令后重新探测：";
-      const li1 = el("li", "mono", "sudo usermod -aG docker " + (S.connStr || "").split("@")[0]);
-      const li2 = el("li");
-      li2.append(document.createTextNode("然后**重新登录 SSH**（或重启 NAS 终端会话）使组生效，再点「重新探测」"));
-      ul.append(li1, li2);
-    } else {
-      d.textContent = "okdeploy 需要 NAS 已安装 Docker 与 compose 插件，请先安装后重新探测：";
-      const li1 = el("li");
-      li1.append(el("b", "", "群晖 Synology"), document.createTextNode("：套件中心安装「Container Manager」（DSM 7.2+）"));
-      const li2 = el("li");
-      li2.append(el("b", "", "威联通 QNAP"), document.createTextNode("：App Center 安装「Container Station」"));
-      const li3 = el("li");
-      li3.append(el("b", "", "其他 Linux NAS"), document.createTextNode("：安装 Docker Engine 24+ 及 docker compose 插件"));
-      ul.append(li1, li2, li3);
+      d.textContent = "Docker 已安装，但当前用户无权访问 daemon。okdeploy 可以直接用 sudo 执行部署（密码仅存内存，不落盘）：";
+      const row = el("div");
+      row.style.cssText = "display:flex;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap";
+      const sudoPwI = el("input", "pinput");
+      sudoPwI.type = "password";
+      sudoPwI.placeholder = S.pwdAuth ? "sudo 密码（默认同登录密码）" : "sudo 密码（私钥登录必填）";
+      sudoPwI.style.width = "240px";
+      const sudoBtn = el("button", "btn btn-primary", "启用 sudo 并重新探测");
+      sudoBtn.onclick = async () => {
+        sudoBtn.disabled = true;
+        sudoBtn.textContent = "验证中…";
+        try {
+          await api("/api/enable-sudo", { method: "POST", body: { password: sudoPwI.value } });
+          route(); // 重新探测
+        } catch (e2) {
+          block.append(alertBar("err", "✗ " + e2.message));
+          sudoBtn.disabled = false;
+          sudoBtn.textContent = "启用 sudo 并重新探测";
+        }
+      };
+      row.append(sudoPwI, sudoBtn);
+      const manual = el("div", "small muted");
+      manual.textContent = "或者手动处理：在 NAS 上执行 sudo usermod -aG docker " + (S.connStr || "").split("@")[0] + "，重新登录 SSH 后点「重新探测」";
+      block.append(h, d, row, manual);
+      slot.append(block);
+      return;
     }
+    d.textContent = "okdeploy 需要 NAS 已安装 Docker 与 compose 插件，请先安装后重新探测：";
+    const li1 = el("li");
+    li1.append(el("b", "", "群晖 Synology"), document.createTextNode("：套件中心安装「Container Manager」（DSM 7.2+）"));
+    const li2 = el("li");
+    li2.append(el("b", "", "威联通 QNAP"), document.createTextNode("：App Center 安装「Container Station」"));
+    const li3 = el("li");
+    li3.append(el("b", "", "其他 Linux NAS"), document.createTextNode("：安装 Docker Engine 24+ 及 docker compose 插件"));
+    ul.append(li1, li2, li3);
     block.append(h, d, ul);
     slot.append(block);
     return;

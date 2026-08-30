@@ -13,6 +13,8 @@ type ProbeResult struct {
 	DockerVersion string `json:"docker_version"`
 	DockerDetail  string `json:"docker_detail"` // 不可用时的真实 stderr 摘要（权限/未运行/未安装）
 	ComposeOK     bool   `json:"compose_ok"`
+	NeedSudo      bool   `json:"need_sudo"`   // docker 可用但须走 sudo（探测时已验证通过）
+	SudoFailed    bool   `json:"sudo_failed"` // 用登录密码试 sudo 失败（需用户另给 sudo 密码）
 	PortGiteaBusy string `json:"port_gitea_busy"`
 	PortOKBusy    string `json:"port_ok_busy"`
 	GiteaFound    bool   `json:"gitea_found"`
@@ -47,7 +49,9 @@ func runQuiet2(ctx context.Context, ex Executor, cmd string) (stdout, stderrTail
 }
 
 // Probe 探测远端部署环境。所有命令容错：单条失败不致命。
-func Probe(ctx context.Context, ex Executor) (*ProbeResult, error) {
+// sudoPw 非空且 daemon 直连被拒时，自动尝试 sudo 路径（NAS 常见）；一旦 sudo
+// 验证通过，余下探测命令全部改走 sudo 包装（容器清单/inspect 才有权限）。
+func Probe(ctx context.Context, ex Executor, sudoPw string) (*ProbeResult, error) {
 	r := &ProbeResult{}
 
 	out, _ := runQuiet(ctx, ex, "uname -m")
@@ -62,6 +66,21 @@ func Probe(ctx context.Context, ex Executor) (*ProbeResult, error) {
 		r.DockerVersion = strings.TrimSpace(ver)
 		r.DockerOK = code == 0
 		r.DockerDetail = strings.TrimSpace(tail)
+		if !r.DockerOK && sudoPw != "" {
+			// 直连被拒 → 用登录密码试 sudo；通过则余下探测改走 sudo 包装
+			if sx, err := WrapSudo(ex, sudoPw); err == nil {
+				ver2, _, code2 := runQuiet2(ctx, sx, "docker version --format '{{.Server.Version}}'")
+				if code2 == 0 {
+					r.NeedSudo = true
+					r.DockerOK = true
+					r.DockerVersion = strings.TrimSpace(ver2)
+					r.DockerDetail = ""
+					ex = sx
+				} else {
+					r.SudoFailed = true
+				}
+			}
+		}
 	} else {
 		r.DockerDetail = "docker 命令不存在（PATH 中找不到）"
 	}
