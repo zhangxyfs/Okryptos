@@ -139,19 +139,21 @@ func buildFullTask(s DeploySpec, compose string) Task {
 			_, err := runCmd(ctxT, e, "启动 Gitea", waitHTTP(giteaHealth))
 			return err
 		}},
+		// gitea CLI 必须 -u git：官方镜像主进程是 root（s6 才把 gitea 降权成 git），
+		// exec 默认以 root 进容器，安装锁生效后 CLI 的运行用户检查直接 fatal。
 		{Name: "创建 Gitea 管理员", Run: func(ctx context.Context, e *Env) error {
 			adminPw := NewGiteaAdminToken()[:16]
 			e.Vars["gitea_admin_password"] = adminPw
 			return runStepMaskedOut(ctx, e, "创建 Gitea 管理员",
-				composeCmd(s.Dir, "exec -T gitea gitea admin user list | grep -qw okadmin || "+
-					composeCmd(s.Dir, "exec -T gitea gitea admin user create --admin --username okadmin --password '****' --email okadmin@local --must-change-password=false")),
-				composeCmd(s.Dir, "exec -T gitea gitea admin user list | grep -qw okadmin || "+
-					composeCmd(s.Dir, "exec -T gitea gitea admin user create --admin --username okadmin --password "+shellQuote(adminPw)+" --email okadmin@local --must-change-password=false")))
+				composeCmd(s.Dir, "exec -T -u git gitea gitea admin user list | grep -qw okadmin || "+
+					composeCmd(s.Dir, "exec -T -u git gitea gitea admin user create --admin --username okadmin --password '****' --email okadmin@local --must-change-password=false")),
+				composeCmd(s.Dir, "exec -T -u git gitea gitea admin user list | grep -qw okadmin || "+
+					composeCmd(s.Dir, "exec -T -u git gitea gitea admin user create --admin --username okadmin --password "+shellQuote(adminPw)+" --email okadmin@local --must-change-password=false")))
 		}},
 		{Name: "生成 Gitea token", Run: func(ctx context.Context, e *Env) error {
 			if err := runStepMasked(ctx, e, "生成 Gitea token",
-				composeCmd(s.Dir, "exec -T gitea gitea admin user generate-access-token --username okadmin --token-name okserver --scopes all --raw"),
-				composeCmd(s.Dir, "exec -T gitea gitea admin user generate-access-token --username okadmin --token-name okserver --scopes all --raw"),
+				composeCmd(s.Dir, "exec -T -u git gitea gitea admin user generate-access-token --username okadmin --token-name okserver --scopes all --raw"),
+				composeCmd(s.Dir, "exec -T -u git gitea gitea admin user generate-access-token --username okadmin --token-name okserver --scopes all --raw"),
 				withSecret(func(out string) {
 					// token 在 stdout 最后一行
 					lines := strings.Split(strings.TrimSpace(out), "\n")
