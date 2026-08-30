@@ -20,6 +20,9 @@ type SSHClient struct {
 	cli *ssh.Client
 }
 
+// 编译期接口断言：SSHClient 必须实现 Executor。
+var _ Executor = (*SSHClient)(nil)
+
 // DialSSH 连接 SSH；keyPath 非空用私钥，password 非空加密码兜底；两者皆空报错。
 // v1 接受任意主机密钥（InsecureIgnoreHostKey）：部署目标多为内网 NAS，
 // 首次连接无 known_hosts 可校验；风险提示见 server/deploy/README.md。
@@ -40,7 +43,7 @@ func DialSSH(ctx context.Context, host string, port int, user, password, keyPath
 		auth = append(auth, ssh.Password(password))
 	}
 	if len(auth) == 0 {
-		return nil, fmt.Errorf("需要密码或私钥")
+		return nil, errors.New("需要密码或私钥")
 	}
 	cfg := &ssh.ClientConfig{
 		User:            user,
@@ -107,7 +110,10 @@ func (c *SSHClient) Run(ctx context.Context, cmd string, stdin io.Reader, onLine
 	go func() { done <- sess.Wait() }()
 	select {
 	case <-ctx.Done():
+		// SIGKILL 可能被服务端拒绝（远端进程不死、Wait 不返回），
+		// 故 Signal 后立即 Close channel，让 Wait 必返回错误，避免挂死。
 		_ = sess.Signal(ssh.SIGKILL)
+		_ = sess.Close()
 		<-done
 		wg.Wait()
 		return -1, ctx.Err()
@@ -147,17 +153,21 @@ func (c *SSHClient) Download(ctx context.Context, cmd string, w io.Writer, onPro
 	go func() { waitCh <- sess.Wait() }()
 	select {
 	case <-ctx.Done():
+		// SIGKILL 可能被服务端拒绝，Signal 后立即 Close 兜底，防止 Wait 挂死。
 		_ = sess.Signal(ssh.SIGKILL)
+		_ = sess.Close()
 		<-waitCh
 		return ctx.Err()
 	case cerr := <-copyCh:
 		if cerr != nil {
+			// copy 失败同样先 SIGKILL 再 Close 兜底，确保 Wait 必返回。
 			_ = sess.Signal(ssh.SIGKILL)
+			_ = sess.Close()
 			<-waitCh
 			return cerr
 		}
 		if werr := <-waitCh; werr != nil {
-			return fmt.Errorf("远端命令失败：%v：%s", werr, errBuf.String())
+			return fmt.Errorf("远端命令失败：%w：%s", werr, errBuf.String())
 		}
 		return nil
 	}
