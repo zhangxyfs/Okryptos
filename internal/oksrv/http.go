@@ -29,6 +29,7 @@ func NewMux(st *Store, backend GitBackend, version string) http.Handler {
 	mux.HandleFunc("GET /api/v1/users", s.auth(s.admin(s.apiUsers)))
 	mux.HandleFunc("POST /api/v1/users", s.auth(s.admin(s.apiUserCreate)))
 	mux.HandleFunc("POST /api/v1/users/{name}/reset-password", s.auth(s.admin(s.apiUserResetPassword)))
+	mux.HandleFunc("DELETE /api/v1/users/{name}", s.auth(s.admin(s.apiUserDelete)))
 	mux.HandleFunc("POST /api/v1/users/{name}/disable", s.auth(s.admin(s.apiUserDisable(true))))
 	mux.HandleFunc("POST /api/v1/users/{name}/enable", s.auth(s.admin(s.apiUserDisable(false))))
 	mux.HandleFunc("GET /api/v1/orgs", s.auth(s.admin(s.apiOrgs)))
@@ -212,10 +213,12 @@ func (s *server) apiUsers(w http.ResponseWriter, _ *http.Request, _ *User) {
 
 // apiUserCreate 建用户（一次性返回明文初始密码 + git token）；
 // 可选 role:"admin" 仅 root 可授（admin 只能建 member）。
+// 可选 password：管理员自选初始密码（≥8 位）；留空则服务端生成一次性随机密码。
 func (s *server) apiUserCreate(w http.ResponseWriter, r *http.Request, u *User) {
 	var in struct {
 		Username string `json:"username"`
 		Role     string `json:"role"`
+		Password string `json:"password"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
@@ -241,7 +244,13 @@ func (s *server) apiUserCreate(w http.ResponseWriter, r *http.Request, u *User) 
 		writeErr(w, http.StatusConflict, "用户已存在")
 		return
 	}
-	pw := GenerateSecret(16) // 16 字节 → 22 字符
+	pw := in.Password
+	if pw == "" {
+		pw = GenerateSecret(16) // 16 字节 → 22 字符
+	} else if len(pw) < 8 {
+		writeErr(w, http.StatusBadRequest, "密码至少 8 位")
+		return
+	}
 	hash, err := HashPassword(pw)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -330,6 +339,36 @@ func (s *server) apiUserDisable(disable bool) func(http.ResponseWriter, *http.Re
 		s.st.Audit(u.Username, action, name, "")
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// apiUserDelete 删账号：root 不可删；admin 只能删 member（对齐建 admin 的角色门控）。
+// 双写顺序 fail-closed 同 disable：先删 Gitea 侧再删本库；本库失败残留可重试删除收敛。
+// Gitea 侧若因用户持有仓库等拒绝删除，错误原样透传给管理员。
+func (s *server) apiUserDelete(w http.ResponseWriter, r *http.Request, u *User) {
+	name := r.PathValue("name")
+	target := s.st.GetUser(name)
+	if target == nil {
+		writeErr(w, http.StatusNotFound, "用户不存在")
+		return
+	}
+	if target.Role == "root" {
+		writeErr(w, http.StatusForbidden, "root 不可删除")
+		return
+	}
+	if target.Role == "admin" && u.Role != "root" {
+		writeErr(w, http.StatusForbidden, "仅 root 可删除 admin")
+		return
+	}
+	if err := s.backend.DeleteUser(r.Context(), name); err != nil {
+		backendErr(w, err)
+		return
+	}
+	if err := s.st.DeleteUser(name); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.st.Audit(u.Username, "delete-user", name, "")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---------- 组织管理 ----------

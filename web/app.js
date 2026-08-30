@@ -215,6 +215,7 @@ const I18N = {
     srvDeploy:"部署指引（还没有服务器？展开）", srvUserCreated:"用户已创建", srvCopyHint:"初始密码与 git token 仅本次显示，请立即复制发给用户。",
     srvPwd:"初始密码", srvNewPwd:"新密码", srvGitTok:"git token", srvCopied:"我已复制", srvCopiedOk:"已复制到剪贴板",
     srvResetDone:"已重置密码", srvConfirmDisable:"确认禁用/启用该用户？",
+    srvDelete:"删除", srvConfirmDelete:"确认删除该用户？okserver 与 Gitea 账号一并删除，不可恢复。", srvPwdOpt:"初始密码（可选，留空自动生成）", srvPwdTooShort:"密码至少 8 位",
     /* P1-B：冲突解决页（卡片流 + 钉住操作条，Task 6） */
     cfTitle:"解决同步冲突", cfResolved:"已解决", cfReady:"（可以完成同步了）",
     cfFinish:"完成同步", cfFinishHint:"全部冲突解决后才可完成同步", cfFinishOk:"同步已完成并推送",
@@ -405,6 +406,7 @@ const I18N = {
     srvDeploy:"Deployment guide (no server yet? expand)", srvUserCreated:"User created", srvCopyHint:"The initial password and git token are shown only once — copy them now.",
     srvPwd:"Initial password", srvNewPwd:"New password", srvGitTok:"git token", srvCopied:"Done", srvCopiedOk:"Copied",
     srvResetDone:"Password reset", srvConfirmDisable:"Confirm disable/enable this user?",
+    srvDelete:"Delete", srvConfirmDelete:"Delete this user? The okserver and Gitea accounts are removed together — this cannot be undone.", srvPwdOpt:"Initial password (optional, auto-generated if empty)", srvPwdTooShort:"Password must be at least 8 characters",
     /* P1-B: conflict resolution page (card flow + pinned action bar, Task 6) */
     cfTitle:"Resolve sync conflict", cfResolved:"Resolved", cfReady:"(ready to finish)",
     cfFinish:"Finish sync", cfFinishHint:"All conflicts must be resolved before finishing", cfFinishOk:"Sync finished and pushed",
@@ -5581,12 +5583,14 @@ function usersCard(){
   const row = el("div","prow");
   const inp = el("input","pinput"); inp.placeholder = t("srvNewUser");
   row.appendChild(inp);
+  const pwInp = el("input","pinput"); pwInp.type = "password"; pwInp.placeholder = t("srvPwdOpt");
+  row.appendChild(pwInp);
   // 角色下拉：admin 选项仅 root 可见（服务端仍有角色门控，这里只是 UI 收窄）
   const rSel = el("select","pselect");
   rSel.innerHTML = '<option value="member">member</option>'+(SRV.user && SRV.user.role === "root" ? '<option value="admin">admin</option>' : '');
   row.appendChild(rSel);
   const btn = el("button","btn btn-primary"); btn.textContent = t("srvCreateUser");
-  btn.onclick = ()=>srvCreateUser(inp.value.trim(), rSel.value, btn);
+  btn.onclick = ()=>srvCreateUser(inp.value.trim(), rSel.value, pwInp.value, btn);
   row.appendChild(btn);
   const note = el("span","small muted"); note.textContent = t("srvOnceNote"); row.appendChild(note);
   card.appendChild(row);
@@ -5603,7 +5607,11 @@ function usersCard(){
     const rst = el("button","btn"); rst.textContent = t("srvReset");
     rst.onclick = ()=>srvResetPwd(u.name);
     if(u.role === "root" && SRV.user.role !== "root"){ rst.disabled = true; rst.title = t("srvRootNoDisable"); }
-    td3.appendChild(tog); td3.appendChild(rst);
+    const del = el("button","btn"); del.textContent = t("srvDelete");
+    del.onclick = ()=>{ if(confirm(t("srvConfirmDelete"))) srvDeleteUser(u.name); };
+    // root 恒不可删；admin 目标仅 root 可删（服务端另有门控，此处 UI 收窄）
+    if(u.role === "root" || (u.role === "admin" && SRV.user.role !== "root")){ del.disabled = true; del.title = t("srvRootNoDisable"); }
+    td3.appendChild(tog); td3.appendChild(rst); td3.appendChild(del);
     tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
     tb.appendChild(tr);
   });
@@ -5611,12 +5619,19 @@ function usersCard(){
   return card;
 }
 
-async function srvCreateUser(name, role, btn){
+/* 管理 mutation 后统一失效重拉：users/orgs/repos/audit 都刷新（此前 audit 不落空导致要 F5） */
+function srvRefresh(){
+  SRV.users = null; SRV.orgs = null; SRV.repos = null; SRV.audit = null;
+  loadServerRoleData();
+}
+
+async function srvCreateUser(name, role, password, btn){
   if(!name) return;
+  if(password && password.length < 8){ toast(t("srvPwdTooShort"), true); return; }
   btn.disabled = true;
   try{
-    const r = await api("/api/server/users", { method:"POST", body:{ username: name, role: role || "member" }, skip401Reload:true });
-    SRV.users = null; loadServerRoleData();
+    const r = await api("/api/server/users", { method:"POST", body:{ username: name, role: role || "member", password: password || "" }, skip401Reload:true });
+    srvRefresh();
     srvShowSecret(t("srvUserCreated")+" — "+name, t("srvCopyHint"), [
       [t("srvPwd"), r.password], [t("srvGitTok"), r.git_token],
     ]);
@@ -5627,7 +5642,7 @@ async function srvCreateUser(name, role, btn){
 async function srvToggleUser(name, disabled){
   try{
     await api("/api/server/users/"+encodeURIComponent(name)+(disabled?"/disable":"/enable"), { method:"POST", skip401Reload:true });
-    SRV.users = null; loadServerRoleData();
+    srvRefresh();
     toast((disabled?t("srvDisable"):t("srvEnable"))+" "+name+" ✓");
   }catch(err){ toast(err.message, true); }
 }
@@ -5635,7 +5650,16 @@ async function srvToggleUser(name, disabled){
 async function srvResetPwd(name){
   try{
     const r = await api("/api/server/users/"+encodeURIComponent(name)+"/reset-password", { method:"POST", skip401Reload:true });
+    srvRefresh();
     srvShowSecret(t("srvResetDone")+" — "+name, t("srvCopyHint"), [[t("srvNewPwd"), r.password]]);
+  }catch(err){ toast(err.message, true); }
+}
+
+async function srvDeleteUser(name){
+  try{
+    await api("/api/server/users/"+encodeURIComponent(name), { method:"DELETE", skip401Reload:true });
+    srvRefresh();
+    toast(t("srvDelete")+" "+name+" ✓");
   }catch(err){ toast(err.message, true); }
 }
 
@@ -5702,7 +5726,7 @@ async function srvCreateOrg(name, desc, btn){
   btn.disabled = true;
   try{
     await api("/api/server/orgs", { method:"POST", body:{ name: name, description: desc }, skip401Reload:true });
-    SRV.orgs = null; loadServerRoleData();
+    srvRefresh();
     toast(t("srvCreateOrg")+" "+name+" ✓");
   }catch(err){ toast(err.message, true); }
   btn.disabled = false;
@@ -5716,7 +5740,7 @@ async function srvToggleMember(org, user, inOrg){
     }else{
       await api("/api/server/orgs/"+encodeURIComponent(org)+"/members", { method:"POST", body:{ username: user, role:"member" }, skip401Reload:true });
     }
-    SRV.orgs = null; loadServerRoleData();
+    srvRefresh();
   }catch(err){ toast(err.message, true); }
 }
 
@@ -5727,7 +5751,7 @@ async function srvCreateTeamRepo(org){
   try{
     await api("/api/server/repos/team", { method:"POST", body:{ org: org, project: project }, skip401Reload:true });
     toast(t("srvTeamRepoBtn")+" "+org+"/"+project+" ✓");
-    SRV.orgs = null; SRV.repos = null; loadServerRoleData();
+    srvRefresh();
   }catch(err){ toast(err.message, true); }
 }
 

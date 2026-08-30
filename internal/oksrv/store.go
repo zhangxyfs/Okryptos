@@ -204,6 +204,26 @@ func (s *Store) SetUserPasswordHash(username, bcryptHash string) error {
 	return err
 }
 
+// DeleteUser 删账号：连带清 sessions 与 org_members；repos/audit 行保留（历史登记）。
+// root 拒删——与 SetUserDisabled 同理，删唯一 root 会把管理面锁死，此处是最后防线。
+func (s *Store) DeleteUser(username string) error {
+	u := s.GetUser(username)
+	if u == nil {
+		return fmt.Errorf("用户 %q 不存在", username)
+	}
+	if u.Role == "root" {
+		return fmt.Errorf("root 不可删除")
+	}
+	if _, err := s.db.Exec(`DELETE FROM sessions WHERE user_id=?`, u.ID); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`DELETE FROM org_members WHERE username=?`, username); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM users WHERE username=?`, username)
+	return err
+}
+
 // HasRoot 报告是否已初始化 root（首次启动引导流程的判定依据）。
 func (s *Store) HasRoot() bool {
 	var n int

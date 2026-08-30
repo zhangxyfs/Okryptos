@@ -26,6 +26,7 @@ func (h *Handler) registerServerAPI(api func(string, http.HandlerFunc)) {
 	api("GET /api/server/users", h.fwdUsers)
 	api("POST /api/server/users", h.fwdUserCreate)
 	api("POST /api/server/users/{name}/reset-password", h.fwdUserResetPassword)
+	api("DELETE /api/server/users/{name}", h.fwdUserDelete)
 	api("POST /api/server/users/{name}/disable", h.fwdUserDisable(true))
 	api("POST /api/server/users/{name}/enable", h.fwdUserDisable(false))
 	api("GET /api/server/orgs", h.fwdOrgs)
@@ -264,6 +265,7 @@ func (h *Handler) fwdUserCreate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username string `json:"username"`
 		Role     string `json:"role"`
+		Password string `json:"password"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -273,12 +275,25 @@ func (h *Handler) fwdUserCreate(w http.ResponseWriter, r *http.Request) {
 		writeNotConfigured(w, err)
 		return
 	}
-	u, err := c.CreateUser(r.Context(), req.Username, req.Role)
+	u, err := c.CreateUser(r.Context(), req.Username, req.Role, req.Password)
 	if err != nil {
 		writeServerErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, u)
+}
+
+func (h *Handler) fwdUserDelete(w http.ResponseWriter, r *http.Request) {
+	c, _, err := h.serverClient()
+	if err != nil || c == nil {
+		writeNotConfigured(w, err)
+		return
+	}
+	if err := c.DeleteUser(r.Context(), r.PathValue("name")); err != nil {
+		writeServerErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) fwdUserResetPassword(w http.ResponseWriter, r *http.Request) {

@@ -197,12 +197,17 @@ func (c *Client) ListUsers(ctx context.Context) ([]ServerUser, error) {
 	return out.Users, nil
 }
 
-func (c *Client) CreateUser(ctx context.Context, username, role string) (*CreatedUser, error) {
+func (c *Client) CreateUser(ctx context.Context, username, role, password string) (*CreatedUser, error) {
 	var out CreatedUser
-	if err := c.call(ctx, "POST", "/users", map[string]string{"username": username, "role": role}, &out); err != nil {
+	if err := c.call(ctx, "POST", "/users", map[string]string{"username": username, "role": role, "password": password}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// DeleteUser 删账号（服务端连带删 Gitea 侧；root/越权由服务端门控）。
+func (c *Client) DeleteUser(ctx context.Context, username string) error {
+	return c.call(ctx, "DELETE", "/users/"+username, nil, nil)
 }
 
 func (c *Client) ResetPassword(ctx context.Context, username string) (string, error) {

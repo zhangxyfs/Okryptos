@@ -259,6 +259,58 @@ func TestAdminWriteEndpoints(t *testing.T) {
 			t.Fatalf("audit missing %s: %v", want, actions)
 		}
 	}
+
+	// 自选密码建用户：短密码 400；合法密码可直接登录
+	code, _ = call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "m2", "password": "short"})
+	if code != 400 {
+		t.Fatalf("short password must be 400: %d", code)
+	}
+	code, _ = call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "m2", "password": "mypass123"})
+	if code != 200 {
+		t.Fatalf("create m2 with custom password: %d", code)
+	}
+	login(t, srv, "m2", "mypass123")
+
+	// 删除用户：admin 删 root → 403；admin 删 admin → 403；root 删 member → 204，
+	// 删后登录 401、列表不再出现、审计落 delete-user
+	code, _ = call(t, srv, "DELETE", "/api/v1/users/root", adminTok, nil)
+	if code != 403 {
+		t.Fatalf("admin delete root must be 403: %d", code)
+	}
+	code, _ = call(t, srv, "DELETE", "/api/v1/users/op1", adminTok, nil)
+	if code != 403 {
+		t.Fatalf("admin delete admin must be 403: %d", code)
+	}
+	code, _ = call(t, srv, "DELETE", "/api/v1/users/m1", rootTok, nil)
+	if code != 204 {
+		t.Fatalf("delete m1: %d", code)
+	}
+	code, _ = call(t, srv, "POST", "/api/v1/login", "", map[string]string{"username": "m1", "password": m1pw})
+	if code != 401 {
+		t.Fatalf("deleted login must be 401: %d", code)
+	}
+	code, out = call(t, srv, "GET", "/api/v1/users", rootTok, nil)
+	if code != 200 {
+		t.Fatalf("users: %d", code)
+	}
+	for _, uu := range out["users"].([]any) {
+		if uu.(map[string]any)["name"] == "m1" {
+			t.Fatal("m1 must be gone from user list")
+		}
+	}
+	code, out = call(t, srv, "GET", "/api/v1/audit?limit=100", rootTok, nil)
+	if code != 200 {
+		t.Fatalf("audit: %d", code)
+	}
+	found := false
+	for _, e := range out["entries"].([]any) {
+		if e.(map[string]any)["action"] == "delete-user" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("audit missing delete-user")
+	}
 }
 
 // TestCreateUserTokenFailureRollback 钉住 2026-08-30 真机 bug：Gitea 发 token 失败
