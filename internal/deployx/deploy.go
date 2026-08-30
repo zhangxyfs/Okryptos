@@ -141,13 +141,83 @@ func buildFullTask(s DeploySpec, compose string) Task {
 	}}
 }
 
-// buildExternalTask 占位：external 分支的完整实现由 Task 6 追加替换。
-// 此处先完成参数校验（缺 GiteaURL/AdminToken 即拒绝）。
-func buildExternalTask(s DeploySpec, _ string) (Task, error) {
+// GovernanceChecklist 返回接入已有 Gitea 时的治理四件套确认清单（设计 §3.3）。
+// 外部 Gitea 的 app.ini 无法远程修改，只能请用户逐项确认。
+func GovernanceChecklist() []string {
+	return []string{
+		"已关闭开放注册（DISABLE_REGISTRATION=true）",
+		"已禁止普通用户建仓（MAX_CREATION_LIMIT=0）",
+		"已设默认私有仓（DEFAULT_PRIVATE=private）",
+		"ROOT_URL 已设为成员实际访问地址",
+	}
+}
+
+// SmokeExternalGitea 验证外部 Gitea 与 okserver 的兼容性（两条都过才放行）：
+// ① admin token 有效且 API 可达；② 支持"token 当用户名"的 Basic 认证
+// （okserver 下发 git token 的关键依赖，internal/oksrv/gitea.go 钉死的语义）。
+func SmokeExternalGitea(ctx context.Context, e *Env, giteaURL, adminToken string) error {
+	base := strings.TrimRight(giteaURL, "/")
+	err := runStepMasked(ctx, e, "Gitea 兼容性冒烟",
+		"curl -sf -H 'Authorization: token ****' "+base+"/api/v1/version",
+		"curl -sf -H "+shellQuote("Authorization: token "+adminToken)+" "+shellQuote(base+"/api/v1/version"))
+	if err != nil {
+		return fmt.Errorf("Gitea API 不可达或 token 无效：%w", err)
+	}
+	err = runStepMasked(ctx, e, "Gitea 兼容性冒烟",
+		"curl -sf -u '****:x' "+base+"/api/v1/user",
+		"curl -sf -u "+shellQuote(adminToken+":x")+" "+shellQuote(base+"/api/v1/user"))
+	if err != nil {
+		return fmt.Errorf("该 Gitea 不支持 token 当用户名的 Basic 认证（Gitea 版本风险，需 1.22+ 已实证版本）：%w", err)
+	}
+	return nil
+}
+
+// buildExternalTask 接入已有 Gitea：只装 okserver 单容器（设计 §3.3）。
+func buildExternalTask(s DeploySpec, compose string) (Task, error) {
 	if s.GiteaURL == "" || s.AdminToken == "" {
 		return Task{}, fmt.Errorf("external 模式需要 Gitea 地址与管理员 token")
 	}
-	return Task{}, fmt.Errorf("external 模式尚未实现（Task 6）")
+	okHealth := fmt.Sprintf("http://127.0.0.1:%d/api/v1/meta", s.OKPort)
+	return Task{Name: "部署 okserver（接入已有 Gitea）", Steps: []Step{
+		{Name: "Gitea 兼容性冒烟", Run: func(ctx context.Context, e *Env) error {
+			return SmokeExternalGitea(ctx, e, s.GiteaURL, s.AdminToken)
+		}},
+		{Name: "创建部署目录", Run: func(ctx context.Context, e *Env) error {
+			if _, err := runCmd(ctx, e, "创建部署目录",
+				"mkdir -p "+s.Dir+"/okserver-data"); err != nil {
+				return err
+			}
+			if _, err := runCmd(ctx, e, "创建部署目录",
+				"chown -R 1000:1000 "+s.Dir+"/okserver-data"); err != nil {
+				e.Hub.Publish("创建部署目录", "info", "警告：chown 失败（okserver 可能无法写数据目录）："+err.Error())
+			}
+			return nil
+		}},
+		{Name: "上传 compose 配置", Run: func(ctx context.Context, e *Env) error {
+			return uploadFile(ctx, e, "上传 compose 配置", s.Dir+"/compose.yaml", []byte(compose), "0644")
+		}},
+		{Name: "写入 .env", Run: func(ctx context.Context, e *Env) error {
+			return uploadFile(ctx, e, "写入 .env", s.Dir+"/.env", []byte(RenderEnv(s)), "0600")
+		}},
+		{Name: "拉取镜像", Run: func(ctx context.Context, e *Env) error {
+			ctxT, cancel := context.WithTimeout(ctx, PullTimeout)
+			defer cancel()
+			_, err := runCmd(ctxT, e, "拉取镜像", composeCmd(s.Dir, "pull"))
+			return err
+		}},
+		{Name: "启动 okserver", Run: func(ctx context.Context, e *Env) error {
+			if _, err := runCmd(ctx, e, "启动 okserver", composeCmd(s.Dir, "up -d")); err != nil {
+				return err
+			}
+			ctxT, cancel := context.WithTimeout(ctx, 3*time.Minute)
+			defer cancel()
+			_, err := runCmd(ctxT, e, "启动 okserver", waitHTTP(okHealth))
+			return err
+		}},
+		{Name: "读取 root 初始密码", Run: func(ctx context.Context, e *Env) error {
+			return readRootPassword(ctx, e, s.Dir)
+		}},
+	}}, nil
 }
 
 // readRootPassword 读取并删除 INITIAL_ROOT_PASSWORD；密码只进 Vars，不进日志。

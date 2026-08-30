@@ -59,6 +59,64 @@ func TestBuildDeployTaskValidates(t *testing.T) {
 	}
 }
 
+// 接入已有 Gitea：冒烟 → 上传 → 启动 → 读 root 密码。
+func TestDeployTaskExternal(t *testing.T) {
+	fx := &fakeExec{t: t, steps: []fakeStep{
+		{match: "api/v1/version", code: 0, stdout: "{\"version\":\"1.22.0\"}"}, // 冒烟①
+		{match: "api/v1/user", code: 0, stdout: "{\"login\":\"okadmin\"}"},     // 冒烟② Basic+token
+		{match: "mkdir -p", code: 0},
+		{match: "chown -R", code: 0},
+		{match: "cat > ", code: 0}, // compose.yaml
+		{match: "cat > ", code: 0}, // .env（external 无需等 token 生成，直接写）
+		{match: "pull", code: 0},
+		{match: "up -d", code: 0},
+		{match: "api/v1/meta", code: 0, stdout: "{}"},
+		{match: "INITIAL_ROOT_PASSWORD", code: 0, stdout: "rootpw32chars"},
+		{match: "rm -f", code: 0},
+	}}
+	spec := DeploySpec{Mode: "external", Dir: "/home/u/openknowledge", OKPort: 3100,
+		Tag: "v9.9.9", GiteaURL: "http://192.168.1.10:3000", AdminToken: "usertok"}
+	task, err := BuildDeployTask(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &Env{Ex: fx, Hub: NewLogHub(), Vars: map[string]string{}}
+	if err := task.Execute(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Vars["root_password"] != "rootpw32chars" {
+		t.Fatalf("root_password = %q", e.Vars["root_password"])
+	}
+	for _, ev := range e.Hub.History() {
+		if strings.Contains(ev.Text, "usertok") || strings.Contains(ev.Text, "rootpw32chars") {
+			t.Fatalf("秘密值进了日志：%+v", ev)
+		}
+	}
+	fx.Done()
+}
+
+// 冒烟②失败（Gitea 版本不支持 token 当用户名）→ 任务终止，错误提示版本风险。
+func TestExternalSmokeTokenAsUsernameFails(t *testing.T) {
+	fx := &fakeExec{t: t, steps: []fakeStep{
+		{match: "api/v1/version", code: 0, stdout: "{}"},
+		{match: "api/v1/user", code: 22}, // curl -f 对 401/403 返回 22
+	}}
+	task, _ := BuildDeployTask(DeploySpec{Mode: "external", Dir: "/d", OKPort: 3100,
+		Tag: "v1", GiteaURL: "http://gitea:3000", AdminToken: "tok"})
+	err := task.Execute(context.Background(), &Env{Ex: fx, Hub: NewLogHub(), Vars: map[string]string{}})
+	if err == nil || !strings.Contains(err.Error(), "token 当用户名") {
+		t.Fatalf("err = %v", err)
+	}
+	fx.Done()
+}
+
+func TestGovernanceChecklist(t *testing.T) {
+	items := GovernanceChecklist()
+	if len(items) != 4 {
+		t.Fatalf("清单 = %v", items)
+	}
+}
+
 // 中途失败即停：pull 失败后不得执行 up。
 func TestDeployTaskStopsOnPullFailure(t *testing.T) {
 	fx := &fakeExec{t: t, steps: []fakeStep{
