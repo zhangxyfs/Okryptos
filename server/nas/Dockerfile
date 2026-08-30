@@ -1,5 +1,5 @@
 # okserver 镜像（多架构：linux/amd64 + linux/arm64）
-# 构建（仓库根目录）：docker buildx build --platform linux/amd64,linux/arm64 -f server/nas/Dockerfile -t openknowledge/okserver:<版本> --push .
+# 构建（仓库根目录）：docker buildx build --platform linux/amd64,linux/arm64 -f server/nas/Dockerfile -t z7dream/openknowledge-okserver:<版本> --push .
 FROM golang:1.25-alpine AS build
 ARG VERSION=dev
 WORKDIR /src

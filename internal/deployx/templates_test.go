@@ -40,7 +40,7 @@ func TestRenderEnvFull(t *testing.T) {
 		Tag: "v9.9.9", RootURL: "http://192.168.1.10:3000/", AdminToken: "tok123",
 	})
 	for _, want := range []string{"GITEA_HTTP_PORT=3000", "OKSERVER_PORT=3100",
-		"OKSERVER_IMAGE=openknowledge/okserver:v9.9.9", "GITEA_ROOT_URL=http://192.168.1.10:3000/", "GITEA_ADMIN_TOKEN=tok123"} {
+		"OKSERVER_IMAGE=z7dream/openknowledge-okserver:v9.9.9", "GITEA_ROOT_URL=http://192.168.1.10:3000/", "GITEA_ADMIN_TOKEN=tok123"} {
 		if !strings.Contains(env, want) {
 			t.Fatalf(".env 缺 %q", want)
 		}

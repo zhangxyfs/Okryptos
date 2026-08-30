@@ -9,7 +9,7 @@ import (
 func TestQueryStatus(t *testing.T) {
 	fx := &fakeExec{t: t, steps: []fakeStep{
 		{match: "docker compose", code: 0, stdout: "gitea|Up 2 hours\nokserver|Up 2 hours"},
-		{match: "OKSERVER_IMAGE", code: 0, stdout: "openknowledge/okserver:v2.23.0"},
+		{match: "OKSERVER_IMAGE", code: 0, stdout: "z7dream/openknowledge-okserver:v2.23.0"},
 		{match: "du -sh", code: 0, stdout: "128M\t/home/u/openknowledge"},
 	}}
 	st, err := QueryStatus(context.Background(), fx, "/home/u/openknowledge")
@@ -19,7 +19,7 @@ func TestQueryStatus(t *testing.T) {
 	if len(st.Containers) != 2 || st.Containers[0].Name != "gitea" {
 		t.Fatalf("%+v", st)
 	}
-	if st.Image != "openknowledge/okserver:v2.23.0" || st.DiskUsage != "128M" {
+	if st.Image != "z7dream/openknowledge-okserver:v2.23.0" || st.DiskUsage != "128M" {
 		t.Fatalf("%+v", st)
 	}
 	fx.Done()
@@ -41,7 +41,7 @@ func TestUpgradeTask(t *testing.T) {
 	// 断言 sed 命令含新 tag
 	found := false
 	for _, c := range fx.Cmds {
-		if strings.Contains(c, "openknowledge/okserver:v9.9.9") {
+		if strings.Contains(c, "z7dream/openknowledge-okserver:v9.9.9") {
 			found = true
 		}
 	}

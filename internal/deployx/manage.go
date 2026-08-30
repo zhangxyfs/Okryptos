@@ -91,7 +91,7 @@ func BuildUpgradeTask(dir, newTag string) Task {
 		newReadOKPortStep(dir),
 		{Name: "更新镜像 tag", Run: func(ctx context.Context, e *Env) error {
 			_, err := runCmd(ctx, e, "更新镜像 tag",
-				"sed -i 's|^OKSERVER_IMAGE=.*|OKSERVER_IMAGE=openknowledge/okserver:"+newTag+"|' "+dir+"/.env")
+				"sed -i 's|^OKSERVER_IMAGE=.*|OKSERVER_IMAGE=z7dream/openknowledge-okserver:"+newTag+"|' "+dir+"/.env")
 			return err
 		}},
 		{Name: "拉取新镜像", Run: func(ctx context.Context, e *Env) error {

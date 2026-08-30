@@ -103,7 +103,7 @@ func TestProbeExistingDeploy(t *testing.T) {
 		{match: "docker version", code: 0, stdout: "24.0.7"},
 		{match: "docker compose version", code: 0, stdout: "2.23.0"},
 		{match: "ss -ltn", code: 0, stdout: "LISTEN 0 4096 0.0.0.0:3100 0.0.0.0:*"},
-		{match: "docker ps -a", code: 0, stdout: "okserver|openknowledge/okserver:v2.23.0|Up 2 hours|0.0.0.0:3100->3100/tcp\ngitea|gitea/gitea:1.22|Up 2 hours|0.0.0.0:3000->3000/tcp"},
+		{match: "docker ps -a", code: 0, stdout: "okserver|z7dream/openknowledge-okserver:v2.23.0|Up 2 hours|0.0.0.0:3100->3100/tcp\ngitea|gitea/gitea:1.22|Up 2 hours|0.0.0.0:3000->3000/tcp"},
 		{match: "docker inspect okserver", code: 0, stdout: "/root/openknowledge"},
 	}}
 	r, err := Probe(context.Background(), fx, "")

@@ -53,7 +53,7 @@ func waitHTTP(url string) string {
 // okserverImageCmd 生成 okserver 镜像获取命令：本地已有（docker load 的离线包）
 // 直接用，没有才从 registry pull。tag 须先过 tagRe 白名单（BuildDeployTask 已校验）。
 func okserverImageCmd(tag string) string {
-	img := "openknowledge/okserver:" + tag
+	img := "z7dream/openknowledge-okserver:" + tag
 	return "docker image inspect " + img + " >/dev/null 2>&1 || docker pull " + img
 }
 

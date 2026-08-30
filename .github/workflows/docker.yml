@@ -1,12 +1,12 @@
 # okserver 镜像发布：打 v* tag 时构建多架构镜像，GHCR + Docker Hub 双发
 # （设计文档 2026-08-28-okdeploy-design.md §边界："发布镜像仓库拉取（GHCR + Docker
 # Hub，随 release 双发）"）。NAS 侧 okdeploy 默认拉 Docker Hub 名
-# openknowledge/okserver:<tag>；Docker Hub 限流或不可达时可把 .env 的
+# z7dream/openknowledge-okserver:<tag>；Docker Hub 限流或不可达时可把 .env 的
 # OKSERVER_IMAGE 改为 GHCR 全名 ghcr.io/zhangxyfs/openknowledge/okserver:<tag>。
 #
 # 前置（一次性人工配置）：
 #   1. GitHub 仓库 Settings → Secrets：DOCKERHUB_USERNAME、DOCKERHUB_TOKEN
-#      （Docker Hub Access Token，需对 openknowledge namespace 有写权限）。
+#      （Docker Hub Access Token，需对 z7dream namespace 有写权限）。
 #   2. 首次推送后到 GitHub Packages 把 openknowledge/okserver 包设为 Public，
 #      否则 NAS 匿名拉取会被拒。
 name: Docker
@@ -62,5 +62,5 @@ jobs:
           tags: |
             ghcr.io/zhangxyfs/openknowledge/okserver:${{ steps.t.outputs.tag }}
             ghcr.io/zhangxyfs/openknowledge/okserver:latest
-            openknowledge/okserver:${{ steps.t.outputs.tag }}
-            openknowledge/okserver:latest
+            z7dream/openknowledge-okserver:${{ steps.t.outputs.tag }}
+            z7dream/openknowledge-okserver:latest

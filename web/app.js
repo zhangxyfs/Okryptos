@@ -5833,7 +5833,7 @@ function deployCard(){
   d.textContent = "okserver + Gitea 双容器一个 compose；完整步骤见仓库 server/nas/README.md。";
   det.appendChild(d);
   const pre = el("pre","pre");
-  pre.textContent = 'services:\n  gitea:\n    image: gitea/gitea:1.22\n    volumes: [./gitea-data:/data]\n    ports: ["3000:3000", "2222:22"]\n  okserver:\n    image: openknowledge/okserver:latest\n    volumes: [./okserver-data:/data]\n    environment:\n      OKSERVER_GITEA_URL: http://gitea:3000\n      OKSERVER_GITEA_ADMIN_TOKEN: <部署时从 Gitea 生成一次（带 user/admin scope）>\n    ports: ["3100:3100"]';
+  pre.textContent = 'services:\n  gitea:\n    image: gitea/gitea:1.22\n    volumes: [./gitea-data:/data]\n    ports: ["3000:3000", "2222:22"]\n  okserver:\n    image: z7dream/openknowledge-okserver:latest\n    volumes: [./okserver-data:/data]\n    environment:\n      OKSERVER_GITEA_URL: http://gitea:3000\n      OKSERVER_GITEA_ADMIN_TOKEN: <部署时从 Gitea 生成一次（带 user/admin scope）>\n    ports: ["3100:3100"]';
   det.appendChild(pre);
   const ol = el("ol","small");
   ol.style.margin = "10px 0 0"; ol.style.paddingLeft = "20px";

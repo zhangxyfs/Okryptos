@@ -47,7 +47,7 @@ func RenderEnv(s DeploySpec) string {
 		fmt.Fprintf(&b, "EXTERNAL_GITEA_URL=%s\n", s.GiteaURL)
 	}
 	fmt.Fprintf(&b, "OKSERVER_PORT=%d\n", s.OKPort)
-	fmt.Fprintf(&b, "OKSERVER_IMAGE=openknowledge/okserver:%s\n", s.Tag)
+	fmt.Fprintf(&b, "OKSERVER_IMAGE=z7dream/openknowledge-okserver:%s\n", s.Tag)
 	fmt.Fprintf(&b, "GITEA_ADMIN_TOKEN=%s\n", s.AdminToken)
 	return b.String()
 }

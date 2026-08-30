@@ -178,7 +178,7 @@ okserver 镜像多架构（`linux/amd64` + `linux/arm64`——ARM NAS 是常态�
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 \
   --build-arg VERSION=<版本> \
-  -f server/nas/Dockerfile -t openknowledge/okserver:<版本> --push .
+  -f server/nas/Dockerfile -t z7dream/openknowledge-okserver:<版本> --push .
 ```
 
 随 OK release 流水线双发 **GHCR + Docker Hub**，版本号与 ok/okd 对齐（sync-version 纪律，bump 时同步）。镜像内以非 root 用户 `okserver` 运行，无 CGO（SQLite 用 modernc.org/sqlite 纯 Go 实现）。

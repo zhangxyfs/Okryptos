@@ -525,7 +525,7 @@ function pageDeploy(content, query) {
     card.append(w);
   }
   const tagI = pinput("mono", "latest", "140px");
-  card.append(prow("镜像版本", [tagI, el("span", "muted small", "openknowledge/okserver:latest")]));
+  card.append(prow("镜像版本", [tagI, el("span", "muted small", "z7dream/openknowledge-okserver:latest")]));
   let giteaUrlI = null, tokenI = null, smokeFb = null;
   if (mode === "external") {
     giteaUrlI = pinput("mono", S.connHost ? "http://" + S.connHost + ":3000" : "", "230px");

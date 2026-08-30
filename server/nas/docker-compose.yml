@@ -15,7 +15,7 @@ services:
       - "${GITEA_HTTP_PORT:-3000}:3000"
       - "${GITEA_SSH_PORT:-2222}:22"   # 可选（v1 git 走 HTTPS+token）
   okserver:
-    image: ${OKSERVER_IMAGE:-openknowledge/okserver:latest}
+    image: ${OKSERVER_IMAGE:-z7dream/openknowledge-okserver:latest}
     restart: unless-stopped
     depends_on: [gitea]
     volumes:
