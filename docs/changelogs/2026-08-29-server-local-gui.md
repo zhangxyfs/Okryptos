@@ -1,0 +1,5 @@
+# 本地接入与 GUI 服务器页（P1-C2）
+
+日期：2026-08-29
+
+P1 多端同步整体闭环。internal/serverx 新增 okserver 客户端（Bearer 薄 HTTP 客户端照 llmx 形态，全端点：meta/login/me/repos/personal + 管理类 users/orgs/members/repos/team/repos/audit，错误包装 *serverx.Error 透传状态码）。全局 config.toml 新增 [server] 段（url/username/token，SetServer 行级写入；token 空串保留旧值（GUI 脱敏回写），URL 空 = 整段清空（logout 语义））。okd 新增服务器页端点族（internal/gui/api_server.go）：GET/PUT /api/server/config（token 不回传）、POST test（连接测试）、POST login/logout（登录成功 url+username+token 落盘）、GET me、POST /api/server/repos 建仓一条龙（provision → 写系统 git credential helper（无 helper 回退 URL 内嵌凭据并注明）→ InitForSync/SetRemote → SetSync → 首次同步）、管理类透传一组（users/orgs/members/repos/team/repos-all/audit）。GUI 新增"服务器"页（左导航"设置"前）：stepper 三步向导（连接→登录→按角色落地，已完成步骤可回看），root/admin 管理视图五卡（状态/用户（建用户与重置密码一次性凭据弹窗带复制按钮）/组织（成员 chip + 团队仓）/仓库总览/审计），member 成员视图两卡（项目绑定（一键建仓并绑定）/我的组织），部署指引折叠卡。管理页未初始化项目的同步按钮接通服务器建仓（已登录时 confirm 后一条龙，未登录纯指引 toast）。SSRF 裁决：服务器地址来自用户配置/输入 + 本地 token 鉴权，不做回环限制（与 ollama 探测端点不同）。全链路 handler 测试：假 okserver + file:// 裸仓真 git 闭环。P1 三阶段（A 引擎/B GUI 同步面/C 服务端+本地接入）至此全部交付。
