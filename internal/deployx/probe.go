@@ -85,6 +85,21 @@ func Probe(ctx context.Context, ex Executor, sudoPw string) (*ProbeResult, error
 		r.DockerDetail = "docker 命令不存在（PATH 中找不到）"
 	}
 
+	// chown uid 1000（容器数据目录属主）需要 root：docker 直连可用但非 root 时
+	// 同样需要 sudo（NAS 常见：docker 组用户但无 root）。有登录密码则试 sudo 提权。
+	if r.DockerOK && !r.NeedSudo && sudoPw != "" {
+		uid, _ := runQuiet(ctx, ex, "id -u")
+		if strings.TrimSpace(uid) != "0" {
+			if sx, err := WrapSudo(ex, sudoPw); err == nil {
+				su, _, scode := runQuiet2(ctx, sx, "id -u")
+				if scode == 0 && strings.TrimSpace(su) == "0" {
+					r.NeedSudo = true
+					ex = sx
+				}
+			}
+		}
+	}
+
 	_, code := runQuiet(ctx, ex, "docker compose version --short")
 	r.ComposeOK = code == 0
 

@@ -12,12 +12,13 @@ func TestDeployTaskFull(t *testing.T) {
 		{match: "mkdir -p", code: 0},
 		{match: "chown -R", code: 0},
 		{match: "cat > ", code: 0},                 // 上传 compose.yaml
+		{match: "cat > ", code: 0},                 // 写入 .env 初版（token 占位）
 		{match: "docker compose", code: 0},         // pull（含 --env-file 或 -f）
 		{match: "up -d gitea", code: 0},
 		{match: "api/v1/version", code: 0, stdout: "{\"version\":\"1.22.0\"}"},
 		{match: "admin user", code: 0}, // 建管理员（grep || create 合并命令）
 		{match: "generate-access-token", code: 0, stdout: "gtok_abc123"},
-		{match: "cat > ", code: 0}, // 上传 .env
+		{match: "cat > ", code: 0}, // 重写 .env（真 token）
 		{match: "up -d", code: 0},
 		{match: "api/v1/meta", code: 0, stdout: "{}"},
 		{match: "INITIAL_ROOT_PASSWORD", code: 0, stdout: "rootpw32chars"},
@@ -123,6 +124,7 @@ func TestDeployTaskStopsOnPullFailure(t *testing.T) {
 		{match: "mkdir -p", code: 0},
 		{match: "chown -R", code: 1}, // chown 失败只警告不终止
 		{match: "cat > ", code: 0},
+		{match: "cat > ", code: 0}, // .env 初版
 		{match: "pull", code: 1},
 	}}
 	task, _ := BuildDeployTask(DeploySpec{Mode: "full", Dir: "/d", GiteaPort: 3000, OKPort: 3100, Tag: "v1", RootURL: "http://x/"})
@@ -139,6 +141,7 @@ func TestDeployTaskEmptyTokenFails(t *testing.T) {
 		{match: "mkdir -p", code: 0},
 		{match: "chown -R", code: 0},
 		{match: "cat > ", code: 0},         // 上传 compose.yaml
+		{match: "cat > ", code: 0},         // 写入 .env 初版（token 占位）
 		{match: "docker compose", code: 0}, // pull
 		{match: "up -d gitea", code: 0},
 		{match: "api/v1/version", code: 0, stdout: "{\"version\":\"1.22.0\"}"},

@@ -167,3 +167,52 @@ func TestProbeSudoFailed(t *testing.T) {
 	}
 	fx.Done()
 }
+
+// docker 直连可用但非 root（chown 容器数据目录要 root）→ 有登录密码时同样切 sudo。
+func TestProbeNotRootSwitchesToSudo(t *testing.T) {
+	fx := &fakeExec{t: t, steps: []fakeStep{
+		{match: "uname -m", code: 0, stdout: "x86_64"},
+		{match: "command -v docker", code: 0, stdout: "/usr/bin/docker"},
+		{match: "docker version", code: 0, stdout: "24.0.7"},
+		{match: "id -u", code: 0, stdout: "1026"},          // 直连非 root
+		{match: "id -u", code: 0, stdout: "0"},             // sudo 包装后为 root
+		{match: "docker compose version", code: 0, stdout: "2.23.0"},
+		{match: "ss -ltn", code: 0, stdout: ""},
+		{match: "docker ps -a", code: 0, stdout: ""},
+	}}
+	r, err := Probe(context.Background(), fx, "loginpw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.DockerOK || !r.NeedSudo {
+		t.Fatalf("%+v", r)
+	}
+	// id -u 之后的命令都走 sudo 包装
+	for _, c := range fx.Cmds[4:] {
+		if !strings.Contains(c, "sudo -kS") {
+			t.Fatalf("切 sudo 后的命令未走包装：%q", c)
+		}
+	}
+	fx.Done()
+}
+
+// root 直连：不切 sudo。
+func TestProbeRootNoSudo(t *testing.T) {
+	fx := &fakeExec{t: t, steps: []fakeStep{
+		{match: "uname -m", code: 0, stdout: "x86_64"},
+		{match: "command -v docker", code: 0, stdout: "/usr/bin/docker"},
+		{match: "docker version", code: 0, stdout: "24.0.7"},
+		{match: "id -u", code: 0, stdout: "0"},
+		{match: "docker compose version", code: 0, stdout: "2.23.0"},
+		{match: "ss -ltn", code: 0, stdout: ""},
+		{match: "docker ps -a", code: 0, stdout: ""},
+	}}
+	r, err := Probe(context.Background(), fx, "loginpw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.DockerOK || r.NeedSudo {
+		t.Fatalf("%+v", r)
+	}
+	fx.Done()
+}

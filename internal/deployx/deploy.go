@@ -90,6 +90,14 @@ func buildFullTask(s DeploySpec, compose string) Task {
 		{Name: "上传 compose 配置", Run: func(ctx context.Context, e *Env) error {
 			return uploadFile(ctx, e, "上传 compose 配置", s.Dir+"/compose.yaml", []byte(compose), "0644")
 		}},
+		// compose 调用固定带 --env-file .env，文件必须先行存在；full 模式的
+		// Gitea token 要等 Gitea 起来后生成，这里先写占位版，token 生成后重写
+		//（okserver 在最后一个 up -d 才启动，读到的是重写后的真 token）。
+		{Name: "写入 .env 初版", Run: func(ctx context.Context, e *Env) error {
+			s0 := s
+			s0.AdminToken = "pending"
+			return uploadFile(ctx, e, "写入 .env 初版", s.Dir+"/.env", []byte(RenderEnv(s0)), "0600")
+		}},
 		{Name: "拉取镜像", Run: func(ctx context.Context, e *Env) error {
 			ctxT, cancel := context.WithTimeout(ctx, PullTimeout)
 			defer cancel()
