@@ -191,6 +191,27 @@ const I18N = {
     syncDotSynced:"已同步", syncDotAhead:"有未同步变更", syncDotOff:"未启用同步", syncDotConflict:"同步冲突",
     syncNavConflict:"解决同步冲突",
     syncInitGuide:"该项目尚未初始化同步：请在终端执行 ok sync init [remote-url] 完成建仓绑定",
+    server:"服务器",
+    srvStep1:"连接服务器", srvStep2:"登录", srvStep3Admin:"管理", srvStep3Member:"使用（成员视图）", srvBackCur:"返回当前步骤",
+    srvAddr:"地址", srvPort:"端口", srvTest:"测试连接", srvTesting:"连接中…", srvConnected:"已连接", srvDisconnect:"断开",
+    srvConnHint:"成功后显示 okserver 版本与 git 后端状态", srvConnOk:"连接成功", srvConnFail:"连接失败：",
+    srvUser:"用户名", srvPass:"密码", srvLogin:"登录", srvLogging:"登录中…", srvLoginOk:"登录成功", srvLoginFail:"用户名或密码错误",
+    srvLogout:"退出登录", srvLoggedOut:"已退出登录",
+    srvStatus:"服务器状态", srvVer:"okserver 版本", srvGitOk:"git 后端（Gitea）", srvGitOkV:"✓ 正常", srvGitBad:"✗ 异常",
+    srvUserOrgCnt:"用户数 / 组织数", srvRepoCnt:"仓库数",
+    srvUsers:"用户", srvUsersDesc:"okserver 是唯一建用户入口（Gitea 已关开放注册）。", srvNewUser:"新用户名", srvCreateUser:"创建用户",
+    srvOnceNote:"创建后弹窗一次性显示初始密码 + git token", srvRole:"角色", srvActions:"操作", srvDisable:"禁用", srvEnable:"启用",
+    srvDisabled:"已禁用", srvReset:"重置密码", srvRootNoDisable:"root 不可禁用",
+    srvOrgs:"组织", srvOrgsDesc:"点成员 chip 加/减成员；团队仓经 okserver provisioning。", srvOrgName:"组织名称", srvDescOpt:"描述（可选）",
+    srvCreateOrg:"创建组织", srvTeamRepo:"团队仓：", srvNone:"无",
+    srvReposAll:"仓库总览", srvLayer:"层", srvOwner:"所有者", srvProject:"项目", srvBy:"创建人", srvAt:"创建时间",
+    srvAudit:"审计", srvAuditDesc:"管理操作流水（倒序）。",
+    srvBindCard:"我的项目绑定", srvBindDesc:"建仓 = okserver provisioning → init → 首次推送，一键完成。",
+    srvBound:"已绑定", srvNotCreated:"未创建", srvBind:"一键建仓并绑定", srvBinding:"建仓中…",
+    srvMyOrgs:"我的组织", srvMyOrgsDesc:"只读（本期）；成员与团队仓由管理员维护。", srvNoOrg:"未加入任何组织。",
+    srvDeploy:"部署指引（还没有服务器？展开）", srvUserCreated:"用户已创建", srvCopyHint:"初始密码与 git token 仅本次显示，请立即复制发给用户。",
+    srvPwd:"初始密码", srvNewPwd:"新密码", srvGitTok:"git token", srvCopied:"我已复制", srvCopiedOk:"已复制到剪贴板",
+    srvResetDone:"已重置密码", srvConfirmDisable:"确认禁用/启用该用户？",
     /* P1-B：冲突解决页（卡片流 + 钉住操作条，Task 6） */
     cfTitle:"解决同步冲突", cfResolved:"已解决", cfReady:"（可以完成同步了）",
     cfFinish:"完成同步", cfFinishHint:"全部冲突解决后才可完成同步", cfFinishOk:"同步已完成并推送",
@@ -359,6 +380,27 @@ const I18N = {
     syncDotSynced:"Synced", syncDotAhead:"Unsynced changes", syncDotOff:"Sync disabled", syncDotConflict:"Sync conflict",
     syncNavConflict:"Resolve sync conflict",
     syncInitGuide:"Sync is not initialized for this project: run 'ok sync init [remote-url]' in terminal to set it up",
+    server:"Server",
+    srvStep1:"Connect to server", srvStep2:"Sign in", srvStep3Admin:"Administration", srvStep3Member:"Member view", srvBackCur:"Back to current step",
+    srvAddr:"Address", srvPort:"Port", srvTest:"Test connection", srvTesting:"Connecting…", srvConnected:"Connected", srvDisconnect:"Disconnect",
+    srvConnHint:"Shows okserver version and git backend status on success", srvConnOk:"Connected", srvConnFail:"Connection failed: ",
+    srvUser:"Username", srvPass:"Password", srvLogin:"Sign in", srvLogging:"Signing in…", srvLoginOk:"Signed in", srvLoginFail:"Invalid credentials",
+    srvLogout:"Sign out", srvLoggedOut:"Signed out",
+    srvStatus:"Server status", srvVer:"okserver version", srvGitOk:"git backend (Gitea)", srvGitOkV:"✓ OK", srvGitBad:"✗ down",
+    srvUserOrgCnt:"Users / Orgs", srvRepoCnt:"Repositories",
+    srvUsers:"Users", srvUsersDesc:"okserver is the only user-creation entry (Gitea registration is disabled).", srvNewUser:"New username", srvCreateUser:"Create user",
+    srvOnceNote:"A one-time dialog shows the initial password + git token", srvRole:"Role", srvActions:"Actions", srvDisable:"Disable", srvEnable:"Enable",
+    srvDisabled:"Disabled", srvReset:"Reset password", srvRootNoDisable:"root cannot be disabled",
+    srvOrgs:"Organizations", srvOrgsDesc:"Toggle member chips to add/remove members; team repos are provisioned via okserver.", srvOrgName:"Org name", srvDescOpt:"Description (optional)",
+    srvCreateOrg:"Create org", srvTeamRepo:"Team repos: ", srvNone:"none",
+    srvReposAll:"Repositories", srvLayer:"Layer", srvOwner:"Owner", srvProject:"Project", srvBy:"Created by", srvAt:"Created at",
+    srvAudit:"Audit", srvAuditDesc:"Administrative operations (newest first).",
+    srvBindCard:"My project bindings", srvBindDesc:"Provision = okserver, init, first push — one click.",
+    srvBound:"Bound", srvNotCreated:"Not created", srvBind:"Provision & bind", srvBinding:"Provisioning…",
+    srvMyOrgs:"My organizations", srvMyOrgsDesc:"Read-only (this release); membership and team repos are admin-managed.", srvNoOrg:"No organization.",
+    srvDeploy:"Deployment guide (no server yet? expand)", srvUserCreated:"User created", srvCopyHint:"The initial password and git token are shown only once — copy them now.",
+    srvPwd:"Initial password", srvNewPwd:"New password", srvGitTok:"git token", srvCopied:"Done", srvCopiedOk:"Copied",
+    srvResetDone:"Password reset", srvConfirmDisable:"Confirm disable/enable this user?",
     /* P1-B: conflict resolution page (card flow + pinned action bar, Task 6) */
     cfTitle:"Resolve sync conflict", cfResolved:"Resolved", cfReady:"(ready to finish)",
     cfFinish:"Finish sync", cfFinishHint:"All conflicts must be resolved before finishing", cfFinishOk:"Sync finished and pushed",
@@ -400,9 +442,10 @@ const ICON = {
   sun:    svg('<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'),
   graph:  svg('<circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M8.5 7.5 15 16M9 6h6"/>'),
   sync:   svg('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><polyline points="20 4 20 9 15 9"/>', 20),   // P1-B：循环箭头（同步）
+  server: svg('<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>', 20),
 };
 const MENUS = [
-  { key:"manage", ico:ICON.manage }, { key:"graph", ico:ICON.graph }, { key:"setup", ico:ICON.setup }, { key:"prefs", ico:ICON.prefs },
+  { key:"manage", ico:ICON.manage }, { key:"graph", ico:ICON.graph }, { key:"setup", ico:ICON.setup }, { key:"server", ico:ICON.server }, { key:"prefs", ico:ICON.prefs },
   { key:"logs", ico:ICON.logs }, { key:"misc", ico:ICON.misc },
 ];
 
@@ -5218,6 +5261,7 @@ function renderBody(app){
       state.syncConflict=null; state.merge=null; CF.project="";   // 冲突/合并子页逃生口：点侧栏即退出，防分发链弹回死局；CF 缓存一并清——重进以仓态为准，消"缓存态重进"困惑
       state.menu=m.key; location.hash=m.key;
       // 跨页缓存联动（Task 4 评审约定）：切到其他页重拉项目列表缓存；切到管理页重拉树数据
+      if(m.key==="server" && SRV.loaded) SRV.loaded=false;
       if(m.key==="misc" && MISC) refreshMisc();
       if(m.key==="setup" && SETUP) refreshSetup();   // 引导页：重拉 agent 检测/接入状态
       if(m.key==="manage" && MGMT) refreshManage();
@@ -5258,11 +5302,501 @@ function renderBody(app){
   else if(state.menu==="setup"){
     main.appendChild(renderSetup());
   }
+  else if(state.menu==="server"){
+    loadServer();
+    main.appendChild(renderServer());
+  }
   else if(state.menu==="prefs"){
     main.appendChild(renderPrefs());
   }
   /* 五页已全部接入，无占位分支 */
   if(state.cfgOpen) app.appendChild(renderCfgModal());   // 需求 4：界面设置弹窗（顶栏级，不限当前页）
+}
+
+/* ================= 服务器页（P1-C2，§10，定稿原型变体 B：stepper 三步向导） ================= */
+const SRV = { loaded:false, url:"", username:"", loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, projects:null, wizardStep:null, bindBusy:{} };
+
+/* 数据装载：进页面拉配置；已登录则拉 me；按角色惰性拉管理/成员数据 */
+function loadServer(){
+  if(SRV.loaded) return;
+  SRV.loaded = true;
+  api("/api/server/config").then(cfg=>{
+    SRV.url = cfg.url || ""; SRV.username = cfg.username || ""; SRV.loggedIn = !!cfg.logged_in;
+    if(SRV.loggedIn){
+      return api("/api/server/me").then(me=>{ SRV.user = me; }).catch(()=>{ SRV.loggedIn = false; SRV.user = null; });
+    }
+  }).catch(()=>{ /* 未配置保持空 */ }).finally(()=>{
+    if(state.menu === "server" && !state.syncConflict && !state.merge) render();
+  });
+}
+
+/* 角色数据惰性加载（root/admin：users+orgs+repos-all+audit；member：projects） */
+function loadServerRoleData(){
+  if(!SRV.user) return;
+  const isAdmin = SRV.user.role === "root" || SRV.user.role === "admin";
+  const pulls = [];
+  if(isAdmin){
+    if(SRV.users === null) pulls.push(api("/api/server/users").then(r=>{ SRV.users = r.users || []; }));
+    if(SRV.orgs === null) pulls.push(api("/api/server/orgs").then(r=>{ SRV.orgs = r.orgs || []; }));
+    if(SRV.repos === null) pulls.push(api("/api/server/repos-all").then(r=>{ SRV.repos = r.repos || []; }));
+    if(SRV.audit === null) pulls.push(api("/api/server/audit?limit=50").then(r=>{ SRV.audit = r.entries || []; }));
+  } else if(SRV.projects === null){
+    pulls.push(api("/api/projects").then(ps=>{ SRV.projects = ps || []; }));
+  }
+  if(pulls.length) Promise.all(pulls).then(()=>{ if(state.menu==="server") render(); });
+}
+
+function serverCurStep(){ if(!SRV.url) return 1; if(!SRV.user) return 2; return 3; }
+
+function renderServer(){
+  loadServerRoleData();
+  const cur = SRV.wizardStep || serverCurStep();
+  const isAdmin = SRV.user && (SRV.user.role === "root" || SRV.user.role === "admin");
+  const titles = { 1:t("srvStep1"), 2:t("srvStep2"), 3: isAdmin ? t("srvStep3Admin") : t("srvStep3Member") };
+  const wrap = el("div","srvwrap");
+
+  // stepper
+  const stepper = el("div","stepper");
+  const realCur = serverCurStep();
+  [1,2,3].forEach((n,i)=>{
+    if(i > 0) stepper.appendChild(el("div","stp-line"));
+    const b = el("button","stp"+(n<realCur?" done":n===cur?" cur":""));
+    if(n < realCur){
+      b.classList.add("clickable");
+      b.onclick = ()=>{ SRV.wizardStep = n; render(); };
+    }
+    b.innerHTML = '<span class="n">'+(n<realCur?"✓":n)+'</span><span class="t">'+esc(titles[n])+'</span>';
+    stepper.appendChild(b);
+  });
+  wrap.appendChild(stepper);
+
+  // 大标题 + 回看返回
+  const head = el("div","");
+  head.style.cssText = "display:flex;align-items:baseline;gap:12px";
+  const bt = el("div","bigtitle"); bt.textContent = titles[cur];
+  head.appendChild(bt);
+  if(cur !== realCur){
+    const back = el("button","btn"); back.textContent = t("srvBackCur"); back.style.marginLeft="auto";
+    back.onclick = ()=>{ SRV.wizardStep = null; render(); };
+    head.appendChild(back);
+  }
+  // 顶行右侧：退出登录 / 断开连接
+  if(SRV.user){
+    const lo = el("button","btn"); lo.textContent = t("srvLogout"); lo.style.marginLeft="auto";
+    lo.onclick = srvLogout; head.appendChild(lo);
+  } else if(SRV.url){
+    const dc = el("button","btn"); dc.textContent = t("srvDisconnect"); dc.style.marginLeft="auto";
+    dc.onclick = srvDisconnect; head.appendChild(dc);
+  }
+  wrap.appendChild(head);
+
+  if(cur === 1){ wrap.appendChild(connectCard()); wrap.appendChild(deployCard()); }
+  else if(cur === 2){ wrap.appendChild(loginCard()); }
+  else if(isAdmin){
+    wrap.appendChild(statusCard()); wrap.appendChild(usersCard()); wrap.appendChild(orgsCard());
+    wrap.appendChild(reposAllCard()); wrap.appendChild(auditCard());
+  } else {
+    wrap.appendChild(bindCard()); wrap.appendChild(myOrgsCard());
+  }
+  return wrap;
+}
+
+/* ---- 步骤 1：连接 ---- */
+function connectCard(){
+  const card = el("div","pcard");
+  const h = el("h3"); h.textContent = t("srvStep1"); card.appendChild(h);
+  const desc = el("div","pdesc"); desc.textContent = t("srvConnHint"); card.appendChild(desc);
+  if(SRV.url){
+    const row = el("div","prow");
+    row.innerHTML = '<span class="k">okserver</span><span class="mono small">'+esc(SRV.url)+'</span><span class="chip on">✓ '+t("srvConnected")+'</span>';
+    const dis = el("button","btn"); dis.style.marginLeft = "auto"; dis.textContent = t("srvDisconnect");
+    dis.onclick = srvDisconnect; row.appendChild(dis);
+    card.appendChild(row);
+    if(SRV.srvVer){
+      const fb = el("div","fb2"); fb.textContent = "okserver "+SRV.srvVer+(SRV.gitOk ? " · git ✓" : " · git ✗");
+      card.appendChild(fb);
+    }
+    return card;
+  }
+  const row = el("div","prow");
+  row.innerHTML = '<span class="k">'+t("srvAddr")+'</span>';
+  const addr = el("input","pinput"); addr.placeholder = "192.168.1.10"; addr.value = SRV.draftAddr || "";
+  addr.oninput = ()=>{ SRV.draftAddr = addr.value; };
+  row.appendChild(addr);
+  const pk = el("span","k"); pk.style.width = "auto"; pk.textContent = t("srvPort"); row.appendChild(pk);
+  const port = el("input","pinput"); port.style.width = "80px"; port.placeholder = "3100"; port.value = SRV.draftPort || "";
+  port.oninput = ()=>{ SRV.draftPort = port.value; };
+  row.appendChild(port);
+  card.appendChild(row);
+  const row2 = el("div","prow");
+  const btn = el("button","btn btn-primary");
+  btn.textContent = SRV.testing ? t("srvTesting") : t("srvTest");
+  btn.disabled = !!SRV.testing;
+  btn.onclick = ()=>srvTestConnect(addr.value.trim(), (port.value.trim() || "3100"));
+  row2.appendChild(btn);
+  card.appendChild(row2);
+  if(SRV.testFb){
+    const fb = el("div","fb2"+(SRV.testErr?" err":"")); fb.textContent = SRV.testFb;
+    card.appendChild(fb);
+  }
+  return card;
+}
+
+async function srvTestConnect(addr, port){
+  if(!addr){ toast(t("srvAddr")+" ?", true); return; }
+  const url = "http://"+addr+":"+port;
+  SRV.testing = true; render();
+  try{
+    const r = await api("/api/server/test", { method:"POST", body:{ url: url } });
+    SRV.testing = false;
+    if(r.ok){
+      SRV.url = url; SRV.srvVer = r.version || ""; SRV.gitOk = !!r.git_backend_ok;
+      SRV.testFb = "okserver "+(r.version||"")+(r.git_backend_ok?" · git ✓":" · git ✗"); SRV.testErr = false;
+      await api("/api/server/config", { method:"PUT", body:{ url: url } });
+      toast(t("srvConnOk")+"：okserver "+(r.version||""));
+    }else{
+      SRV.testFb = t("srvConnFail")+(r.error||""); SRV.testErr = true;
+    }
+  }catch(err){
+    SRV.testing = false;
+    SRV.testFb = t("srvConnFail")+(err.message||""); SRV.testErr = true;
+  }
+  render();
+}
+
+async function srvDisconnect(){
+  try{ await api("/api/server/logout", { method:"POST" }); }catch(_){}
+  try{ await api("/api/server/config", { method:"PUT", body:{ url:"" } }); }catch(_){}
+  Object.assign(SRV, { url:"", username:"", loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, wizardStep:null, testFb:null });
+  render();
+}
+
+/* ---- 步骤 2：登录 ---- */
+function loginCard(){
+  const card = el("div","pcard");
+  const h = el("h3"); h.textContent = t("srvStep2")+" okserver"; card.appendChild(h);
+  const row = el("div","prow");
+  row.innerHTML = '<span class="k">'+t("srvUser")+'</span>';
+  const un = el("input","pinput"); un.placeholder = "alice"; un.value = SRV.username || "";
+  row.appendChild(un);
+  const pk = el("span","k"); pk.style.width = "auto"; pk.textContent = t("srvPass"); row.appendChild(pk);
+  const pw = el("input","pinput"); pw.type = "password";
+  row.appendChild(pw);
+  card.appendChild(row);
+  const row2 = el("div","prow");
+  const btn = el("button","btn btn-primary");
+  btn.textContent = SRV.logging ? t("srvLogging") : t("srvLogin");
+  btn.disabled = !!SRV.logging;
+  btn.onclick = ()=>srvLogin(un.value.trim(), pw.value);
+  pw.onkeydown = e=>{ if(e.key === "Enter") srvLogin(un.value.trim(), pw.value); };
+  row2.appendChild(btn);
+  card.appendChild(row2);
+  if(SRV.loginFb){
+    const fb = el("div","fb2 err"); fb.textContent = SRV.loginFb;
+    card.appendChild(fb);
+  }
+  return card;
+}
+
+async function srvLogin(username, password){
+  if(!username || !password){ toast(t("srvLoginFail"), true); return; }
+  SRV.logging = true; render();
+  try{
+    const r = await api("/api/server/login", { method:"POST", body:{ url: SRV.url, username: username, password: password } });
+    SRV.logging = false; SRV.loginFb = null;
+    SRV.user = r.user; SRV.username = r.user.name; SRV.loggedIn = true; SRV.wizardStep = null;
+    toast(t("srvLoginOk")+"："+r.user.name+"（"+r.user.role+"）");
+  }catch(err){
+    SRV.logging = false;
+    SRV.loginFb = (err.status === 401) ? t("srvLoginFail") : (err.message || t("srvLoginFail"));
+  }
+  render();
+}
+
+async function srvLogout(){
+  try{ await api("/api/server/logout", { method:"POST" }); }catch(_){}
+  Object.assign(SRV, { loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, wizardStep:2 });
+  toast(t("srvLoggedOut"));
+  render();
+}
+
+/* ---- 步骤 3 · 管理视图（root/admin） ---- */
+function statusCard(){
+  const card = el("div","pcard");
+  const h = el("h3"); h.textContent = t("srvStatus"); card.appendChild(h);
+  const grid = el("div","statgrid");
+  const cells = [
+    [SRV.srvVer || "—", t("srvVer")],
+    [SRV.gitOk ? t("srvGitOkV") : t("srvGitBad"), t("srvGitOk")],
+    [(SRV.users ? SRV.users.length : "…")+" / "+(SRV.orgs ? SRV.orgs.length : "…"), t("srvUserOrgCnt")],
+    [SRV.repos ? String(SRV.repos.length) : "…", t("srvRepoCnt")],
+  ];
+  cells.forEach(c=>{
+    const cell = el("div","statcell");
+    const v = el("div","v"); v.textContent = c[0];
+    const k = el("div","k"); k.textContent = c[1];
+    cell.appendChild(v); cell.appendChild(k); grid.appendChild(cell);
+  });
+  card.appendChild(grid);
+  return card;
+}
+
+function usersCard(){
+  const card = el("div","pcard");
+  const h = el("h3"); h.textContent = t("srvUsers"); card.appendChild(h);
+  const desc = el("div","pdesc"); desc.textContent = t("srvUsersDesc"); card.appendChild(desc);
+  const row = el("div","prow");
+  const inp = el("input","pinput"); inp.placeholder = t("srvNewUser");
+  row.appendChild(inp);
+  const btn = el("button","btn btn-primary"); btn.textContent = t("srvCreateUser");
+  btn.onclick = ()=>srvCreateUser(inp.value.trim(), btn);
+  row.appendChild(btn);
+  const note = el("span","small muted"); note.textContent = t("srvOnceNote"); row.appendChild(note);
+  card.appendChild(row);
+  const tb = el("table","list");
+  tb.innerHTML = '<tr><th>'+t("srvUser")+'</th><th>'+t("srvRole")+'</th><th style="text-align:right">'+t("srvActions")+'</th></tr>';
+  (SRV.users || []).forEach(u=>{
+    const tr = el("tr","");
+    const td1 = el("td",""); td1.innerHTML = '<b>'+esc(u.name)+'</b>'+(u.disabled?' <span class="chip off">'+t("srvDisabled")+'</span>':'');
+    const td2 = el("td",""); td2.textContent = u.role;
+    const td3 = el("td",""); td3.style.textAlign = "right";
+    const tog = el("button","btn"); tog.textContent = u.disabled ? t("srvEnable") : t("srvDisable");
+    tog.onclick = ()=>srvToggleUser(u.name, !u.disabled);
+    if(u.role === "root"){ tog.disabled = true; tog.title = t("srvRootNoDisable"); }
+    const rst = el("button","btn"); rst.textContent = t("srvReset");
+    rst.onclick = ()=>srvResetPwd(u.name);
+    if(u.role === "root" && SRV.user.role !== "root"){ rst.disabled = true; rst.title = t("srvRootNoDisable"); }
+    td3.appendChild(tog); td3.appendChild(rst);
+    tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+    tb.appendChild(tr);
+  });
+  card.appendChild(tb);
+  return card;
+}
+
+async function srvCreateUser(name, btn){
+  if(!name) return;
+  btn.disabled = true;
+  try{
+    const r = await api("/api/server/users", { method:"POST", body:{ username: name } });
+    SRV.users = null; loadServerRoleData();
+    srvShowSecret(t("srvUserCreated")+" — "+name, t("srvCopyHint"), [
+      [t("srvPwd"), r.password], [t("srvGitTok"), r.git_token],
+    ]);
+  }catch(err){ toast(err.message, true); }
+  btn.disabled = false;
+}
+
+async function srvToggleUser(name, disabled){
+  try{
+    await api("/api/server/users/"+encodeURIComponent(name)+(disabled?"/disable":"/enable"), { method:"POST" });
+    SRV.users = null; loadServerRoleData();
+    toast((disabled?t("srvDisable"):t("srvEnable"))+" "+name+" ✓");
+  }catch(err){ toast(err.message, true); }
+}
+
+async function srvResetPwd(name){
+  try{
+    const r = await api("/api/server/users/"+encodeURIComponent(name)+"/reset-password", { method:"POST" });
+    srvShowSecret(t("srvResetDone")+" — "+name, t("srvCopyHint"), [[t("srvNewPwd"), r.password]]);
+  }catch(err){ toast(err.message, true); }
+}
+
+/* 一次性凭据弹窗（纪律：必须有复制按钮 + 只显示一次提示） */
+function srvShowSecret(title, hint, pairs){
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  const h = el("h3"); h.textContent = title; m.appendChild(h);
+  const d = el("div","small muted"); d.style.marginBottom = "8px"; d.textContent = hint; m.appendChild(d);
+  pairs.forEach(p=>{
+    const row = el("div","prow");
+    row.innerHTML = '<span class="k">'+esc(p[0])+'</span><span class="mono" style="flex:1">'+esc(p[1])+'</span>';
+    const cp = el("button","btn"); cp.textContent = "⧉";
+    cp.onclick = ()=>{ navigator.clipboard.writeText(p[1]).then(()=>toast(t("srvCopiedOk"))); };
+    row.appendChild(cp);
+    m.appendChild(row);
+  });
+  const foot = el("div","mfoot2");
+  const ok = el("button","btn btn-primary"); ok.textContent = t("srvCopied");
+  ok.onclick = ()=>{ mask.remove(); };
+  foot.appendChild(ok); m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = e=>{ if(e.target === mask) mask.remove(); };
+  document.body.appendChild(mask);
+}
+
+function orgsCard(){
+  const card = el("div","pcard");
+  const h = el("h3"); h.textContent = t("srvOrgs"); card.appendChild(h);
+  const desc = el("div","pdesc"); desc.textContent = t("srvOrgsDesc"); card.appendChild(desc);
+  const row = el("div","prow");
+  const inp = el("input","pinput"); inp.placeholder = t("srvOrgName");
+  const dInp = el("input","pinput"); dInp.placeholder = t("srvDescOpt");
+  const btn = el("button","btn btn-primary"); btn.textContent = t("srvCreateOrg");
+  btn.onclick = ()=>srvCreateOrg(inp.value.trim(), dInp.value.trim(), btn);
+  row.appendChild(inp); row.appendChild(dInp); row.appendChild(btn);
+  card.appendChild(row);
+  (SRV.orgs || []).forEach(o=>{
+    const orow = el("div","prow"); orow.style.alignItems = "flex-start";
+    const k = el("span","k"); k.textContent = o.name; orow.appendChild(k);
+    const mid = el("span","small"); mid.style.flex = "1";
+    mid.textContent = o.description || "";
+    mid.appendChild(el("br"));
+    (SRV.users || []).filter(u=>u.role !== "root").forEach(u=>{
+      const inOrg = (o.members || []).some(mm=>mm.username === u.name);
+      const chip = el("button","chip "+(inOrg?"on":"off"));
+      chip.style.border = "none"; chip.style.cursor = "pointer";
+      chip.textContent = u.name+(inOrg?" ✓":"");
+      chip.onclick = ()=>srvToggleMember(o.name, u.name, inOrg);
+      mid.appendChild(chip);
+      mid.appendChild(document.createTextNode(" "));
+    });
+    orow.appendChild(mid);
+    card.appendChild(orow);
+  });
+  return card;
+}
+
+async function srvCreateOrg(name, desc, btn){
+  if(!name) return;
+  btn.disabled = true;
+  try{
+    await api("/api/server/orgs", { method:"POST", body:{ name: name, description: desc } });
+    SRV.orgs = null; loadServerRoleData();
+    toast(t("srvCreateOrg")+" "+name+" ✓");
+  }catch(err){ toast(err.message, true); }
+  btn.disabled = false;
+}
+
+async function srvToggleMember(org, user, inOrg){
+  try{
+    await api("/api/server/orgs/"+encodeURIComponent(org)+"/members/"+(inOrg?encodeURIComponent(user):""), inOrg
+      ? { method:"DELETE" }
+      : { method:"POST", body:{ username: user, role:"member" } });
+    SRV.orgs = null; loadServerRoleData();
+  }catch(err){ toast(err.message, true); }
+}
+
+function reposAllCard(){
+  const card = el("div","pcard");
+  const h = el("h3"); h.textContent = t("srvReposAll"); card.appendChild(h);
+  const tb = el("table","list");
+  tb.innerHTML = '<tr><th>'+t("srvLayer")+'</th><th>'+t("srvOwner")+'</th><th>'+t("srvProject")+'</th><th>'+t("srvBy")+'</th><th>'+t("srvAt")+'</th></tr>';
+  (SRV.repos || []).forEach(r=>{
+    const tr = el("tr","");
+    [r.layer, r.owner, r.project, r.created_by, (r.created_at||"").slice(0,16).replace("T"," ")].forEach((v,i)=>{
+      const td = el("td", i===4 ? "muted" : ""); td.textContent = v || "";
+      tr.appendChild(td);
+    });
+    tb.appendChild(tr);
+  });
+  card.appendChild(tb);
+  return card;
+}
+
+function auditCard(){
+  const card = el("div","pcard");
+  const h = el("h3"); h.textContent = t("srvAudit"); card.appendChild(h);
+  const desc = el("div","pdesc"); desc.textContent = t("srvAuditDesc"); card.appendChild(desc);
+  const tb = el("table","list");
+  (SRV.audit || []).forEach(a=>{
+    const tr = el("tr","");
+    const td1 = el("td","muted mono"); td1.style.whiteSpace = "nowrap"; td1.textContent = (a.created_at||"").slice(0,16).replace("T"," ");
+    const td2 = el("td",""); td2.textContent = a.actor+" "+a.action+" "+a.target+(a.detail?"（"+a.detail+"）":"");
+    tr.appendChild(td1); tr.appendChild(td2); tb.appendChild(tr);
+  });
+  card.appendChild(tb);
+  return card;
+}
+
+/* ---- 步骤 3 · 成员视图（member） ---- */
+function bindCard(){
+  const card = el("div","pcard");
+  const h = el("h3"); h.textContent = t("srvBindCard"); card.appendChild(h);
+  const desc = el("div","pdesc"); desc.textContent = t("srvBindDesc"); card.appendChild(desc);
+  const tb = el("table","list");
+  tb.innerHTML = '<tr><th>'+t("srvProject")+'</th><th>'+t("srvStatus")+'</th><th style="text-align:right">'+t("srvActions")+'</th></tr>';
+  (SRV.projects || []).forEach(p=>{
+    const bound = p.sync && p.sync.is_repo;
+    const tr = el("tr","");
+    const td1 = el("td",""); td1.innerHTML = '<b>'+esc(p.name)+'</b>';
+    const td2 = el("td","");
+    td2.innerHTML = bound ? '<span class="chip on">'+t("srvBound")+'</span>' : '<span class="chip off">'+t("srvNotCreated")+'</span>';
+    const td3 = el("td",""); td3.style.textAlign = "right";
+    if(bound){
+      const s = el("span","small muted mono"); s.textContent = p.sync.remote || "";
+      td3.appendChild(s);
+    }else{
+      const btn = el("button","btn btn-primary");
+      btn.textContent = SRV.bindBusy[p.name] ? t("srvBinding") : t("srvBind");
+      btn.disabled = !!SRV.bindBusy[p.name];
+      btn.onclick = ()=>srvBind(p.name);
+      td3.appendChild(btn);
+    }
+    tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+    tb.appendChild(tr);
+  });
+  card.appendChild(tb);
+  return card;
+}
+
+async function srvBind(project){
+  SRV.bindBusy[project] = true; render();
+  try{
+    const r = await api("/api/server/repos", { method:"POST", body:{ project: project } });
+    toast(r.message || t("srvBound"), r.status === "error");
+    if(r.status === "conflict"){
+      state.syncConflict = { project: project };
+      location.hash = "sync-conflict?project=" + encodeURIComponent(project);
+    }
+    SRV.projects = null; loadServerRoleData();
+    refreshManage();
+  }catch(err){ toast(err.message, true); }
+  SRV.bindBusy[project] = false;
+  if(state.menu === "server") render();
+}
+
+function myOrgsCard(){
+  const card = el("div","pcard");
+  const h = el("h3"); h.textContent = t("srvMyOrgs"); card.appendChild(h);
+  const desc = el("div","pdesc"); desc.textContent = t("srvMyOrgsDesc"); card.appendChild(desc);
+  const mine = SRV.user && SRV.user.orgs ? SRV.user.orgs : [];
+  if(!mine.length){
+    const d = el("div","small muted"); d.textContent = t("srvNoOrg"); card.appendChild(d);
+  } else {
+    mine.forEach(name=>{
+      const row = el("div","prow");
+      row.innerHTML = '<span class="k">'+esc(name)+'</span>';
+      card.appendChild(row);
+    });
+  }
+  return card;
+}
+
+/* ---- 部署指引卡（折叠，静态简版；完整版在 server/nas/README.md） ---- */
+function deployCard(){
+  const card = el("div","pcard");
+  const det = el("details","deploy");
+  const sum = el("summary",""); sum.textContent = t("srvDeploy");
+  det.appendChild(sum);
+  const d = el("div","pdesc");
+  d.textContent = "okserver + Gitea 双容器一个 compose；完整步骤见仓库 server/nas/README.md。";
+  det.appendChild(d);
+  const pre = el("pre","pre");
+  pre.textContent = 'services:\n  gitea:\n    image: gitea/gitea:1.22\n    volumes: [./gitea-data:/data]\n    ports: ["3000:3000", "2222:22"]\n  okserver:\n    image: openknowledge/okserver:latest\n    volumes: [./okserver-data:/data]\n    environment:\n      OKSERVER_GITEA_URL: http://gitea:3000\n      OKSERVER_GITEA_ADMIN_TOKEN: <部署时从 Gitea 生成一次（带 user/admin scope）>\n    ports: ["3100:3100"]';
+  det.appendChild(pre);
+  const ol = el("ol","small");
+  ol.style.margin = "10px 0 0"; ol.style.paddingLeft = "20px";
+  ["建持久化目录 ./gitea-data、./okserver-data（okserver-data 需 chown 1000:1000）",
+   "docker compose up -d gitea → 安装向导（SQLite、建管理员、关开放注册）",
+   "Gitea 生成 admin token（user/admin scope），填入 .env 的 GITEA_ADMIN_TOKEN",
+   "docker compose up -d → 取 root 初始密码（/data/INITIAL_ROOT_PASSWORD）",
+   "成员设备 OkManager → 本页三步向导连 http://<nas>:3100"].forEach(s=>{
+    const li = el("li",""); li.textContent = s; ol.appendChild(li);
+  });
+  det.appendChild(ol);
+  card.appendChild(det);
+  return card;
 }
 
 /* 刷新恢复选中菜单：菜单点击时写入 location.hash，启动时读回（非法值回退 manage）。
