@@ -50,7 +50,15 @@ function setBadge(on, text) {
 function route() {
   const raw = location.hash.replace(/^#\/?/, "");
   const page = raw.split("?")[0] || "connect";
-  if (page.startsWith("token=")) return; // 首次进入的 token fragment
+  // 渲染前先关掉上一页的 SSE 连接，避免路由切换后旧 EventSource 泄漏
+  // （需要日志的页面会在渲染后由 mountLogPane 重新建立连接）。
+  if (S.logES) { S.logES.close(); S.logES = null; }
+  // 中途刷新会丢内存态会话：非 connect 页在未连接状态下直接跳回连接页，
+  // 避免 probe/deploy/manage 拿空状态渲染出畸形数据（如 root_url 拼成 http://:3000/）。
+  if (page !== "connect" && !S.connStr) {
+    location.hash = "#/connect";
+    return;
+  }
   const app = document.getElementById("app");
   app.innerHTML = "";
   const content = el("div", "content");
