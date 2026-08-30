@@ -5449,7 +5449,7 @@ function connectCard(){
   }
   const row = el("div","prow");
   row.innerHTML = '<span class="k">'+t("srvAddr")+'</span>';
-  const addr = el("input","pinput"); addr.placeholder = "192.168.1.10"; addr.value = SRV.draftAddr || "";
+  const addr = el("input","pinput"); addr.placeholder = "192.168.1.10"; addr.value = SRV.draftAddr || ""; addr.style.width = "220px";
   addr.oninput = ()=>{ SRV.draftAddr = addr.value; };
   row.appendChild(addr);
   const pk = el("span","k"); pk.style.width = "auto"; pk.textContent = t("srvPort"); row.appendChild(pk);
