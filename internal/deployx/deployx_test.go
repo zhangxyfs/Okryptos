@@ -138,6 +138,20 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
+func TestDialSSHRequiresAuth(t *testing.T) {
+	_, err := DialSSH(context.Background(), "127.0.0.1", 22, "u", "", "")
+	if err == nil || !strings.Contains(err.Error(), "密码或私钥") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDialSSHBadKeyPath(t *testing.T) {
+	_, err := DialSSH(context.Background(), "127.0.0.1", 22, "u", "", "/no/such/key")
+	if err == nil || !strings.Contains(err.Error(), "读私钥") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestValidateDir(t *testing.T) {
 	for _, ok := range []string{"~/openknowledge", "$HOME/openknowledge", "/opt/ok", "/home/u/ok-1.2"} {
 		if err := ValidateDir(ok); err != nil {
