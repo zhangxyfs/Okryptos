@@ -9,6 +9,7 @@ package main
 // （服务已在跑，直接导航）、无 token 注入脚本（#token= fragment 自带）。
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -38,6 +39,7 @@ var (
 	procDispatchMessageW = dUser32.NewProc("DispatchMessageW")
 	procPostQuitMessage  = dUser32.NewProc("PostQuitMessage")
 	procMoveWindow       = dUser32.NewProc("MoveWindow")
+	procGetWindowRect    = dUser32.NewProc("GetWindowRect")
 	dShell32             = windows.NewLazySystemDLL("shell32.dll")
 	procExtractIconW     = dShell32.NewProc("ExtractIconW")
 	dGdi32               = windows.NewLazySystemDLL("gdi32.dll")
@@ -59,6 +61,12 @@ const (
 	deployWinW = 972
 	deployWinH = 686
 )
+
+// deployPageSizes 各页窗口尺寸（前端 route 切页时 postMessage 通知宿主换尺寸）；
+// 未列出的页用默认 deployWinW×deployWinH。
+var deployPageSizes = map[string][2]int{
+	"probe": {958, 793},
+}
 
 type dWndClassExW struct {
 	CbSize        uint32
@@ -93,6 +101,34 @@ type deployCtx struct {
 	chromium *edge.Chromium
 	url      string
 	showOnce sync.Once
+	curW     int
+	curH     int
+}
+
+type dRect struct{ Left, Top, Right, Bottom int32 }
+
+// onPageMessage 前端 route() 切页通知：按 deployPageSizes 换窗口尺寸，保持窗口中心不动。
+func (c *deployCtx) onPageMessage(msg string) {
+	var m struct {
+		Type string `json:"type"`
+		Page string `json:"page"`
+	}
+	if err := json.Unmarshal([]byte(msg), &m); err != nil || m.Type != "page" {
+		return
+	}
+	w, h := deployWinW, deployWinH
+	if s, ok := deployPageSizes[m.Page]; ok {
+		w, h = s[0], s[1]
+	}
+	if w == c.curW && h == c.curH {
+		return
+	}
+	var r dRect
+	procGetWindowRect.Call(c.hwnd, uintptr(unsafe.Pointer(&r)))
+	x := (r.Left + r.Right - int32(w)) / 2
+	y := (r.Top + r.Bottom - int32(h)) / 2
+	c.curW, c.curH = w, h
+	procMoveWindow.Call(c.hwnd, uintptr(x), uintptr(y), uintptr(w), uintptr(h), 1)
 }
 
 var (
@@ -191,7 +227,7 @@ func openUI(url string, serveErr chan error, stderr io.Writer) int {
 
 	chromium := edge.NewChromium()
 	chromium.DataPath = filepath.Join(registry.Home(), "webview2-data-okdeploy")
-	ctx := &deployCtx{hwnd: hwnd, chromium: chromium, url: url}
+	ctx := &deployCtx{hwnd: hwnd, chromium: chromium, url: url, curW: deployWinW, curH: deployWinH}
 	deployContextsMu.Lock()
 	deployContexts[hwnd] = ctx
 	deployContextsMu.Unlock()
@@ -222,6 +258,7 @@ func openUI(url string, serveErr chan error, stderr io.Writer) int {
 		_ = settings.PutAreDefaultContextMenusEnabled(false)
 		_ = settings.PutAreDevToolsEnabled(false)
 	}
+	chromium.MessageCallback = ctx.onPageMessage // 前端切页时按需换窗口尺寸
 	chromium.Resize()
 	chromium.Navigate(ctx.url)
 

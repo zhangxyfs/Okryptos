@@ -59,6 +59,10 @@ function route() {
     location.hash = "#/connect";
     return;
   }
+  // 通知 WebView2 宿主当前页名：按页调整窗口尺寸（浏览器回退路径无 chrome.webview，跳过）
+  if (window.chrome && chrome.webview) {
+    chrome.webview.postMessage({ type: "page", page });
+  }
   const app = document.getElementById("app");
   app.innerHTML = "";
   const content = el("div", "content");
