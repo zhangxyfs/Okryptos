@@ -134,3 +134,54 @@ func BuildUninstallTask(dir string, deleteData bool) Task {
 	}
 	return Task{Name: "卸载 OpenKnowledge 服务端", Steps: steps}
 }
+
+// QueryRemoteLogs 拉取容器日志（排障查看，同步快查询）。
+// docker logs 把容器 stderr 流到自身 stderr，故 stdout/stderr 都收（runQuiet 只收 stdout，不够用）。
+// tail 缺省/越界（≤0 或 >5000）按 200。
+func QueryRemoteLogs(ctx context.Context, ex Executor, dir string, tail int) (string, error) {
+	if err := ValidateDir(dir); err != nil {
+		return "", err
+	}
+	if tail <= 0 || tail > 5000 {
+		tail = 200
+	}
+	var lines []string
+	code, err := ex.Run(ctx, composeCmd(dir, fmt.Sprintf("logs --tail=%d --no-color", tail)), nil,
+		func(_, line string) { lines = append(lines, line) })
+	if err != nil {
+		return "", err
+	}
+	if code != 0 {
+		return "", fmt.Errorf("读取日志失败（退出码 %d）", code)
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// BuildResetRootTask 重置 root 密码：容器内执行 reset-root 子命令，stdout 末行即新密码。
+// 不经 runCmd——密码不能进日志；stderr（提示行）照常进日志。
+func BuildResetRootTask(dir string) Task {
+	return Task{Name: "重置 root 密码", Steps: []Step{
+		{Name: "生成新密码", Run: func(ctx context.Context, e *Env) error {
+			ctxT, cancel := context.WithTimeout(ctx, CmdTimeout)
+			defer cancel()
+			var out []string
+			code, err := e.Ex.Run(ctxT, composeCmd(dir, "exec -T okserver /out/okserver reset-root"), nil,
+				func(stream, line string) {
+					if stream == "stdout" {
+						out = append(out, line)
+					} else {
+						e.Hub.Publish("生成新密码", "info", line)
+					}
+				})
+			if err != nil {
+				return err
+			}
+			if code != 0 || len(out) == 0 {
+				return fmt.Errorf("重置失败（退出码 %d）", code)
+			}
+			e.Vars["root_password"] = strings.TrimSpace(out[len(out)-1])
+			e.Hub.Publish("生成新密码", "info", "已生成新 root 密码（将只在完成页显示一次）")
+			return nil
+		}},
+	}}
+}

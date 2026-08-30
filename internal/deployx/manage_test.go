@@ -104,3 +104,34 @@ func TestUninstallTaskRejectsBadDir(t *testing.T) {
 		t.Fatalf("不应执行任何远程命令：%v", fx.Cmds)
 	}
 }
+
+func TestQueryRemoteLogs(t *testing.T) {
+	fx := &fakeExec{t: t, steps: []fakeStep{
+		{match: "logs --tail=200", code: 0, stdout: "okserver  | 启动完成"},
+	}}
+	logs, err := QueryRemoteLogs(context.Background(), fx, "/home/u/openknowledge", 0)
+	if err != nil || !strings.Contains(logs, "启动完成") {
+		t.Fatalf("logs=%q err=%v", logs, err)
+	}
+	fx.Done()
+}
+
+func TestResetRootTask(t *testing.T) {
+	fx := &fakeExec{t: t, steps: []fakeStep{
+		{match: "reset-root", code: 0, stdout: "newpw32chars"},
+	}}
+	task := BuildResetRootTask("/home/u/openknowledge")
+	e := &Env{Ex: fx, Hub: NewLogHub(), Vars: map[string]string{}}
+	if err := task.Execute(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Vars["root_password"] != "newpw32chars" {
+		t.Fatalf("root_password = %q", e.Vars["root_password"])
+	}
+	for _, ev := range e.Hub.History() {
+		if strings.Contains(ev.Text, "newpw32chars") {
+			t.Fatalf("新密码进了日志：%+v", ev)
+		}
+	}
+	fx.Done()
+}

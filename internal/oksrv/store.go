@@ -213,6 +213,28 @@ func (s *Store) HasRoot() bool {
 	return n > 0
 }
 
+// ResetRoot 重置 root 密码（root 初始密码只显示一次，丢失后的恢复入口）：
+// 重生成 32 位随机密码，bcrypt 更新 root 行，重写 <dataDir>/INITIAL_ROOT_PASSWORD（0600），
+// 返回明文（只此一次）。root 行由首启 EnsureRoot 建立，这里只做 UPDATE；未初始化时报错。
+func (s *Store) ResetRoot() (string, error) {
+	if !s.HasRoot() {
+		return "", fmt.Errorf("root 尚未初始化，无法重置")
+	}
+	pw := GenerateSecret(24) // 24 字节 → 32 字符
+	hash, err := HashPassword(pw)
+	if err != nil {
+		return "", err
+	}
+	if err := s.SetUserPasswordHash("root", hash); err != nil {
+		return "", fmt.Errorf("更新 root 密码失败: %w", err)
+	}
+	initFile := filepath.Join(s.dir, "INITIAL_ROOT_PASSWORD")
+	if err := os.WriteFile(initFile, []byte(pw+"\n"), 0o600); err != nil {
+		return "", fmt.Errorf("重写 INITIAL_ROOT_PASSWORD 失败: %w", err)
+	}
+	return pw, nil
+}
+
 // Org 是一个组织（对应 Gitea org，仓库归属的组织层命名空间）。
 type Org struct {
 	Name      string

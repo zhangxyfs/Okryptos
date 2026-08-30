@@ -1,6 +1,8 @@
 package oksrv
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -119,5 +121,46 @@ func TestStoreLifecycle(t *testing.T) {
 	defer s2.Close()
 	if !s2.HasRoot() || len(s2.ListUsers()) != 2 {
 		t.Fatal("state should persist")
+	}
+}
+
+// ResetRoot：新密码 32 位随机、可认证，旧密码失效，INITIAL_ROOT_PASSWORD 重写。
+// （EnsureRoot 返回 (明文, created, err)、密码校验走 VerifyLogin、目录取 s.dir——
+// 均以 auth.go/store.go 实际实现为准。）
+func TestResetRoot(t *testing.T) {
+	st, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	old, created, err := st.EnsureRoot() // 首启生成
+	if err != nil || !created {
+		t.Fatalf("EnsureRoot: created=%v err=%v", created, err)
+	}
+	new1, err := st.ResetRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(new1) != 32 || new1 == old {
+		t.Fatalf("新密码长度/随机性异常：%q", new1)
+	}
+	// 新密码可认证、旧密码不可（VerifyLogin 是 store 既有校验入口）
+	if st.VerifyLogin("root", new1) == nil || st.VerifyLogin("root", old) != nil {
+		t.Fatal("重置后新旧密码校验不符")
+	}
+	if _, err := os.Stat(filepath.Join(st.dir, "INITIAL_ROOT_PASSWORD")); err != nil {
+		t.Fatal("应重写 INITIAL_ROOT_PASSWORD")
+	}
+}
+
+// 未初始化 root 时 ResetRoot 应报错（root 行由首启 EnsureRoot 建立）。
+func TestResetRootWithoutRoot(t *testing.T) {
+	st, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.ResetRoot(); err == nil {
+		t.Fatal("root 未初始化时应报错")
 	}
 }

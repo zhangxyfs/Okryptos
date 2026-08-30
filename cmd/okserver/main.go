@@ -16,6 +16,11 @@ import (
 func main() { os.Exit(run()) }
 
 func run() int {
+	// 子命令分发（HTTP 服务启动前）：容器内 /out/okserver reset-root
+	if len(os.Args) > 1 && os.Args[1] == "reset-root" {
+		return resetRoot()
+	}
+
 	log := logx.New(os.Stdout)
 	listen := envOr("OKSERVER_LISTEN", ":3100")
 	dataDir := envOr("OKSERVER_DATA_DIR", "./okserver-data")
@@ -63,4 +68,23 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// resetRoot 是容器内运维子命令（/out/okserver reset-root）：重置 root 密码。
+// stdout 只打印一行新密码（供部署器捕获），提示一律走 stderr。
+func resetRoot() int {
+	st, err := oksrv.OpenStore(envOr("OKSERVER_DATA_DIR", "./okserver-data"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "打开数据库失败：", err)
+		return 1
+	}
+	defer st.Close()
+	pw, err := st.ResetRoot()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "重置失败：", err)
+		return 1
+	}
+	fmt.Fprintln(os.Stderr, "root 密码已重置")
+	fmt.Println(pw)
+	return 0
 }
