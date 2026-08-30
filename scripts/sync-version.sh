@@ -28,7 +28,7 @@ done
 # exe 版本资源（winres.json）：bump 时易漏（v2.9.0 起曾停在 2.8.0.0 直至 2.16.0 发现），
 # 四段式 = 三段版本号 + ".0"
 VERSION4="${VERSION}.0"
-for f in cmd/ok/winres.json cmd/okd/winres.json cmd/okmanager/winres.json; do
+for f in cmd/ok/winres.json cmd/okd/winres.json cmd/okmanager/winres.json cmd/okdeploy/winres.json; do
   if grep -q "\"file_version\": \"${VERSION4}\"" "$f" && grep -q "\"product_version\": \"${VERSION4}\"" "$f"; then
     echo "$f: 已是 ${VERSION4}，无需变更"
   else
