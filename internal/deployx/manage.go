@@ -97,7 +97,8 @@ func BuildUpgradeTask(dir, newTag string) Task {
 		{Name: "拉取新镜像", Run: func(ctx context.Context, e *Env) error {
 			ctxT, cancel := context.WithTimeout(ctx, PullTimeout)
 			defer cancel()
-			_, err := runCmd(ctxT, e, "拉取新镜像", composeCmd(dir, "pull"))
+			// 同部署的离线路径：本地已 load 的镜像优先，没有才 pull（gitea 镜像升级不动）
+			_, err := runCmd(ctxT, e, "拉取新镜像", okserverImageCmd(newTag))
 			return err
 		}},
 		{Name: "重启服务", Run: func(ctx context.Context, e *Env) error {

@@ -160,3 +160,10 @@ func TestDeployTaskEmptyTokenFails(t *testing.T) {
 	}
 	fx.Done()
 }
+
+// 镜像 tag 注入防线：非法字符直接拒绝（tag 会拼进 shell 命令）。
+func TestBuildDeployTaskRejectsBadTag(t *testing.T) {
+	if _, err := BuildDeployTask(DeploySpec{Mode: "full", Dir: "/d", GiteaPort: 3000, OKPort: 3100, Tag: "v1;touch /tmp/pwn", RootURL: "http://x/"}); err == nil {
+		t.Fatal("非法 tag 应报错")
+	}
+}

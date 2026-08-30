@@ -50,10 +50,20 @@ func waitHTTP(url string) string {
 		`sleep 2; done; [ "$ok" = 1 ]`, shellQuote(url), shellQuote(url))
 }
 
+// okserverImageCmd 生成 okserver 镜像获取命令：本地已有（docker load 的离线包）
+// 直接用，没有才从 registry pull。tag 须先过 tagRe 白名单（BuildDeployTask 已校验）。
+func okserverImageCmd(tag string) string {
+	img := "openknowledge/okserver:" + tag
+	return "docker image inspect " + img + " >/dev/null 2>&1 || docker pull " + img
+}
+
 // BuildDeployTask 构建部署任务（full 全新双容器 / external 接入已有 Gitea）。
 func BuildDeployTask(s DeploySpec) (Task, error) {
 	if err := ValidateDir(s.Dir); err != nil {
 		return Task{}, err
+	}
+	if !tagRe.MatchString(s.Tag) {
+		return Task{}, fmt.Errorf("镜像版本含非法字符：%q（允许字母数字、._-）", s.Tag)
 	}
 	compose, err := RenderCompose(s.Mode)
 	if err != nil {
@@ -101,7 +111,9 @@ func buildFullTask(s DeploySpec, compose string) Task {
 		{Name: "拉取镜像", Run: func(ctx context.Context, e *Env) error {
 			ctxT, cancel := context.WithTimeout(ctx, PullTimeout)
 			defer cancel()
-			_, err := runCmd(ctxT, e, "拉取镜像", composeCmd(s.Dir, "pull"))
+			// gitea 必拉（registry）；okserver 镜像优先用本地已 docker load 的
+			//（registry 未发布前的离线路径），本地没有才 pull
+			_, err := runCmd(ctxT, e, "拉取镜像", composeCmd(s.Dir, "pull gitea")+" && { "+okserverImageCmd(s.Tag)+"; }")
 			return err
 		}},
 		{Name: "启动 Gitea", Run: func(ctx context.Context, e *Env) error {
@@ -219,7 +231,8 @@ func buildExternalTask(s DeploySpec, compose string) (Task, error) {
 		{Name: "拉取镜像", Run: func(ctx context.Context, e *Env) error {
 			ctxT, cancel := context.WithTimeout(ctx, PullTimeout)
 			defer cancel()
-			_, err := runCmd(ctxT, e, "拉取镜像", composeCmd(s.Dir, "pull"))
+			// okserver 镜像优先用本地已 docker load 的（registry 未发布前的离线路径）
+			_, err := runCmd(ctxT, e, "拉取镜像", okserverImageCmd(s.Tag))
 			return err
 		}},
 		{Name: "启动 okserver", Run: func(ctx context.Context, e *Env) error {
