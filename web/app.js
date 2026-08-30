@@ -191,6 +191,7 @@ const I18N = {
     syncDotSynced:"已同步", syncDotAhead:"有未同步变更", syncDotOff:"未启用同步", syncDotConflict:"同步冲突",
     syncNavConflict:"解决同步冲突",
     syncInitGuide:"该项目尚未初始化同步：请在终端执行 ok sync init [remote-url] 完成建仓绑定",
+    syncServerBindConfirm:"该项目尚未初始化同步。经服务器建仓并初始化（建仓 + 绑定 remote + 首次推送）？",
     server:"服务器",
     srvStep1:"连接服务器", srvStep2:"登录", srvStep3Admin:"管理", srvStep3Member:"使用（成员视图）", srvBackCur:"返回当前步骤",
     srvAddr:"地址", srvPort:"端口", srvTest:"测试连接", srvTesting:"连接中…", srvConnected:"已连接", srvDisconnect:"断开",
@@ -380,6 +381,7 @@ const I18N = {
     syncDotSynced:"Synced", syncDotAhead:"Unsynced changes", syncDotOff:"Sync disabled", syncDotConflict:"Sync conflict",
     syncNavConflict:"Resolve sync conflict",
     syncInitGuide:"Sync is not initialized for this project: run 'ok sync init [remote-url]' in terminal to set it up",
+    syncServerBindConfirm:"Sync is not initialized for this project. Provision and bind via the server (create repo + bind remote + first push)?",
     server:"Server",
     srvStep1:"Connect to server", srvStep2:"Sign in", srvStep3Admin:"Administration", srvStep3Member:"Member view", srvBackCur:"Back to current step",
     srvAddr:"Address", srvPort:"Port", srvTest:"Test connection", srvTesting:"Connecting…", srvConnected:"Connected", srvDisconnect:"Disconnect",
@@ -1860,7 +1862,19 @@ async function doProjectSync(project, btn){
       return;
     }
     if(r.status === "not_repo"){
-      // 未初始化：纯指引 toast（建仓入口在终端/服务器页；杜绝假功能按钮——不再发必失败的二次 POST）
+      // 已登录服务器 → 提供"经服务器建仓并初始化"（真动作）；未登录 → 纯指引 toast
+      try{
+        const sc = await api("/api/server/config");
+        if(sc.logged_in){
+          if(confirm(t("syncServerBindConfirm"))){
+            btn.classList.add("spinning");
+            const r2 = await api("/api/server/repos", { method:"POST", body:{ project: project } });
+            toast(r2.message || t("syncToastLatest"), r2.status === "error");
+            refreshManage();
+          }
+          return;
+        }
+      }catch(_){ /* 未配置服务器，落纯指引 */ }
       toast(t("syncInitGuide"), true);
       return;
     }
