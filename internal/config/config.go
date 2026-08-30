@@ -552,7 +552,9 @@ func SetServer(path string, s Server) error {
 				}
 			}
 		}
-		if s.Token == "" {
+		// URL 为空 = 故意清空整段（logout 语义：三键全省略，不保留旧 token）；
+		// 否则 token 空串 = 脱敏回写（保留旧值）。
+		if s.Token == "" && s.URL != "" {
 			s.Token = oldToken
 		}
 		var section []string
