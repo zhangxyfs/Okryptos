@@ -1,0 +1,29 @@
+# okdeploy 全新部署：okserver + Gitea 双容器（端口/镜像经 .env 注入）
+services:
+  gitea:
+    image: gitea/gitea:1.22
+    restart: unless-stopped
+    volumes:
+      - ./gitea-data:/data
+    environment:
+      - GITEA__server__INSTALL_LOCK=true                 # 跳过网页安装向导（无人值守部署）
+      - GITEA__database__DB_TYPE=sqlite3
+      - GITEA__service__DISABLE_REGISTRATION=true        # 治理配置①：关闭开放注册
+      - GITEA__repository__MAX_CREATION_LIMIT=0          # 治理配置②：禁普通用户建仓
+      - GITEA__repository__DEFAULT_PRIVATE=private       # 治理配置③：默认私有
+      - GITEA__server__ROOT_URL=${GITEA_ROOT_URL}        # 治理配置④：clone URL 地址
+    ports:
+      - "${GITEA_HTTP_PORT}:3000"
+  okserver:
+    image: ${OKSERVER_IMAGE}
+    restart: unless-stopped
+    depends_on: [gitea]
+    volumes:
+      - ./okserver-data:/data
+    environment:
+      - OKSERVER_LISTEN=:3100
+      - OKSERVER_DATA_DIR=/data
+      - OKSERVER_GITEA_URL=http://gitea:3000
+      - OKSERVER_GITEA_ADMIN_TOKEN=${GITEA_ADMIN_TOKEN}
+    ports:
+      - "${OKSERVER_PORT}:3100"

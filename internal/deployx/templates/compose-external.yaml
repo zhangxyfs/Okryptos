@@ -1,0 +1,14 @@
+# okdeploy 接入已有 Gitea：仅 okserver 单容器
+services:
+  okserver:
+    image: ${OKSERVER_IMAGE}
+    restart: unless-stopped
+    volumes:
+      - ./okserver-data:/data
+    environment:
+      - OKSERVER_LISTEN=:3100
+      - OKSERVER_DATA_DIR=/data
+      - OKSERVER_GITEA_URL=${EXTERNAL_GITEA_URL}
+      - OKSERVER_GITEA_ADMIN_TOKEN=${GITEA_ADMIN_TOKEN}
+    ports:
+      - "${OKSERVER_PORT}:3100"
