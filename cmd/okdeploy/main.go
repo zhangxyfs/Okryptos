@@ -41,10 +41,12 @@ func run(stderr *os.File) int {
 	// 若先开窗口，轮询期间页面无人应答，用户会看到长时间白屏）。
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- http.Serve(ln, srv.Handler(webui.WebFS())) }()
-	gui.BrowserWindowTitle = "OpenKnowledge 服务端部署" // 回退浏览器路径用（尺寸模式下不轮询）
-	gui.BrowserWindowSize = "972,686"
 	return openUI(url, serveErr, stderr)
 }
+
+// browserOpts 是回退浏览器路径（WebView2 不可用时）的窗口形态：
+// 固定尺寸不最大化，标题匹配部署页 <title>。
+var browserOpts = gui.BrowserOptions{WindowTitle: "OpenKnowledge 服务端部署", WindowSize: "972,686"}
 
 // waitServe 回退路径：浏览器打开后驻留 HTTP 服务直至出错或进程被杀。
 func waitServe(serveErr chan error, stderr io.Writer) int {

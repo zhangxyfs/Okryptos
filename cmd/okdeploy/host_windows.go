@@ -221,7 +221,7 @@ func openUI(url string, serveErr chan error, stderr io.Writer) int {
 	)
 	if hwnd == 0 {
 		fmt.Fprintln(stderr, "窗口创建失败，回退浏览器打开")
-		gui.OpenBrowser(url)
+		gui.OpenBrowserOpt(url, browserOpts)
 		return waitServe(serveErr, stderr)
 	}
 
@@ -251,7 +251,7 @@ func openUI(url string, serveErr chan error, stderr io.Writer) int {
 		delete(deployContexts, hwnd)
 		deployContextsMu.Unlock()
 		procDestroyWindow.Call(hwnd)
-		gui.OpenBrowser(url)
+		gui.OpenBrowserOpt(url, browserOpts)
 		return waitServe(serveErr, stderr)
 	}
 	if settings, err := chromium.GetSettings(); err == nil {

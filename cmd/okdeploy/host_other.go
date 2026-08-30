@@ -11,6 +11,6 @@ import (
 )
 
 func openUI(url string, serveErr chan error, _ io.Writer) int {
-	gui.OpenBrowser(url)
+	gui.OpenBrowserOpt(url, browserOpts)
 	return waitServe(serveErr, io.Discard)
 }
