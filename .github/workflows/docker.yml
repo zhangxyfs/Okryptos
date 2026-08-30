@@ -45,7 +45,13 @@ jobs:
       # 手动触发时取 inputs.tag，tag 推送时取 github.ref_name。
       - name: 解析镜像 tag
         id: t
-        run: echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+        run: |
+          t="${{ github.event.inputs.tag || github.ref_name }}"
+          t="${t//[[:space:]]/}"  # 输入框可能带进空格，Docker tag 不允许
+          if [[ ! "$t" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "tag 格式应为 vX.Y.Z，实得: '$t'" >&2; exit 1
+          fi
+          echo "tag=$t" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
