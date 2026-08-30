@@ -40,8 +40,8 @@ func run(stderr *os.File) int {
 	// 若先开浏览器，轮询期间页面无人应答，用户会看到长时间白屏。
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- http.Serve(ln, srv.Handler(webui.WebFS())) }()
-	gui.BrowserWindowTitle = "okdeploy" // 页面 <title> 为 "okdeploy · OpenKnowledge 服务端部署"
-	gui.BrowserWindowSize = "980,700"   // 部署向导是窄表单，固定尺寸比最大化更合适
+	gui.BrowserWindowTitle = "OpenKnowledge 服务端部署" // 页面 <title>（尺寸模式下不轮询，仅兜底语义）
+	gui.BrowserWindowSize = "972,686"                   // 部署向导是窄表单，固定尺寸比最大化更合适
 	gui.OpenBrowser(url)
 	if err := <-serveErr; err != nil {
 		fmt.Fprintln(stderr, "服务退出：", err)
