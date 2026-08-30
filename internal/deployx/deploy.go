@@ -142,7 +142,7 @@ func buildFullTask(s DeploySpec, compose string) Task {
 		{Name: "创建 Gitea 管理员", Run: func(ctx context.Context, e *Env) error {
 			adminPw := NewGiteaAdminToken()[:16]
 			e.Vars["gitea_admin_password"] = adminPw
-			return runStepMasked(ctx, e, "创建 Gitea 管理员",
+			return runStepMaskedOut(ctx, e, "创建 Gitea 管理员",
 				composeCmd(s.Dir, "exec -T gitea gitea admin user list | grep -qw okadmin || "+
 					composeCmd(s.Dir, "exec -T gitea gitea admin user create --admin --username okadmin --password '****' --email okadmin@local --must-change-password=false")),
 				composeCmd(s.Dir, "exec -T gitea gitea admin user list | grep -qw okadmin || "+
@@ -296,6 +296,17 @@ func withSecret(fn func(stdout string)) secretOpt { return fn }
 // runStepMasked 执行命令：日志显示 display（掩码版），真实命令 cmd；
 // 真实命令的 stdout 不进日志（防秘密泄漏），只经 post 回调给调用方。
 func runStepMasked(ctx context.Context, e *Env, step, display, cmd string, post ...secretOpt) error {
+	return runStepMasked0(ctx, e, step, display, cmd, false, post...)
+}
+
+// runStepMaskedOut 同 runStepMasked，但失败时错误附带 stdout 尾。
+// 仅限 stdout 确定无秘密的步骤——Gitea CLI 的日志/错误默认走 stdout，
+// 不带出来失败就是"退出码 1 无输出"的黑盒（管理员创建踩过）。
+func runStepMaskedOut(ctx context.Context, e *Env, step, display, cmd string) error {
+	return runStepMasked0(ctx, e, step, display, cmd, true)
+}
+
+func runStepMasked0(ctx context.Context, e *Env, step, display, cmd string, stdoutOnErr bool, post ...secretOpt) error {
 	ctxT, cancel := context.WithTimeout(ctx, CmdTimeout)
 	defer cancel()
 	e.Hub.Publish(step, "info", "$ "+display)
@@ -314,8 +325,11 @@ func runStepMasked(ctx context.Context, e *Env, step, display, cmd string, post 
 	stdout := strings.Join(out, "\n")
 	if code != 0 {
 		tail := strings.Join(errLines, "; ")
+		if stdoutOnErr && stdout != "" {
+			tail = strings.TrimRight(stdout, "\n") // gitea CLI 错误在 stdout
+		}
 		if tail == "" {
-			tail = "（无 stderr 输出）"
+			tail = "（无输出）"
 		}
 		return fmt.Errorf("退出码 %d：%s", code, tail)
 	}
