@@ -8,8 +8,10 @@ import (
 // ProbeResult 是远端环境探测结果（设计 §3.2）。*Busy 空串 = 端口空闲。
 type ProbeResult struct {
 	Arch          string `json:"arch"`
-	DockerOK      bool   `json:"docker_ok"`
+	DockerCLI     bool   `json:"docker_cli"`    // docker 命令存在（command -v）
+	DockerOK      bool   `json:"docker_ok"`     // 当前用户能连 daemon（可直接部署）
 	DockerVersion string `json:"docker_version"`
+	DockerDetail  string `json:"docker_detail"` // 不可用时的真实 stderr 摘要（权限/未运行/未安装）
 	ComposeOK     bool   `json:"compose_ok"`
 	PortGiteaBusy string `json:"port_gitea_busy"`
 	PortOKBusy    string `json:"port_ok_busy"`
@@ -21,16 +23,27 @@ type ProbeResult struct {
 
 // runQuiet 探测专用：直接执行，不进 LogHub，不判非零退出。
 func runQuiet(ctx context.Context, ex Executor, cmd string) (string, int) {
-	var out []string
-	code, err := ex.Run(ctx, cmd, nil, func(stream, line string) {
+	out, _, code := runQuiet2(ctx, ex, cmd)
+	return out, code
+}
+
+// runQuiet2 同 runQuiet，另带回 stderr 尾行（诊断展示用）。
+func runQuiet2(ctx context.Context, ex Executor, cmd string) (stdout, stderrTail string, code int) {
+	var out, errLines []string
+	c, err := ex.Run(ctx, cmd, nil, func(stream, line string) {
 		if stream == "stdout" {
 			out = append(out, line)
+		} else {
+			errLines = append(errLines, line)
+			if len(errLines) > 3 {
+				errLines = errLines[1:]
+			}
 		}
 	})
 	if err != nil {
-		return "", -1
+		return "", "", -1
 	}
-	return strings.Join(out, "\n"), code
+	return strings.Join(out, "\n"), strings.Join(errLines, "\n"), c
 }
 
 // Probe 探测远端部署环境。所有命令容错：单条失败不致命。
@@ -40,11 +53,20 @@ func Probe(ctx context.Context, ex Executor) (*ProbeResult, error) {
 	out, _ := runQuiet(ctx, ex, "uname -m")
 	r.Arch = strings.TrimSpace(out)
 
-	out, code := runQuiet(ctx, ex, "docker version --format '{{.Server.Version}}'")
-	r.DockerOK = code == 0
-	r.DockerVersion = strings.TrimSpace(out)
+	// Docker 分两档：CLI 存在 ≠ 当前用户能连 daemon（NAS 常见：SSH 用户不在
+	// docker 组，daemon socket permission denied）。真实 stderr 摘要带回前端。
+	_, cliCode := runQuiet(ctx, ex, "command -v docker")
+	r.DockerCLI = cliCode == 0
+	if r.DockerCLI {
+		ver, tail, code := runQuiet2(ctx, ex, "docker version --format '{{.Server.Version}}'")
+		r.DockerVersion = strings.TrimSpace(ver)
+		r.DockerOK = code == 0
+		r.DockerDetail = strings.TrimSpace(tail)
+	} else {
+		r.DockerDetail = "docker 命令不存在（PATH 中找不到）"
+	}
 
-	_, code = runQuiet(ctx, ex, "docker compose version --short")
+	_, code := runQuiet(ctx, ex, "docker compose version --short")
 	r.ComposeOK = code == 0
 
 	// 端口占用：ss 为主，macOS/极简系统回退 netstat。

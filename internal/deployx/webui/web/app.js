@@ -363,7 +363,8 @@ function renderProbeResult(slot, p) {
   const items = el("div");
   // Docker / Compose
   if (p.docker_ok) items.append(probeItem("ok", "✓", "Docker " + (p.docker_version || ""), ""));
-  else items.append(probeItem("err", "✗", "未检测到 Docker", p.docker_version || "docker: command not found"));
+  else if (p.docker_cli) items.append(probeItem("err", "✗", "Docker 已安装但当前用户无法访问", p.docker_detail || ""));
+  else items.append(probeItem("err", "✗", "未检测到 Docker", p.docker_detail || "docker 命令不存在"));
   if (p.compose_ok) items.append(probeItem("ok", "✓", "Compose 插件可用", ""));
   else items.append(probeItem("err", "✗", "未检测到 compose 插件", "docker compose 插件缺失"));
   // 端口：已有部署时用 info 中性提示，否则 warn 并预告自动避让
@@ -399,24 +400,34 @@ function renderProbeResult(slot, p) {
     slot.append(bottom);
     return;
   }
-  // 无 Docker / compose：红色终止块 + 安装指引
+  // 无 Docker / compose：红色终止块 + 指引（按真实原因分流：装 Docker / 加 docker 组）
   if (!p.docker_ok || !p.compose_ok) {
     slot.append(items);
     const block = el("div", "pcard card-danger");
     block.style.borderWidth = "2px";
+    const permDenied = p.docker_cli && !p.docker_ok && (p.docker_detail || "").toLowerCase().indexOf("permission denied") >= 0;
     const h = el("h3", "", "✗ 无法继续部署");
     h.style.color = "var(--danger)";
-    const d = el("div", "pdesc", "okdeploy 需要 NAS 已安装 Docker 与 compose 插件，请先安装后重新探测：");
+    const d = el("div", "pdesc");
     d.style.color = "var(--danger)";
     const ul = el("ul", "small");
     ul.style.cssText = "margin:0;padding-left:20px;line-height:2";
-    const li1 = el("li");
-    li1.append(el("b", "", "群晖 Synology"), document.createTextNode("：套件中心安装「Container Manager」（DSM 7.2+）"));
-    const li2 = el("li");
-    li2.append(el("b", "", "威联通 QNAP"), document.createTextNode("：App Center 安装「Container Station」"));
-    const li3 = el("li");
-    li3.append(el("b", "", "其他 Linux NAS"), document.createTextNode("：安装 Docker Engine 24+ 及 docker compose 插件"));
-    ul.append(li1, li2, li3);
+    if (permDenied) {
+      d.textContent = "Docker 已安装，但 SSH 用户无权访问 Docker daemon（不在 docker 组）。在 NAS 上执行以下命令后重新探测：";
+      const li1 = el("li", "mono", "sudo usermod -aG docker " + (S.connStr || "").split("@")[0]);
+      const li2 = el("li");
+      li2.append(document.createTextNode("然后**重新登录 SSH**（或重启 NAS 终端会话）使组生效，再点「重新探测」"));
+      ul.append(li1, li2);
+    } else {
+      d.textContent = "okdeploy 需要 NAS 已安装 Docker 与 compose 插件，请先安装后重新探测：";
+      const li1 = el("li");
+      li1.append(el("b", "", "群晖 Synology"), document.createTextNode("：套件中心安装「Container Manager」（DSM 7.2+）"));
+      const li2 = el("li");
+      li2.append(el("b", "", "威联通 QNAP"), document.createTextNode("：App Center 安装「Container Station」"));
+      const li3 = el("li");
+      li3.append(el("b", "", "其他 Linux NAS"), document.createTextNode("：安装 Docker Engine 24+ 及 docker compose 插件"));
+      ul.append(li1, li2, li3);
+    }
     block.append(h, d, ul);
     slot.append(block);
     return;

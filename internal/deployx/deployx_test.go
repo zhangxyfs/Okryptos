@@ -13,6 +13,7 @@ type fakeStep struct {
 	match  string // 命令须包含的片段
 	code   int
 	stdout string
+	stderr string // 非空则以 stderr 流回调
 	err    error
 }
 
@@ -37,6 +38,11 @@ func (f *fakeExec) Run(_ context.Context, cmd string, stdin io.Reader, onLine fu
 	for _, ln := range strings.Split(st.stdout, "\n") {
 		if ln != "" && onLine != nil {
 			onLine("stdout", ln)
+		}
+	}
+	for _, ln := range strings.Split(st.stderr, "\n") {
+		if ln != "" && onLine != nil {
+			onLine("stderr", ln)
 		}
 	}
 	return st.code, st.err
