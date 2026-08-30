@@ -78,3 +78,29 @@ func TestUninstallTaskDeleteData(t *testing.T) {
 	}
 	fx.Done()
 }
+
+// 非法部署目录：BuildUpgradeTask 第一步即失败，不执行任何远程命令。
+func TestUpgradeTaskRejectsBadDir(t *testing.T) {
+	fx := &fakeExec{t: t}
+	task := BuildUpgradeTask("/a;id", "v9.9.9")
+	err := task.Execute(context.Background(), &Env{Ex: fx, Hub: NewLogHub(), Vars: map[string]string{}})
+	if err == nil {
+		t.Fatal("非法目录应报错")
+	}
+	if len(fx.Cmds) != 0 {
+		t.Fatalf("不应执行任何远程命令：%v", fx.Cmds)
+	}
+}
+
+// 非法部署目录：BuildUninstallTask 第一步即失败，不执行任何远程命令。
+func TestUninstallTaskRejectsBadDir(t *testing.T) {
+	fx := &fakeExec{t: t}
+	task := BuildUninstallTask("/a;id", true)
+	err := task.Execute(context.Background(), &Env{Ex: fx, Hub: NewLogHub(), Vars: map[string]string{}})
+	if err == nil {
+		t.Fatal("非法目录应报错")
+	}
+	if len(fx.Cmds) != 0 {
+		t.Fatalf("不应执行任何远程命令：%v", fx.Cmds)
+	}
+}

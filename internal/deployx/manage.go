@@ -50,9 +50,12 @@ func newReadOKPortStep(dir string) Step {
 	return Step{Name: "读取服务端口", Run: func(ctx context.Context, e *Env) error {
 		out, err := runCmd(ctx, e, "读取服务端口",
 			"grep '^OKSERVER_PORT=' "+dir+"/.env | cut -d= -f2")
-		port := strings.TrimSpace(out)
-		if err != nil || port == "" {
+		if err != nil {
 			return fmt.Errorf("读不到 OKSERVER_PORT：%v", err)
+		}
+		port := strings.TrimSpace(out)
+		if port == "" {
+			return fmt.Errorf("读不到 OKSERVER_PORT（.env 缺该键）")
 		}
 		e.Vars["ok_port"] = port
 		return nil
@@ -76,6 +79,9 @@ var tagRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 // BuildUpgradeTask 升级：改 .env 镜像 tag → pull → up -d → 健康检查（数据卷不动）。
 func BuildUpgradeTask(dir, newTag string) Task {
 	return Task{Name: "升级到 " + newTag, Steps: []Step{
+		{Name: "校验部署目录", Run: func(_ context.Context, _ *Env) error {
+			return ValidateDir(dir)
+		}},
 		{Name: "校验版本 tag", Run: func(_ context.Context, _ *Env) error {
 			if !tagRe.MatchString(newTag) {
 				return fmt.Errorf("镜像 tag 含非法字符：%q（允许字母数字、._-）", newTag)
@@ -103,9 +109,11 @@ func BuildUpgradeTask(dir, newTag string) Task {
 }
 
 // BuildUninstallTask 卸载：down --rmi all；deleteData=true 才删部署目录（默认保留）。
-// dir 由 API 层先过 ValidateDir。
 func BuildUninstallTask(dir string, deleteData bool) Task {
 	steps := []Step{
+		{Name: "校验部署目录", Run: func(_ context.Context, _ *Env) error {
+			return ValidateDir(dir)
+		}},
 		{Name: "停止并删除容器镜像", Run: func(ctx context.Context, e *Env) error {
 			ctxT, cancel := context.WithTimeout(ctx, 5*time.Minute)
 			defer cancel()
