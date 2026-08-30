@@ -14,8 +14,9 @@ import (
 //     stdout 绝不进日志，只经 post 回调给调用方。
 // 两个都保留，按"秘密在命令行还是 stdout"选用。
 
-// PullTimeout 是镜像拉取与健康检查等待的超时（NAS 网络可能很慢）。
-const PullTimeout = 30 * time.Minute
+// PullTimeout 是镜像拉取与健康检查等待的超时（NAS 网络可能很慢；
+// 拉取带 3 次重试 + GHCR 回退，完成层会续传，总时长给足 60 分钟）。
+const PullTimeout = 60 * time.Minute
 
 // composeCmd 组装 docker compose 调用（固定 env-file 与文件名）。
 // dir 必须已过 ValidateDir 白名单校验——原样不加引号，~/$HOME 才能被远端 sh 展开。
@@ -50,11 +51,23 @@ func waitHTTP(url string) string {
 		`sleep 2; done; [ "$ok" = 1 ]`, shellQuote(url), shellQuote(url))
 }
 
+// pullRetry 把一条拉取命令包成最多 3 次的重试循环（docker pull 会续传已完成层，
+// 重试不从零开始）。循环里最后一次 sleep 的退出码会掩盖失败，所以用 ok 标记收尾。
+func pullRetry(pullCmd string) string {
+	return "ok=0; for i in 1 2 3; do if " + pullCmd + "; then ok=1; break; fi; " +
+		`echo "第 $i 次拉取失败，5s 后重试"; sleep 5; done; [ "$ok" = 1 ]`
+}
+
 // okserverImageCmd 生成 okserver 镜像获取命令：本地已有（docker load 的离线包）
-// 直接用，没有才从 registry pull。tag 须先过 tagRe 白名单（BuildDeployTask 已校验）。
+// 直接用；没有则 Docker Hub 重试拉取，仍失败回退 GHCR 源并 tag 回主名
+// （国内 NAS 直连 Docker Hub 常被限速到拉不动，GHCR 通常反而通）。
+// tag 须先过 tagRe 白名单（BuildDeployTask 已校验）。
 func okserverImageCmd(tag string) string {
 	img := "z7dream/openknowledge-okserver:" + tag
-	return "docker image inspect " + img + " >/dev/null 2>&1 || docker pull " + img
+	ghcr := "ghcr.io/zhangxyfs/openknowledge/okserver:" + tag
+	return "docker image inspect " + img + " >/dev/null 2>&1 || " +
+		pullRetry("docker pull "+img) + " || " +
+		"{ docker pull " + ghcr + " && docker tag " + ghcr + " " + img + "; }"
 }
 
 // BuildDeployTask 构建部署任务（full 全新双容器 / external 接入已有 Gitea）。
@@ -111,9 +124,10 @@ func buildFullTask(s DeploySpec, compose string) Task {
 		{Name: "拉取镜像", Run: func(ctx context.Context, e *Env) error {
 			ctxT, cancel := context.WithTimeout(ctx, PullTimeout)
 			defer cancel()
-			// gitea 必拉（registry）；okserver 镜像优先用本地已 docker load 的
-			//（registry 未发布前的离线路径），本地没有才 pull
-			_, err := runCmd(ctxT, e, "拉取镜像", composeCmd(s.Dir, "pull gitea")+" && { "+okserverImageCmd(s.Tag)+"; }")
+			// gitea 必拉（registry，加重试：NAS 直连 Docker Hub 慢/抖）；
+			// okserver 镜像优先用本地已 docker load 的（registry 未发布前的
+			// 离线路径），本地没有才 pull（Docker Hub 重试 + GHCR 回退）
+			_, err := runCmd(ctxT, e, "拉取镜像", pullRetry(composeCmd(s.Dir, "pull gitea"))+" && { "+okserverImageCmd(s.Tag)+"; }")
 			return err
 		}},
 		{Name: "启动 Gitea", Run: func(ctx context.Context, e *Env) error {
