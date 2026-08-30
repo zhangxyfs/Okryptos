@@ -36,7 +36,8 @@ okserver 服务端目前只有手工部署路径（`server/nas/`：cp .env、doc
 |---|---|
 | `cmd/okdeploy/` | main：起本地 HTTP 服务、embed 前端、开浏览器 |
 | `internal/deployx/` | 核心逻辑（纯 Go，可单测） |
-| `server/deploy/` | 前端静态资源（web/）、README、发布脚本说明 |
+| `internal/deployx/webui/` | 前端静态资源（go:embed 要求被嵌文件与 Go 源同包，server/ 下无 Go 包可嵌，故归此处） |
+| `server/deploy/` | README、发布脚本说明 |
 
 `internal/deployx` 模块划分（各自独立可测）：
 
@@ -69,7 +70,7 @@ SSH 地址 / 端口（默认 22）/ 用户名 / 密码或私钥文件路径。"�
 
 ### 3.3 部署页
 
-- 全新部署：填远端目录（默认 `/opt/openknowledge`，可浏览远端目录选择）、Gitea/okserver 端口、镜像 tag（默认与部署器自身版本对齐）。治理四件套（关注册/建仓限额 0/默认 private/ROOT_URL）自动写进 compose 环境变量（与 `server/nas/docker-compose.yml` 一致）。
+- 全新部署：填远端目录（默认 `~/openknowledge`，可浏览远端目录选择）、Gitea/okserver 端口、镜像 tag（默认与部署器自身版本对齐）。治理四件套（关注册/建仓限额 0/默认 private/ROOT_URL）自动写进 compose 环境变量（与 `server/nas/docker-compose.yml` 一致）。
 - 接入已有 Gitea：只装 okserver 单容器；填 Gitea URL + 管理员 token。部署前做**兼容性冒烟**：建测试仓 → token 当用户名 Basic 认证拉取 → 删仓；失败则明确提示 Gitea 版本风险（依赖行为见 `internal/oksrv/gitea.go` 钉死的语义）。治理四件套无法远程改外部 Gitea 的 app.ini → 出**手动配置清单**让用户逐项确认后才可继续。
 - 执行：实时日志滚动（SSE）；成功后**醒目显示 root 初始密码**（读后删文件），附"下一步：客户端 OkManager 服务器页接入"指引。
 

@@ -16,6 +16,11 @@ GOOS=linux GOARCH=amd64 go build \
 GOOS=linux GOARCH=amd64 go build \
   -ldflags "-s -w -X openknowledge/internal/version.Version=$VERSION" \
   -o "$STAGE/okd" ./cmd/okd
+# okdeploy 一键部署器：独立 artifact（dist/deploy/），不进 $STAGE（deb/tar 客户端包不含）
+mkdir -p dist/deploy
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+  -ldflags "-s -w -X openknowledge/internal/version.Version=$VERSION" \
+  -o dist/deploy/okdeploy-linux-amd64 ./cmd/okdeploy
 # Windows 宿主落盘为 0644，须钉权限位；Git Bash 挂载 noacl 时本行是静默 no-op，
 # 此时由下方 tar --mode 与 nfpm file_info 兜底（Linux/macOS 宿主本行生效）
 chmod 0755 "$STAGE/ok" "$STAGE/okd"

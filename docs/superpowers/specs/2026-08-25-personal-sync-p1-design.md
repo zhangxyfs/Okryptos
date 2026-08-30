@@ -192,6 +192,8 @@ services:
 - **首选 Docker**：群晖 Container Manager / 威联通 Container Station / 绿联极空间 / 任意 Linux 主机；
 - **备选裸二进制**：无 Docker 的老 NAS 或极简环境——okserver 与 Gitea 都是单二进制 + 数据目录（systemd unit 或直接进程守护），部署文档给出对等步骤。功能无差异，Docker 只是省心。
 
+**图形化一键部署**：除下述手工路径外，另有独立程序 okdeploy（`cmd/okdeploy` + `internal/deployx`，设计见 `docs/superpowers/specs/2026-08-28-okdeploy-design.md`）——双击启动、浏览器向导、SSH 完成部署/升级/备份/恢复/卸载，使用文档 `server/deploy/README.md`。它是独立 release artifact（`dist/deploy/`），**不进客户端安装包**。
+
 **逐步部署流程**（GUI 部署指引卡与 `server/nas/README.md` 同内容）：
 
 1. 建持久化目录 `./gitea-data`、`./okserver-data`；

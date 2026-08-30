@@ -37,9 +37,9 @@ def app_version(test=False):
     return v
 
 
-def run(cmd, cwd=ROOT):
+def run(cmd, cwd=ROOT, env=None):
     print("+", " ".join(str(c) for c in cmd))
-    subprocess.run([str(c) for c in cmd], check=True, cwd=cwd)
+    subprocess.run([str(c) for c in cmd], check=True, cwd=cwd, env=env)
 
 
 def prepare_runtime():
@@ -88,7 +88,7 @@ def main():
             sys.exit("未找到 go-winres，无法生成 exe 图标/版本资源\n"
                      "  安装: go install github.com/tc-hib/go-winres@latest\n"
                      "  确需跳过: --skip-winres")
-        for pkg in ("ok", "okd", "okmanager"):
+        for pkg in ("ok", "okd", "okmanager", "okdeploy"):
             run([winres, "make", "--in", "winres.json"], cwd=ROOT / "cmd" / pkg)
 
     # 2. 编译 dist/ 三 exe + 拷贝 web/（注入版本号，与 build-dist.sh 一致）
@@ -97,6 +97,13 @@ def main():
     run(["go", "build", "-ldflags", ldflags, "-o", "dist/ok.exe", "./cmd/ok"])
     run(["go", "build", "-ldflags", ldflags, "-o", "dist/okd.exe", "./cmd/okd"])
     run(["go", "build", "-ldflags", ldflags, "-o", "dist/OkManager.exe", "./cmd/okmanager"])
+    # okdeploy 一键部署器：独立 artifact（dist/deploy/），不进客户端安装包；
+    # linux 交叉用独立 ldflags（去掉 -H windowsgui，那是 Windows 子系统参数）
+    (ROOT / "dist" / "deploy").mkdir(exist_ok=True)
+    run(["go", "build", "-ldflags", ldflags, "-o", "dist/deploy/okdeploy-windows-amd64.exe", "./cmd/okdeploy"])
+    linux_ldflags = f"-s -w -X openknowledge/internal/version.Version={version}"
+    env = {**os.environ, "GOOS": "linux", "GOARCH": "amd64", "CGO_ENABLED": "0"}
+    run(["go", "build", "-ldflags", linux_ldflags, "-o", "dist/deploy/okdeploy-linux-amd64", "./cmd/okdeploy"], env=env)
     web_dist = ROOT / "dist" / "web"
     if web_dist.exists():
         shutil.rmtree(web_dist)

@@ -1,6 +1,7 @@
 # OpenKnowledge 服务端 NAS 部署（okserver + Gitea）
 
 本文档是 OpenKnowledge 服务端部署/运维的**单一事实源**，落地设计文档 §9.5（`docs/superpowers/specs/2026-08-25-personal-sync-p1-design.md`）全文；GUI 部署指引卡与本文同源维护。
+图形化一键部署见 `server/deploy/`（okdeploy），手工路径仍由本文档覆盖。
 
 服务端 = 两个进程：
 

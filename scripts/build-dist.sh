@@ -17,12 +17,15 @@ if [ -z "$WINRES" ]; then
   echo "  安装: go install github.com/tc-hib/go-winres@latest" >&2
   exit 1
 fi
-for pkg in ok okd okmanager; do
+for pkg in ok okd okmanager okdeploy; do
   (cd "cmd/$pkg" && "$WINRES" make --in winres.json) || { echo "错误：go-winres 生成 cmd/$pkg 版本资源失败" >&2; exit 1; }
 done
 go build -ldflags "-s -w -H windowsgui -X openknowledge/internal/version.Version=$VERSION" -o dist/ok.exe ./cmd/ok
 go build -ldflags "-s -w -H windowsgui -X openknowledge/internal/version.Version=$VERSION" -o dist/okd.exe ./cmd/okd
 go build -ldflags "-s -w -H windowsgui -X openknowledge/internal/version.Version=$VERSION" -o dist/OkManager.exe ./cmd/okmanager
+# okdeploy 一键部署器：独立 artifact（dist/deploy/），不进安装包（iss 不打 dist/deploy）
+mkdir -p dist/deploy
+go build -ldflags "-s -w -H windowsgui -X openknowledge/internal/version.Version=$VERSION" -o dist/deploy/okdeploy-windows-amd64.exe ./cmd/okdeploy
 rm -rf dist/web dist/changelogs
 cp -r web dist/web
 cp -r docs/changelogs dist/changelogs
