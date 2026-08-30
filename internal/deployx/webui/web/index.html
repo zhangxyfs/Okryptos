@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>okdeploy · OpenKnowledge 服务端部署</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/style.css">
+<script>
+// token 经 URL fragment 一次性注入（fragment 不发服务器、不进 Referer）；读入后转存
+// sessionStorage 并从地址栏抹除——hash 路由会改写 location.hash，没有 sessionStorage
+// 兜底的话，切页后再刷新 token 就丢了（同主 GUI web/index.html 的做法）。
+(function () {
+  var m = /[#&]token=([0-9a-f]+)/.exec(location.hash);
+  if (m) {
+    try { sessionStorage.setItem("okdeploy_token", m[1]); } catch (e) {}
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+  var t = "";
+  try { t = sessionStorage.getItem("okdeploy_token") || ""; } catch (e) {}
+  window.OK_TOKEN = t;
+})();
+</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">OK</span>okdeploy<span class="sub">· 服务端部署</span></div>
+  <div class="sp"></div>
+  <span id="conn-badge" class="badge off"><span class="dot" style="background:var(--gray)"></span>未连接</span>
+</header>
+<main id="app"></main>
+<script src="/app.js"></script>
+</body>
+</html>
