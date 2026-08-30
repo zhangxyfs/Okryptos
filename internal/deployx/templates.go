@@ -55,6 +55,8 @@ func RenderEnv(s DeploySpec) string {
 // NewGiteaAdminToken 生成 40 字符 hex token（full 模式建仓后注入 .env）。
 func NewGiteaAdminToken() string {
 	buf := make([]byte, 20)
-	_, _ = rand.Read(buf)
+	if _, err := rand.Read(buf); err != nil {
+		panic(err) // crypto/rand 失败是不可恢复的系统故障（同 internal/oksrv/auth.go 惯例）
+	}
 	return hex.EncodeToString(buf)
 }

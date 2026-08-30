@@ -3,6 +3,7 @@ package deployx
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -135,5 +136,37 @@ func TestResetRootRequiresConfirmWord(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("确认词错误应 400，得 %d", rec.Code)
+	}
+}
+
+// 恢复缺/错确认词 → 400（照 TestResetRootRequiresConfirmWord 模式，multipart 表单）。
+func TestRestoreRequiresConfirmWord(t *testing.T) {
+	s := testServer()
+	s.mu.Lock()
+	s.ex = &fakeExec{t: t}
+	s.mu.Unlock()
+	h := s.Handler(fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<html>")}})
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	_ = mw.WriteField("dir", "/d")
+	_ = mw.WriteField("confirm", "yes")
+	fw, err := mw.CreateFormFile("file", "b.tar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = fw.Write([]byte("x"))
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/api/restore", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("X-Ok-Token", "testtok")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("确认词错误应 400，得 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "RESTORE") {
+		t.Fatalf("错误文案应提示 RESTORE，得 %s", rec.Body.String())
 	}
 }

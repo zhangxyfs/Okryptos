@@ -1,6 +1,6 @@
 # okdeploy 一键部署器设计（P1-D）
 
-> 日期：2026-08-28　状态：设计已批准，待实施
+> 日期：2026-08-28　状态：已实施（P1-D）
 > 上游：`2026-08-25-personal-sync-p1-design.md`（多端同步 P1）、`server/nas/README.md`（手工部署路径）
 
 ## 1. 背景与目标
@@ -70,8 +70,8 @@ SSH 地址 / 端口（默认 22）/ 用户名 / 密码或私钥文件路径。"�
 
 ### 3.3 部署页
 
-- 全新部署：填远端目录（默认 `~/openknowledge`，可浏览远端目录选择）、Gitea/okserver 端口、镜像 tag（默认与部署器自身版本对齐）。治理四件套（关注册/建仓限额 0/默认 private/ROOT_URL）自动写进 compose 环境变量（与 `server/nas/docker-compose.yml` 一致）。
-- 接入已有 Gitea：只装 okserver 单容器；填 Gitea URL + 管理员 token。部署前做**兼容性冒烟**：建测试仓 → token 当用户名 Basic 认证拉取 → 删仓；失败则明确提示 Gitea 版本风险（依赖行为见 `internal/oksrv/gitea.go` 钉死的语义）。治理四件套无法远程改外部 Gitea 的 app.ini → 出**手动配置清单**让用户逐项确认后才可继续。
+- 全新部署：填远端目录（默认 `~/openknowledge`，可浏览远端目录选择）、Gitea/okserver 端口、镜像 tag（v1 前端默认 latest 自由输入；GHCR 清单候选留 v1.1）。治理四件套（关注册/建仓限额 0/默认 private/ROOT_URL）自动写进 compose 环境变量（与 `server/nas/docker-compose.yml` 一致）。
+- 接入已有 Gitea：只装 okserver 单容器；填 Gitea URL + 管理员 token。部署前做**兼容性冒烟**：两条 curl 验证（① admin token 有效 + API 可达；② token 当用户名 Basic 认证）；失败则明确提示 Gitea 版本风险（依赖行为见 `internal/oksrv/gitea.go` 钉死的语义）。不验证 token scope（read-only token 可过冒烟、建仓时才暴露），v1.1 补强为建仓冒烟。治理四件套无法远程改外部 Gitea 的 app.ini → 出**手动配置清单**让用户逐项确认后才可继续。
 - 执行：实时日志滚动（SSE）；成功后**醒目显示 root 初始密码**（读后删文件），附"下一步：客户端 OkManager 服务器页接入"指引。
 
 ### 3.4 管理模式（已部署设备再连时进入）
@@ -81,7 +81,7 @@ SSH 地址 / 端口（默认 22）/ 用户名 / 密码或私钥文件路径。"�
 - **查看日志**：拉取两容器 `docker compose logs --tail=N --no-color` 显示在日志面板（排障刚需，同步快查询）。
 - **重置 root 密码**：root 初始密码只显示一次，丢失需要恢复入口。依赖 okserver 新增 `reset-root` 子命令（重生成 32 位随机密码、bcrypt 入库、重写 INITIAL_ROOT_PASSWORD）；部署器执行 `docker compose exec -T okserver okserver reset-root` 后读密码、完成页语义显示一次。确认词 `RESET`。
 - **备份**：远端执行 `server/nas/backup/backup.sh` 逻辑打包数据卷 → stdout tar 流式下载到本地目录，进度条。
-- **恢复**：选本地备份包 → 上传 → 停容器 → 解压 → 起 → 健康检查。覆盖性操作，二次确认。
+- **恢复**：选本地备份包 → 上传 → 停容器 → 解压 → 起 → 健康检查。覆盖性操作，确认词 `RESTORE`（与卸载 DELETE/重置 RESET 并列）。
 - **卸载**：停删容器+镜像；数据目录**默认保留**，显式勾选才删除；二次确认。
 
 破坏性操作（恢复覆盖、卸载删数据）需输入确认词；任何步骤失败即停，日志可下载。
@@ -103,7 +103,7 @@ SSH 地址 / 端口（默认 22）/ 用户名 / 密码或私钥文件路径。"�
 - `scripts/build.py` 增加 okdeploy 目标：纯 Go 交叉编译出 `okdeploy-windows-amd64.exe` / `okdeploy-linux-amd64`（前端 embed）。
 - release 流水线挂两个**独立** artifact；**iss/nfpm 客户端安装包不含 okdeploy**（与 okserver 同纪律），`installer/` 无需改动。
 - 版本号与 ok/okd/okserver 对齐（sync-version 纪律，bump 时同步）。
-- 部署页镜像 tag 可选值来自 GHCR 发布清单，默认与部署器自身版本一致。
+- 部署页镜像 tag：v1 前端默认 latest 自由输入；GHCR 清单候选留 v1.1。
 
 ## 7. 文档落点
 

@@ -132,3 +132,28 @@ func TestDeployTaskStopsOnPullFailure(t *testing.T) {
 	}
 	fx.Done()
 }
+
+// generate-access-token 返回空 stdout → 任务失败（防止空 token 写进 .env 的假成功部署）。
+func TestDeployTaskEmptyTokenFails(t *testing.T) {
+	fx := &fakeExec{t: t, steps: []fakeStep{
+		{match: "mkdir -p", code: 0},
+		{match: "chown -R", code: 0},
+		{match: "cat > ", code: 0},         // 上传 compose.yaml
+		{match: "docker compose", code: 0}, // pull
+		{match: "up -d gitea", code: 0},
+		{match: "api/v1/version", code: 0, stdout: "{\"version\":\"1.22.0\"}"},
+		{match: "admin user", code: 0},
+		{match: "generate-access-token", code: 0, stdout: ""}, // 无输出
+	}}
+	spec := DeploySpec{Mode: "full", Dir: "/home/u/openknowledge", GiteaPort: 3000, OKPort: 3100, Tag: "v9.9.9", RootURL: "http://nas:3000/"}
+	task, err := BuildDeployTask(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &Env{Ex: fx, Hub: NewLogHub(), Vars: map[string]string{}}
+	err = task.Execute(context.Background(), e)
+	if err == nil || !strings.Contains(err.Error(), "Gitea token 生成为空") {
+		t.Fatalf("err = %v", err)
+	}
+	fx.Done()
+}

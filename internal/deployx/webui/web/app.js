@@ -1,5 +1,5 @@
 // okdeploy 前端：hash 路由 + SSE 日志。token 经 #token= fragment 进入（同 OkManager 模式）。
-// 页面标记结构、文案、CSS 类名以 docs/prototypes/prototype-okdeploy-final.html 为准。
+// 视觉事实源：docs/prototypes/prototype-okdeploy-final.html（gitignored，本地评审产物）
 "use strict";
 
 async function api(path, opts = {}) {
@@ -760,10 +760,15 @@ function pageManage(content) {
   fileI.style.display = "none";
   const pickBtn = el("button", "btn", "选择备份文件…");
   const fileName = el("span", "mono small muted", "（未选择）");
+  const rtI = pinput("", "", "180px");
+  rtI.placeholder = "输入 RESTORE 确认";
   pickBtn.onclick = () => fileI.click();
-  fileI.onchange = () => { fileName.textContent = fileI.files.length ? fileI.files[0].name : "（未选择）"; rtBtn.disabled = !fileI.files.length; };
-  rtRow.append(fileI, pickBtn, fileName);
-  const rtWarn = el("div", "fb-err", "⚠ 恢复将覆盖服务器现有数据，操作前会自动做一份快照");
+  // 按钮需同时满足：已选文件 + 确认词 RESTORE（照卸载卡 DELETE 模式）
+  const rtCheck = () => { rtBtn.disabled = !(fileI.files.length && rtI.value === "RESTORE"); };
+  fileI.onchange = () => { fileName.textContent = fileI.files.length ? fileI.files[0].name : "（未选择）"; rtCheck(); };
+  rtI.oninput = rtCheck;
+  rtRow.append(fileI, pickBtn, fileName, rtI);
+  const rtWarn = el("div", "fb-err", "⚠ 恢复将删除并覆盖服务器现有数据，不可撤销。建议先执行备份。");
   rtWarn.style.margin = "2px 0 8px";
   const rtBtn = el("button", "btn btn-danger", "开始恢复");
   rtBtn.disabled = true;
@@ -893,6 +898,7 @@ function pageManage(content) {
     const fd = new FormData();
     fd.append("file", fileI.files[0]);
     fd.append("dir", S.deployDir);
+    fd.append("confirm", rtI.value);
     try {
       // multipart 不能走 api() 的 JSON 通道，原生 fetch + X-Ok-Token 头
       const r = await fetch("/api/restore", { method: "POST", headers: { "X-Ok-Token": window.OK_TOKEN }, body: fd });

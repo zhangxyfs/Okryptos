@@ -113,14 +113,21 @@ func buildFullTask(s DeploySpec, compose string) Task {
 					composeCmd(s.Dir, "exec -T gitea gitea admin user create --admin --username okadmin --password "+shellQuote(adminPw)+" --email okadmin@local --must-change-password=false")))
 		}},
 		{Name: "生成 Gitea token", Run: func(ctx context.Context, e *Env) error {
-			return runStepMasked(ctx, e, "生成 Gitea token",
+			if err := runStepMasked(ctx, e, "生成 Gitea token",
 				composeCmd(s.Dir, "exec -T gitea gitea admin user generate-access-token --username okadmin --token-name okserver --scopes all --raw"),
 				composeCmd(s.Dir, "exec -T gitea gitea admin user generate-access-token --username okadmin --token-name okserver --scopes all --raw"),
 				withSecret(func(out string) {
 					// token 在 stdout 最后一行
 					lines := strings.Split(strings.TrimSpace(out), "\n")
 					e.Vars["admin_token"] = strings.TrimSpace(lines[len(lines)-1])
-				}))
+				})); err != nil {
+				return err
+			}
+			// 空 token 不得进入 .env，否则假成功部署后 okserver 必然 401
+			if e.Vars["admin_token"] == "" {
+				return fmt.Errorf("Gitea token 生成为空（generate-access-token 无输出）")
+			}
+			return nil
 		}},
 		{Name: "写入 .env", Run: func(ctx context.Context, e *Env) error {
 			s.AdminToken = e.Vars["admin_token"]

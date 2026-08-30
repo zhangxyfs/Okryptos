@@ -379,11 +379,22 @@ func (s *Server) apiUninstall(w http.ResponseWriter, r *http.Request) {
 	s.startTask(w, BuildUninstallTask(req.Dir, req.DeleteData))
 }
 
+// apiRestore 恢复备份（确认词 RESTORE，与卸载 DELETE/重置 RESET 同级）。
+// 校验顺序：确认词 → dir → 读文件，避免为大文件白付读取代价（台账 #19）。
 func (s *Server) apiRestore(w http.ResponseWriter, r *http.Request) {
 	if s.session(w) == nil {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<30) // 1GB 上限
+	if r.FormValue("confirm") != "RESTORE" {
+		writeErr(w, http.StatusBadRequest, "请输入 RESTORE 确认恢复")
+		return
+	}
+	dir := r.FormValue("dir")
+	if err := ValidateDir(dir); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	file, _, err := r.FormFile("file")
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "缺备份文件（file 字段，≤1GB）")
@@ -393,11 +404,6 @@ func (s *Server) apiRestore(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(file)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "读取备份文件失败："+err.Error())
-		return
-	}
-	dir := r.FormValue("dir")
-	if err := ValidateDir(dir); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	s.startTask(w, BuildRestoreTask(dir, data))
