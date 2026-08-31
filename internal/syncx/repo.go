@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Repo 是一个项目数据目录对应的 git 仓视图。
@@ -14,10 +15,40 @@ type Repo struct {
 // Open 返回 dir 的仓视图（不校验是否为仓，校验用 IsRepo）。
 func Open(dir string) *Repo { return &Repo{Dir: dir} }
 
-// IsRepo 报告 dir 是否已是 git 仓。
-func (r *Repo) IsRepo() bool {
-	_, err := execGit(r.Dir, localTimeout, "rev-parse", "--is-inside-work-tree")
-	return err == nil
+// IsRepo 报告 dir 是否已是 git 仓。纯文件系统判断（.git 目录或 worktree gitfile），
+// 不起 git 子进程——/api/projects 对每项目都调，Windows 上进程创建是管理页加载的主要开销。
+func (r *Repo) IsRepo() bool { return gitDir(r.Dir) != "" }
+
+// gitDir 解析 dir 的 git 目录：.git 是目录直接用；是文件（linked worktree 形态）解析
+// 其中的 "gitdir: <path>" 指针（相对路径相对 dir 解析）。非仓或指针损坏返回 ""。
+func gitDir(dir string) string {
+	gp := filepath.Join(dir, ".git")
+	fi, err := os.Stat(gp)
+	if err != nil {
+		return ""
+	}
+	if fi.IsDir() {
+		return gp
+	}
+	b, err := os.ReadFile(gp)
+	if err != nil {
+		return ""
+	}
+	line := strings.TrimSpace(string(b))
+	if !strings.HasPrefix(line, "gitdir:") {
+		return ""
+	}
+	gd := strings.TrimSpace(line[len("gitdir:"):])
+	if gd == "" {
+		return ""
+	}
+	if !filepath.IsAbs(gd) {
+		gd = filepath.Join(dir, gd)
+	}
+	if fi, err := os.Stat(gd); err == nil && fi.IsDir() {
+		return gd
+	}
+	return ""
 }
 
 // gitignoreContent 随 git init 生成（设计文档 §3）：索引/状态/日志不入仓。
