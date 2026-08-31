@@ -38,11 +38,13 @@ type syncRequest struct {
 
 // validSyncFileParam 校验冲突文件参数：拒绝空串、".." 穿越与绝对路径（conflict-file/resolve 共用）。
 // 纵深加固：Clean 后首段为 .git（大小写不敏感，正反斜杠都算）同样拒绝。
+// 反斜杠须先手工归一——filepath.Clean/ToSlash 在 Linux 不认 `\` 为分隔符，
+// 直接 Clean 会让 ".git\hooks\x" 整串当成首段绕过守卫。
 func validSyncFileParam(file string) bool {
 	if file == "" || strings.Contains(file, "..") || filepath.IsAbs(file) {
 		return false
 	}
-	first := strings.SplitN(filepath.ToSlash(filepath.Clean(file)), "/", 2)[0]
+	first := strings.SplitN(filepath.ToSlash(filepath.Clean(strings.ReplaceAll(file, "\\", "/"))), "/", 2)[0]
 	return !strings.EqualFold(first, ".git")
 }
 
