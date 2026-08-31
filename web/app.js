@@ -222,6 +222,9 @@ const I18N = {
     srvBound:"已绑定", srvNotCreated:"未创建", srvBind:"一键建仓并绑定", srvBinding:"建仓中…",
     srvAutoBindConfirm:"检测到 {n} 个项目在服务器已有你的数据、本地未初始化且为空：{l}\n一键拉取并绑定？（本地已有内容的项目不自动处理，请逐个手动绑定）",
     srvAutoBindDone:"已自动绑定 {n} 个项目", srvAutoBindFail:"，失败：",
+    srvPullable:"服务器仓（本机未拉取）", srvPull:"拉取", srvPullAll:"全部拉取", srvPulling:"拉取中…",
+    srvPullDone:"已拉取 {n} 个项目到本机", srvPullFail:"，失败：",
+    srvAutoBindConfirm2:"服务器上有 {n} 个本机尚未拉取的项目仓：{l}\n\n是否现在拉取到本机？（注册同名项目并克隆全部知识条目）",
     srvMyOrgs:"我的组织", srvMyOrgsDesc:"只读（本期）；成员与团队仓由管理员维护。", srvNoOrg:"未加入任何组织。",
     srvDeploy:"部署指引（还没有服务器？展开）", srvUserCreated:"用户已创建", srvCopyHint:"初始密码与 git token 仅本次显示，请立即复制发给用户。",
     srvPwd:"初始密码", srvNewPwd:"新密码", srvGitTok:"git token", srvCopied:"我已复制", srvCopiedOk:"已复制到剪贴板",
@@ -419,6 +422,9 @@ const I18N = {
     srvBound:"Bound", srvNotCreated:"Not created", srvBind:"Provision & bind", srvBinding:"Provisioning…",
     srvAutoBindConfirm:"{n} project(s) have your data on the server, are uninitialized and empty locally: {l}\nPull and bind them now? (Projects with local content are left for manual binding.)",
     srvAutoBindDone:"Auto-bound {n} project(s)", srvAutoBindFail:", failed: ",
+    srvPullable:"Server repos (not on this machine)", srvPull:"Pull", srvPullAll:"Pull all", srvPulling:"Pulling…",
+    srvPullDone:"Pulled {n} projects to this machine", srvPullFail:", failed: ",
+    srvAutoBindConfirm2:"The server has {n} project repos not on this machine: {l}\n\nPull them now? (registers same-named projects and clones all entries)",
     srvMyOrgs:"My organizations", srvMyOrgsDesc:"Read-only (this release); membership and team repos are admin-managed.", srvNoOrg:"No organization.",
     srvDeploy:"Deployment guide (no server yet? expand)", srvUserCreated:"User created", srvCopyHint:"The initial password and git token are shown only once — copy them now.",
     srvPwd:"Initial password", srvNewPwd:"New password", srvGitTok:"git token", srvCopied:"Done", srvCopiedOk:"Copied",
@@ -5648,12 +5654,27 @@ async function maybeAutoBind(){
       const es = await api("/api/entries?project=" + encodeURIComponent(p.name), { skip401Reload:true }).catch(()=>null);
       if(es && es.length === 0) cands.push(p.name);
     }
-    if(!cands.length) return;
-    if(!await uiConfirm(t("srvAutoBindConfirm").replace("{n}", cands.length).replace("{l}", cands.join("、")))) return;
+    // 第二候选集：服务器有仓、本机未注册（新机器场景）——注册壳 + clone
+    const localNames = {}; (ps || []).forEach(p=>{ localNames[p.name] = true; });
+    const remoteOnly = (me.repos || []).filter(r=>r.layer === "personal" && !localNames[r.project]).map(r=>r.project);
+    if(!cands.length && !remoteOnly.length) return;
+    let msg = "";
+    if(cands.length) msg += t("srvAutoBindConfirm").replace("{n}", cands.length).replace("{l}", cands.join("、"));
+    if(remoteOnly.length){
+      if(msg) msg += "\n\n";
+      msg += t("srvAutoBindConfirm2").replace("{n}", remoteOnly.length).replace("{l}", remoteOnly.join("、"));
+    }
+    if(!await uiConfirm(msg)) return;
     let done = 0; const failed = [];
     for(const name of cands){
       try{
         const r = await api("/api/server/repos", { method:"POST", body:{ project: name }, skip401Reload:true });
+        if(r.status === "error") failed.push(name); else done++;
+      }catch(_){ failed.push(name); }
+    }
+    for(const name of remoteOnly){
+      try{
+        const r = await api("/api/server/pull", { method:"POST", body:{ project: name }, skip401Reload:true });
         if(r.status === "error") failed.push(name); else done++;
       }catch(_){ failed.push(name); }
     }
@@ -5972,6 +5993,30 @@ function bindCard(){
     tb.appendChild(tr);
   });
   card.appendChild(tb);
+  // 服务器有仓、本机未拉取分组（一键拉取 / 全部拉取）
+  const pullable = srvPullable();
+  if(pullable.length){
+    const gh = el("h3"); gh.style.marginTop = "18px"; gh.textContent = t("srvPullable"); card.appendChild(gh);
+    const pt = el("table","list");
+    pt.innerHTML = '<tr><th>'+t("srvProject")+'</th><th style="text-align:right">'+t("srvActions")+'</th></tr>';
+    pullable.forEach(name=>{
+      const tr = el("tr","");
+      const td1 = el("td",""); td1.innerHTML = '<b>'+esc(name)+'</b>';
+      const td2 = el("td",""); td2.style.textAlign = "right";
+      const btn = el("button","btn btn-primary");
+      btn.textContent = SRV.bindBusy[name] ? t("srvPulling") : t("srvPull");
+      btn.disabled = !!SRV.bindBusy[name];
+      btn.onclick = ()=>srvPull(name);
+      td2.appendChild(btn);
+      tr.appendChild(td1); tr.appendChild(td2); pt.appendChild(tr);
+    });
+    card.appendChild(pt);
+    if(pullable.length > 1){
+      const all = el("button","btn"); all.style.marginTop = "8px"; all.textContent = t("srvPullAll");
+      all.onclick = ()=>srvPullAll(pullable);
+      card.appendChild(all);
+    }
+  }
   return card;
 }
 
@@ -5988,6 +6033,41 @@ async function srvBind(project){
     refreshManage();
   }catch(err){ toast(err.message, true); }
   SRV.bindBusy[project] = false;
+  if(state.menu === "server") render();
+}
+
+/* 服务器有仓、本机未注册：注册壳 + clone（Task 4 端点） */
+async function srvPull(project){
+  SRV.bindBusy[project] = true; render();
+  try{
+    const r = await api("/api/server/pull", { method:"POST", body:{ project: project }, skip401Reload:true });
+    toast(r.message || t("srvPullDone").replace("{n}", 1), r.status === "error");
+    SRV.projects = null; loadServerRoleData(); refreshManage();
+  }catch(err){ toast(err.message, true); }
+  SRV.bindBusy[project] = false;
+  if(state.menu === "server") render();
+}
+
+// 服务器仓中本机未注册的项目列表（personal 层）
+function srvPullable(){
+  const mine = (SRV.user && SRV.user.repos) || [];
+  const local = {}; (SRV.projects || []).forEach(p=>{ local[p.name] = true; });
+  return mine.filter(r=>r.layer === "personal" && !local[r.project]).map(r=>r.project);
+}
+
+async function srvPullAll(names){
+  let done = 0; const failed = [];
+  for(const name of names){
+    SRV.bindBusy[name] = true;
+    if(state.menu === "server") render();
+    try{
+      const r = await api("/api/server/pull", { method:"POST", body:{ project: name }, skip401Reload:true });
+      if(r.status === "error") failed.push(name); else done++;
+    }catch(_){ failed.push(name); }
+    SRV.bindBusy[name] = false;
+  }
+  toast(t("srvPullDone").replace("{n}", done) + (failed.length ? t("srvPullFail")+failed.join("、") : ""), failed.length > 0);
+  SRV.projects = null; loadServerRoleData(); refreshManage();
   if(state.menu === "server") render();
 }
 
