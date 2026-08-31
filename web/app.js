@@ -34,8 +34,17 @@ async function api(path, opts){
       setTimeout(()=>{ location.reload(); }, 800);
       return new Promise(()=>{});
     }
-    const err = new Error(data.error || ("请求失败: " + res.status));
-    err.status = res.status;
+    let err;
+    if(res.status === 403 && data.error === "must_change_password"){
+      // 强制改密全局钩子：任何页面收到 okserver 403 都弹不可取消改密框；
+      // 错误文案换成可读提示（调用方 catch 里 toast 不再露出 must_change_password 原文）
+      err = new Error(t("srvForcePwdTitle"));
+      err.status = res.status;
+      if(typeof srvForcePwdModal === "function") srvForcePwdModal();
+    } else {
+      err = new Error(data.error || ("请求失败: " + res.status));
+      err.status = res.status;
+    }
     throw err;
   }
   return data;
@@ -218,6 +227,10 @@ const I18N = {
     srvPwd:"初始密码", srvNewPwd:"新密码", srvGitTok:"git token", srvCopied:"我已复制", srvCopiedOk:"已复制到剪贴板",
     srvResetDone:"已重置密码", srvConfirmDisable:"确认禁用/启用该用户？",
     srvDelete:"删除", srvConfirmDelete:"确认删除该用户？okserver 与 Gitea 账号一并删除，不可恢复。", srvPwdOpt:"初始密码（可选，留空自动生成）", srvPwdTooShort:"密码至少 8 位",
+    srvChangePwd:"修改我的密码", srvOldPwd:"旧密码", srvConfirmPwd:"确认新密码",
+    srvForcePwdTitle:"必须设置新密码", srvForcePwdHint:"你正在使用初始密码（或密码刚被管理员重置），设置新密码后才能继续使用。",
+    srvPwdMismatch:"两次输入的新密码不一致", srvPwdSame:"新密码不能与旧密码相同",
+    srvPwdChanged:"密码已修改", srvChangePwdFail:"修改失败：",
     /* P1-B：冲突解决页（卡片流 + 钉住操作条，Task 6） */
     cfTitle:"解决同步冲突", cfResolved:"已解决", cfReady:"（可以完成同步了）",
     cfFinish:"完成同步", cfFinishHint:"全部冲突解决后才可完成同步", cfFinishOk:"同步已完成并推送",
@@ -411,6 +424,10 @@ const I18N = {
     srvPwd:"Initial password", srvNewPwd:"New password", srvGitTok:"git token", srvCopied:"Done", srvCopiedOk:"Copied",
     srvResetDone:"Password reset", srvConfirmDisable:"Confirm disable/enable this user?",
     srvDelete:"Delete", srvConfirmDelete:"Delete this user? The okserver and Gitea accounts are removed together — this cannot be undone.", srvPwdOpt:"Initial password (optional, auto-generated if empty)", srvPwdTooShort:"Password must be at least 8 characters",
+    srvChangePwd:"Change my password", srvOldPwd:"Current password", srvConfirmPwd:"Confirm new password",
+    srvForcePwdTitle:"New password required", srvForcePwdHint:"You are signing in with an initial password (or an admin just reset it) — set a new password to continue.",
+    srvPwdMismatch:"The two new passwords do not match", srvPwdSame:"New password must differ from the current one",
+    srvPwdChanged:"Password changed", srvChangePwdFail:"Change failed: ",
     /* P1-B: conflict resolution page (card flow + pinned action bar, Task 6) */
     cfTitle:"Resolve sync conflict", cfResolved:"Resolved", cfReady:"(ready to finish)",
     cfFinish:"Finish sync", cfFinishHint:"All conflicts must be resolved before finishing", cfFinishOk:"Sync finished and pushed",
@@ -5385,7 +5402,7 @@ function renderBody(app){
 }
 
 /* ================= 服务器页（P1-C2，§10，定稿原型变体 B：stepper 三步向导） ================= */
-const SRV = { loaded:false, url:"", username:"", loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, projects:null, wizardStep:null, bindBusy:{} };
+const SRV = { loaded:false, url:"", username:"", loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, projects:null, wizardStep:null, bindBusy:{}, pwdModalOpen:false };
 
 /* 数据装载：进页面拉配置；已登录则拉 me；按角色惰性拉管理/成员数据 */
 function loadServer(){
@@ -5401,7 +5418,10 @@ function loadServer(){
       }).catch(()=>{});
     }
     if(SRV.loggedIn){
-      return api("/api/server/me", { skip401Reload:true }).then(me=>{ SRV.user = me; }).catch(()=>{ SRV.loggedIn = false; SRV.user = null; });
+      return api("/api/server/me", { skip401Reload:true }).then(me=>{
+        SRV.user = me;
+        if(me.must_change_password) srvForcePwdModal();
+      }).catch(()=>{ SRV.loggedIn = false; SRV.user = null; });
     }
   }).catch(()=>{ /* 未配置保持空 */ }).finally(()=>{
     if(state.menu === "server" && !state.syncConflict && !state.merge) render();
@@ -5460,8 +5480,10 @@ function renderServer(){
     back.onclick = ()=>{ SRV.wizardStep = null; render(); };
     head.appendChild(back);
   }
-  // 顶行右侧：退出登录 / 断开连接
+  // 顶行右侧：修改我的密码 / 退出登录 / 断开连接
   if(SRV.user){
+    const cp = el("button","btn"); cp.textContent = t("srvChangePwd");
+    cp.onclick = ()=>srvChangePwdModal(false); head.appendChild(cp);
     const lo = el("button","btn"); lo.textContent = t("srvLogout"); lo.style.marginLeft="auto";
     lo.onclick = srvLogout; head.appendChild(lo);
   } else if(SRV.url){
@@ -5589,6 +5611,7 @@ async function srvLogin(username, password){
     SRV.user = r.user; SRV.username = r.user.name; SRV.loggedIn = true; SRV.wizardStep = null;
     // login 响应只有 name/role——补拉一次 me 填 orgs（否则"我的组织"恒空）
     try{ SRV.user = await api("/api/server/me", { skip401Reload:true }); }catch(_){ /* me 失败暂用 login 返回的 user */ }
+    if(SRV.user && SRV.user.must_change_password){ srvForcePwdModal(); }
     toast(t("srvLoginOk")+"："+r.user.name+"（"+r.user.role+"）");
   }catch(err){
     SRV.logging = false;
@@ -5765,6 +5788,57 @@ function srvShowSecret(title, hint, pairs){
   mask.appendChild(m);
   mask.onclick = e=>{ if(e.target === mask) mask.remove(); };
   document.body.appendChild(mask);
+}
+
+/* 改密弹窗：force=true 为强制改密（无取消按钮、点遮罩不关）；
+   防重入：强制框已开着时不再叠（全局 403 钩子可能并发触发多次）。 */
+function srvChangePwdModal(force){
+  if(force && SRV.pwdModalOpen) return;
+  if(force) SRV.pwdModalOpen = true;
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  const h = el("h3"); h.textContent = force ? t("srvForcePwdTitle") : t("srvChangePwd"); m.appendChild(h);
+  if(force){
+    const d = el("div","small muted"); d.style.marginBottom = "8px"; d.textContent = t("srvForcePwdHint"); m.appendChild(d);
+  }
+  const oldIn = el("input","pinput"); oldIn.type = "password"; oldIn.placeholder = t("srvOldPwd");
+  const newIn = el("input","pinput"); newIn.type = "password"; newIn.placeholder = t("srvNewPwd");
+  const cfIn = el("input","pinput"); cfIn.type = "password"; cfIn.placeholder = t("srvConfirmPwd");
+  [oldIn, newIn, cfIn].forEach(i=>{ i.style.width = "100%"; i.style.boxSizing = "border-box"; i.style.marginBottom = "8px"; m.appendChild(i); });
+  const close = ()=>{ SRV.pwdModalOpen = false; mask.remove(); };
+  const foot = el("div","mfoot2");
+  const ok = el("button","btn btn-primary"); ok.textContent = t("srvChangePwd");
+  ok.onclick = async ()=>{
+    if(newIn.value.length < 8){ toast(t("srvPwdTooShort"), true); return; }
+    if(newIn.value !== cfIn.value){ toast(t("srvPwdMismatch"), true); return; }
+    if(newIn.value === oldIn.value){ toast(t("srvPwdSame"), true); return; }
+    ok.disabled = true;
+    try{
+      await api("/api/server/change-password", { method:"POST", body:{ old_password: oldIn.value, new_password: newIn.value }, skip401Reload:true });
+      if(SRV.user) SRV.user.must_change_password = false;
+      close();
+      toast(t("srvPwdChanged"));
+      if(state.menu === "server") render();
+    }catch(err){
+      toast(t("srvChangePwdFail")+(err.message||""), true);
+    }
+    ok.disabled = false;
+  };
+  foot.appendChild(ok);
+  if(!force){
+    const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+    cancel.onclick = close; foot.appendChild(cancel);
+    mask.onclick = e=>{ if(e.target === mask) close(); };
+  }
+  m.appendChild(foot);
+  mask.appendChild(m);
+  document.body.appendChild(mask);
+}
+
+/* 强制改密入口（api() 全局钩子与各触发点共用）：已登录才弹 */
+function srvForcePwdModal(){
+  if(!SRV.user) return;
+  srvChangePwdModal(true);
 }
 
 function orgsCard(){
