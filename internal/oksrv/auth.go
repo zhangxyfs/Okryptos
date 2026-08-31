@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"net/http"
 	"sync"
 	"time"
 
@@ -139,4 +140,15 @@ func (l *LoginLimiter) Reset(username string) {
 	defer l.mu.Unlock()
 	delete(l.fails, username)
 	delete(l.lockedTill, username)
+}
+
+// bearerTokenHash 返回请求携带的 Bearer token 的库存哈希（SHA-256 hex）；
+// 无 Bearer 头返回空串。改密后"踢其他会话保当前"用。
+func bearerTokenHash(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	if len(h) <= 7 || h[:7] != "Bearer " {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(h[7:]))
+	return hex.EncodeToString(sum[:])
 }

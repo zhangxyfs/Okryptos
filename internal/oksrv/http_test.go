@@ -20,6 +20,11 @@ func newTestServer(t *testing.T) (*httptest.Server, *Store, *FakeBackend) {
 	if err != nil || !created {
 		t.Fatalf("root: %v", err)
 	}
+	// 存量管理流测试默认 root 已自助改密（否则 gate 拦截全部管理端点）；
+	// 强制改密行为本身由 TestForcePasswordChange* / TestUserCreateAndResetSetFlag 覆盖。
+	if err := s.SetMustChangePassword("root", false); err != nil {
+		t.Fatalf("clear root flag: %v", err)
+	}
 	t.Cleanup(func() { s.Close() })
 	testEnv["OK_TEST_ROOT_PW"] = pw // 测试内取用（包级 map，非真 env）
 	b := NewFakeBackend()
@@ -95,7 +100,7 @@ func TestMetaAndLogin(t *testing.T) {
 }
 
 func TestFullManagementFlow(t *testing.T) {
-	srv, _, _ := newTestServer(t)
+	srv, st, _ := newTestServer(t)
 	defer srv.Close()
 	rootTok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
 
@@ -107,6 +112,10 @@ func TestFullManagementFlow(t *testing.T) {
 	pw := out["password"].(string)
 	if pw == "" || out["git_token"].(string) == "" {
 		t.Fatalf("create user resp: %v", out)
+	}
+	// alice 视为已自助改密（初始密码标记会让 gate 拦截后续建仓端点）
+	if err := st.SetMustChangePassword("alice", false); err != nil {
+		t.Fatal(err)
 	}
 	// 成员登录
 	aliceTok := login(t, srv, "alice", pw)
@@ -186,6 +195,10 @@ func TestAdminWriteEndpoints(t *testing.T) {
 	code, out := call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "op1", "role": "admin"})
 	if code != 200 {
 		t.Fatalf("create admin: %d %v", code, out)
+	}
+	// op1 视为已自助改密（同上，gate 会拦截带标记会话的管理端点）
+	if err := st.SetMustChangePassword("op1", false); err != nil {
+		t.Fatal(err)
 	}
 	adminTok := login(t, srv, "op1", out["password"].(string))
 
@@ -399,4 +412,100 @@ func TestUserCreateAndResetSetFlag(t *testing.T) {
 		t.Fatal("重置应踢掉该用户全部旧会话")
 	}
 	login(t, srv, "dave", out["password"].(string))
+}
+
+// TestForcePasswordChangeFlow 钉住强制改密全链路：建用户置标记 → gate 拦截 →
+// 白名单放行 → 自助改密（错误分支 + 成功）→ 标记清除、功能恢复、旧密码失效。
+func TestForcePasswordChangeFlow(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	defer srv.Close()
+	rootTok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
+
+	code, out := call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "bob"})
+	if code != 200 {
+		t.Fatalf("create bob: %d %v", code, out)
+	}
+	bobPW := out["password"].(string)
+
+	// 登录响应带标记
+	code, out = call(t, srv, "POST", "/api/v1/login", "", map[string]string{"username": "bob", "password": bobPW})
+	if code != 200 {
+		t.Fatalf("bob login: %d %v", code, out)
+	}
+	bobTok := out["token"].(string)
+	if u := out["user"].(map[string]any); u["must_change_password"] != true {
+		t.Fatalf("login 响应应带 must_change_password=true: %v", u)
+	}
+
+	// gate：普通端点 403 must_change_password
+	code, out = call(t, srv, "POST", "/api/v1/repos/personal", bobTok, map[string]string{"project": "demo"})
+	if code != 403 || out["error"] != "must_change_password" {
+		t.Fatalf("gate must 403: %d %v", code, out)
+	}
+	// 白名单：me 放行且带标记
+	code, out = call(t, srv, "GET", "/api/v1/me", bobTok, nil)
+	if code != 200 || out["must_change_password"] != true {
+		t.Fatalf("me must pass gate: %d %v", code, out)
+	}
+
+	// 改密错误分支：旧密码错 401 / 太短 400 / 新旧相同 400
+	code, _ = call(t, srv, "POST", "/api/v1/change-password", bobTok, map[string]string{"old_password": "bad", "new_password": "newpass123"})
+	if code != 401 {
+		t.Fatalf("wrong old must be 401: %d", code)
+	}
+	code, _ = call(t, srv, "POST", "/api/v1/change-password", bobTok, map[string]string{"old_password": bobPW, "new_password": "short"})
+	if code != 400 {
+		t.Fatalf("short must be 400: %d", code)
+	}
+	code, _ = call(t, srv, "POST", "/api/v1/change-password", bobTok, map[string]string{"old_password": bobPW, "new_password": bobPW})
+	if code != 400 {
+		t.Fatalf("same password must be 400: %d", code)
+	}
+
+	// 改密成功 → 200，标记清除，普通端点恢复
+	code, _ = call(t, srv, "POST", "/api/v1/change-password", bobTok, map[string]string{"old_password": bobPW, "new_password": "newpass123"})
+	if code != 200 {
+		t.Fatalf("change-password: %d", code)
+	}
+	code, out = call(t, srv, "GET", "/api/v1/me", bobTok, nil)
+	if code != 200 || out["must_change_password"] != false {
+		t.Fatalf("flag must be cleared: %d %v", code, out)
+	}
+	code, _ = call(t, srv, "POST", "/api/v1/repos/personal", bobTok, map[string]string{"project": "demo"})
+	if code != 200 {
+		t.Fatalf("gated endpoint must recover: %d", code)
+	}
+	// 旧密码失效、新密码可登录
+	if code, _ := call(t, srv, "POST", "/api/v1/login", "", map[string]string{"username": "bob", "password": bobPW}); code != 401 {
+		t.Fatalf("old password must fail: %d", code)
+	}
+	login(t, srv, "bob", "newpass123")
+}
+
+// TestChangePasswordKeepsCurrentKicksOthers 改密后当前会话保留、其他会话失效。
+func TestChangePasswordKeepsCurrentKicksOthers(t *testing.T) {
+	srv, st, _ := newTestServer(t)
+	defer srv.Close()
+	rootTok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
+
+	code, _ := call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "carol", "password": "mypass123"})
+	if code != 200 {
+		t.Fatalf("create carol: %d", code)
+	}
+	tok1 := login(t, srv, "carol", "mypass123")
+	tok2 := login(t, srv, "carol", "mypass123")
+	if err := st.SetMustChangePassword("carol", false); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _ = call(t, srv, "POST", "/api/v1/change-password", tok1, map[string]string{"old_password": "mypass123", "new_password": "newpass456"})
+	if code != 200 {
+		t.Fatalf("change-password: %d", code)
+	}
+	if code, _ := call(t, srv, "GET", "/api/v1/me", tok2, nil); code != 401 {
+		t.Fatalf("other session must be kicked: %d", code)
+	}
+	if code, _ := call(t, srv, "GET", "/api/v1/me", tok1, nil); code != 200 {
+		t.Fatalf("current session must be kept: %d", code)
+	}
 }

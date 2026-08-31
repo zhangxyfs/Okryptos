@@ -24,21 +24,23 @@ func NewMux(st *Store, backend GitBackend, version string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/meta", s.apiMeta)
 	mux.HandleFunc("POST /api/v1/login", s.apiLogin)
+	// 强制改密白名单：me 与 change-password 不套 gate，其余已认证端点全拦
 	mux.HandleFunc("GET /api/v1/me", s.auth(s.apiMe))
-	mux.HandleFunc("POST /api/v1/repos/personal", s.auth(s.apiPersonalRepo))
-	mux.HandleFunc("GET /api/v1/users", s.auth(s.admin(s.apiUsers)))
-	mux.HandleFunc("POST /api/v1/users", s.auth(s.admin(s.apiUserCreate)))
-	mux.HandleFunc("POST /api/v1/users/{name}/reset-password", s.auth(s.admin(s.apiUserResetPassword)))
-	mux.HandleFunc("DELETE /api/v1/users/{name}", s.auth(s.admin(s.apiUserDelete)))
-	mux.HandleFunc("POST /api/v1/users/{name}/disable", s.auth(s.admin(s.apiUserDisable(true))))
-	mux.HandleFunc("POST /api/v1/users/{name}/enable", s.auth(s.admin(s.apiUserDisable(false))))
-	mux.HandleFunc("GET /api/v1/orgs", s.auth(s.admin(s.apiOrgs)))
-	mux.HandleFunc("POST /api/v1/orgs", s.auth(s.admin(s.apiOrgCreate)))
-	mux.HandleFunc("POST /api/v1/orgs/{org}/members", s.auth(s.admin(s.apiOrgMemberAdd)))
-	mux.HandleFunc("DELETE /api/v1/orgs/{org}/members/{username}", s.auth(s.admin(s.apiOrgMemberRemove)))
-	mux.HandleFunc("POST /api/v1/repos/team", s.auth(s.admin(s.apiTeamRepo)))
-	mux.HandleFunc("GET /api/v1/repos", s.auth(s.admin(s.apiRepos)))
-	mux.HandleFunc("GET /api/v1/audit", s.auth(s.admin(s.apiAudit)))
+	mux.HandleFunc("POST /api/v1/change-password", s.auth(s.apiChangePassword))
+	mux.HandleFunc("POST /api/v1/repos/personal", s.auth(s.gate(s.apiPersonalRepo)))
+	mux.HandleFunc("GET /api/v1/users", s.auth(s.gate(s.admin(s.apiUsers))))
+	mux.HandleFunc("POST /api/v1/users", s.auth(s.gate(s.admin(s.apiUserCreate))))
+	mux.HandleFunc("POST /api/v1/users/{name}/reset-password", s.auth(s.gate(s.admin(s.apiUserResetPassword))))
+	mux.HandleFunc("DELETE /api/v1/users/{name}", s.auth(s.gate(s.admin(s.apiUserDelete))))
+	mux.HandleFunc("POST /api/v1/users/{name}/disable", s.auth(s.gate(s.admin(s.apiUserDisable(true)))))
+	mux.HandleFunc("POST /api/v1/users/{name}/enable", s.auth(s.gate(s.admin(s.apiUserDisable(false)))))
+	mux.HandleFunc("GET /api/v1/orgs", s.auth(s.gate(s.admin(s.apiOrgs))))
+	mux.HandleFunc("POST /api/v1/orgs", s.auth(s.gate(s.admin(s.apiOrgCreate))))
+	mux.HandleFunc("POST /api/v1/orgs/{org}/members", s.auth(s.gate(s.admin(s.apiOrgMemberAdd))))
+	mux.HandleFunc("DELETE /api/v1/orgs/{org}/members/{username}", s.auth(s.gate(s.admin(s.apiOrgMemberRemove))))
+	mux.HandleFunc("POST /api/v1/repos/team", s.auth(s.gate(s.admin(s.apiTeamRepo))))
+	mux.HandleFunc("GET /api/v1/repos", s.auth(s.gate(s.admin(s.apiRepos))))
+	mux.HandleFunc("GET /api/v1/audit", s.auth(s.gate(s.admin(s.apiAudit))))
 	return mux
 }
 
@@ -63,6 +65,18 @@ func (s *server) admin(fn func(http.ResponseWriter, *http.Request, *User)) func(
 	return func(w http.ResponseWriter, r *http.Request, u *User) {
 		if u.Role != "root" && u.Role != "admin" {
 			writeErr(w, http.StatusForbidden, "需要管理员权限")
+			return
+		}
+		fn(w, r, u)
+	}
+}
+
+// gate：强制改密拦截——带 must_change_password 标记的会话只放行白名单端点
+// （me/change-password 注册时不套 gate），其余一律 403，客户端据此弹强制改密框。
+func (s *server) gate(fn func(http.ResponseWriter, *http.Request, *User)) func(http.ResponseWriter, *http.Request, *User) {
+	return func(w http.ResponseWriter, r *http.Request, u *User) {
+		if u.MustChangePassword {
+			writeErr(w, http.StatusForbidden, "must_change_password")
 			return
 		}
 		fn(w, r, u)
@@ -136,7 +150,7 @@ func (s *server) apiLogin(w http.ResponseWriter, r *http.Request) {
 	s.limiter.Reset(in.Username)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token": tok,
-		"user":  map[string]any{"name": u.Username, "role": u.Role},
+		"user":  map[string]any{"name": u.Username, "role": u.Role, "must_change_password": u.MustChangePassword},
 	})
 }
 
@@ -153,7 +167,58 @@ func (s *server) apiMe(w http.ResponseWriter, _ *http.Request, u *User) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": u.Username, "role": u.Role, "orgs": orgs, "repos": repos,
+		"must_change_password": u.MustChangePassword,
 	})
+}
+
+// apiChangePassword 自助改密：已认证用户凭旧密码换新密码。成功后清强制改密标记、
+// 踢掉除当前会话外的全部会话（当前会话保留，客户端无需重登）。
+// 旧密码失败计入登录限流（与 apiLogin 共用同一 LoginLimiter，防在线爆破）。
+func (s *server) apiChangePassword(w http.ResponseWriter, r *http.Request, u *User) {
+	var in struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if !s.limiter.Allow(u.Username) {
+		writeErr(w, http.StatusTooManyRequests, "尝试次数过多，请稍后再试")
+		return
+	}
+	if s.st.VerifyLogin(u.Username, in.OldPassword) == nil {
+		s.limiter.Fail(u.Username)
+		writeErr(w, http.StatusUnauthorized, "旧密码错误")
+		return
+	}
+	if len(in.NewPassword) < 8 {
+		writeErr(w, http.StatusBadRequest, "密码至少 8 位")
+		return
+	}
+	if in.NewPassword == in.OldPassword {
+		writeErr(w, http.StatusBadRequest, "新密码不能与旧密码相同")
+		return
+	}
+	hash, err := HashPassword(in.NewPassword)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.st.SetUserPasswordHash(u.Username, hash); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.st.SetMustChangePassword(u.Username, false); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.st.DeleteUserSessionsExcept(u.ID, bearerTokenHash(r)); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.limiter.Reset(u.Username)
+	s.st.Audit(u.Username, "change-password", u.Username, "")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // apiPersonalRepo 建个人仓 ok-<project>（幂等：已存在返回现有记录且 git_token 空串，
