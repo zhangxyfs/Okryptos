@@ -5,11 +5,14 @@ package gui
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"openknowledge/internal/config"
+	"openknowledge/internal/registry"
 	"openknowledge/internal/serverx"
 	"openknowledge/internal/store"
 	"openknowledge/internal/syncx"
@@ -24,6 +27,7 @@ func (h *Handler) registerServerAPI(api func(string, http.HandlerFunc)) {
 	api("POST /api/server/change-password", h.fwdChangePassword)
 	api("GET /api/server/me", h.apiServerMe)
 	api("POST /api/server/repos", h.apiServerRepos)
+	api("POST /api/server/pull", h.apiServerPull)
 	// 管理类透传（角色门控在服务端）
 	api("GET /api/server/users", h.fwdUsers)
 	api("POST /api/server/users", h.fwdUserCreate)
@@ -177,6 +181,48 @@ func (h *Handler) apiServerRepos(w http.ResponseWriter, r *http.Request) {
 	}
 	st := resolveProject(w, req.Project)
 	if st == nil {
+		return
+	}
+	h.serveBindRepo(w, r, st, req.Project)
+}
+
+// apiServerPull 新机器拉取：服务器有仓、本机未注册的项目——注册空 Paths 壳
+// （备份恢复同款先例）后走共用绑定管线（本地无内容 → InitForSync 自动 clone）。
+func (h *Handler) apiServerPull(w http.ResponseWriter, r *http.Request) {
+	var req serverReposRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if !validProjectName(req.Project) {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("非法项目名: %q", req.Project))
+		return
+	}
+	_, _, found, err := findProject(req.Project)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if found {
+		writeErr(w, http.StatusConflict, "项目已注册："+req.Project)
+		return
+	}
+	// 锁内读-改-写注册空壳（并发 ok init / GUI 删除互斥，与 cli.go init 同口径）；
+	// 二次检查放锁内，防并发双注册。
+	if err := registry.Update(func(reg *registry.Registry) error {
+		for _, p := range reg.Projects {
+			if p.Name == req.Project {
+				return fmt.Errorf("项目 %q 已存在", req.Project)
+			}
+		}
+		reg.Projects = append(reg.Projects, registry.Project{Name: req.Project})
+		return nil
+	}); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	st := store.New(filepath.Join(registry.Home(), "projects", req.Project))
+	if err := st.EnsureDirs(); err != nil {
+		writeErr(w, http.StatusInternalServerError, "创建项目目录失败："+err.Error())
 		return
 	}
 	h.serveBindRepo(w, r, st, req.Project)

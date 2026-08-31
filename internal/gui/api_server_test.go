@@ -10,12 +10,13 @@ import (
 	"testing"
 
 	"openknowledge/internal/config"
+	"openknowledge/internal/registry"
 	"openknowledge/internal/syncx"
 )
 
 // fakeOKServer 起假 okserver（meta/login/me/repos/personal，校验 Bearer）。
 // gitToken 传空串模拟"仓已存在"语义（token 仅建仓首发）。
-func fakeOKServer(t *testing.T, cloneURL, gitToken string) *httptest.Server {
+func fakeOKServer(t *testing.T, cloneURL, gitToken string, extra ...func(*http.ServeMux)) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/meta", func(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +79,9 @@ func fakeOKServer(t *testing.T, cloneURL, gitToken string) *httptest.Server {
 		}
 		w.WriteHeader(204)
 	})
+	for _, f := range extra {
+		f(mux)
+	}
 	return httptest.NewServer(mux)
 }
 
@@ -302,5 +306,81 @@ func TestApiServerChangePassword(t *testing.T) {
 	res, _ = do(t, "POST", srv.URL+"/api/server/change-password", testToken, map[string]any{"old_password": "pw", "new_password": "newpass123"})
 	if res != 204 {
 		t.Fatalf("change: %d", res)
+	}
+}
+
+// TestApiServerPullNewMachine 新机器语义：项目本机未注册 → pull 注册空 Paths 壳 +
+// 走 clone 路径（provision 返回 file:// 裸仓且空 git_token → 自助重发拿凭据）。
+func TestApiServerPullNewMachine(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "gitconfig-sys"))
+	// "远端"已有内容的裸仓（模拟另一台机器已推送）
+	bare := t.TempDir()
+	gitRun(t, bare, "init", "--bare", "-b", "main")
+	bareURL := "file://" + filepath.ToSlash(bare)
+	seed := t.TempDir()
+	gitRun(t, seed, "init", "-b", "main")
+	if err := os.MkdirAll(filepath.Join(seed, "knowledge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, "knowledge", "k.md"), []byte("远端知识\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, seed, "add", ".")
+	gitRun(t, seed, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "sync: seed")
+	gitRun(t, seed, "remote", "add", "origin", bareURL)
+	gitRun(t, seed, "push", "-u", "origin", "main")
+	// fake：provision 返回该裸仓 + 空 token（仓已存在）；另注册 git-token 重发路由
+	fake := fakeOKServer(t, bareURL, "", func(mux *http.ServeMux) {
+		mux.HandleFunc("POST /api/v1/git-token", func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]string{"git_token": "git-tok-reissue"})
+		})
+	})
+	defer fake.Close()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	res, body := do(t, "POST", srv.URL+"/api/server/login", testToken, map[string]any{"url": fake.URL, "username": "alice", "password": "pw"})
+	if res != 200 {
+		t.Fatalf("login: %d %s", res, body)
+	}
+	// 未注册直接 pull（本机全新）
+	res, body = do(t, "POST", srv.URL+"/api/server/pull", testToken, map[string]any{"project": "freshproj"})
+	if res != 200 {
+		t.Fatalf("pull: %d %s", res, body)
+	}
+	var out struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "ok" {
+		t.Fatalf("out: %s", body)
+	}
+	// 壳项目已注册且无关联路径
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *registry.Project
+	for i := range reg.Projects {
+		if reg.Projects[i].Name == "freshproj" {
+			found = &reg.Projects[i]
+		}
+	}
+	if found == nil || len(found.Paths) != 0 {
+		t.Fatalf("shell project: %+v", found)
+	}
+	// 内容已 clone 下来
+	data, err := os.ReadFile(filepath.Join(okHome, "projects", "freshproj", "knowledge", "k.md"))
+	if err != nil || !strings.Contains(string(data), "远端知识") {
+		t.Fatalf("cloned content: %v %q", err, data)
+	}
+	// 再 pull 一次 → 409 已注册
+	res, _ = do(t, "POST", srv.URL+"/api/server/pull", testToken, map[string]any{"project": "freshproj"})
+	if res != 409 {
+		t.Fatalf("re-pull: %d", res)
 	}
 }
