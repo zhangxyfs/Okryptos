@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 type fakeRepo struct{ owner, name string }
@@ -15,16 +16,18 @@ type FakeBackend struct {
 	failTokens bool // 测试注入：CreateUserToken 强制失败（建用户回滚路径用）
 	users      map[string]bool // username → active
 	tokens     map[string]int
+	tokenList  map[string][]TokenInfo // username → token 列表（凭证管理端点数据源）
 	repos      map[fakeRepo]bool
 	orgs       map[string]map[string]bool // org → members
 }
 
 func NewFakeBackend() *FakeBackend {
 	return &FakeBackend{
-		users:  map[string]bool{},
-		tokens: map[string]int{},
-		repos:  map[fakeRepo]bool{},
-		orgs:   map[string]map[string]bool{},
+		users:     map[string]bool{},
+		tokens:    map[string]int{},
+		tokenList: map[string][]TokenInfo{},
+		repos:     map[fakeRepo]bool{},
+		orgs:      map[string]map[string]bool{},
 	}
 }
 
@@ -75,11 +78,39 @@ func (f *FakeBackend) CreateUserToken(ctx context.Context, username, tokenName s
 		return "", fmt.Errorf("用户 %q 不存在", username)
 	}
 	f.tokens[username]++
+	f.tokenList[username] = append(f.tokenList[username],
+		TokenInfo{Name: tokenName, CreatedAt: time.Now(), UpdatedAt: time.Now()})
 	return fmt.Sprintf("fake-token-%s-%s-%d", username, tokenName, f.tokens[username]), nil
 }
 
-// DeleteUserToken _fake 语义：记数即可（撞名场景由 tokens 计数自然区分）。
-func (f *FakeBackend) DeleteUserToken(_ context.Context, _, _ string) error { return nil }
+// DeleteUserToken fake 语义：按名从 tokenList 删除；不存在时仍返回 nil（尽力而为语义）。
+func (f *FakeBackend) DeleteUserToken(ctx context.Context, username, tokenName string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.check(); err != nil {
+		return err
+	}
+	list := f.tokenList[username]
+	out := list[:0]
+	for _, t := range list {
+		if t.Name != tokenName {
+			out = append(out, t)
+		}
+	}
+	f.tokenList[username] = out
+	return nil
+}
+
+// ListUserTokens 返回该用户 token 切片的拷贝（nil → 空切片）。
+func (f *FakeBackend) ListUserTokens(ctx context.Context, username string) ([]TokenInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.check(); err != nil {
+		return nil, err
+	}
+	out := make([]TokenInfo, 0, len(f.tokenList[username]))
+	return append(out, f.tokenList[username]...), nil
+}
 
 // DeleteUser 从 users 删除（建用户回滚用）；不存在时报错（尽力而为场景被忽略）。
 func (f *FakeBackend) DeleteUser(ctx context.Context, username string) error {

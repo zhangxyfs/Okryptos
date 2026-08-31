@@ -30,6 +30,10 @@ func NewMux(st *Store, backend GitBackend, version string) http.Handler {
 	mux.HandleFunc("POST /api/v1/change-password", s.auth(s.apiChangePassword))
 	mux.HandleFunc("POST /api/v1/repos/personal", s.auth(s.gate(s.apiPersonalRepo)))
 	mux.HandleFunc("POST /api/v1/git-token", s.auth(s.gate(s.apiGitToken)))
+	mux.HandleFunc("GET /api/v1/tokens", s.auth(s.gate(s.apiTokens)))
+	mux.HandleFunc("DELETE /api/v1/tokens/{name}", s.auth(s.gate(s.apiTokenDelete)))
+	mux.HandleFunc("GET /api/v1/users/{name}/tokens", s.auth(s.gate(s.admin(s.apiUserTokens))))
+	mux.HandleFunc("DELETE /api/v1/users/{name}/tokens/{token}", s.auth(s.gate(s.admin(s.apiUserTokenDelete))))
 	mux.HandleFunc("GET /api/v1/users", s.auth(s.gate(s.admin(s.apiUsers))))
 	mux.HandleFunc("POST /api/v1/users", s.auth(s.gate(s.admin(s.apiUserCreate))))
 	mux.HandleFunc("POST /api/v1/users/{name}/reset-password", s.auth(s.gate(s.admin(s.apiUserResetPassword))))
@@ -306,6 +310,51 @@ func sanitizeTokenName(hint string) string {
 	return s
 }
 
+// tokenJSON 是 token 列表响应形状（updated_at 即最近使用；零值时前端回落 created_at）。
+func tokenJSON(t TokenInfo) map[string]any {
+	return map[string]any{"name": t.Name, "created_at": t.CreatedAt, "updated_at": t.UpdatedAt}
+}
+
+func (s *server) listTokens(w http.ResponseWriter, r *http.Request, username string) {
+	ts, err := s.backend.ListUserTokens(r.Context(), username)
+	if err != nil {
+		backendErr(w, err)
+		return
+	}
+	out := []map[string]any{}
+	for _, t := range ts {
+		out = append(out, tokenJSON(t))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": out})
+}
+
+func (s *server) deleteToken(w http.ResponseWriter, r *http.Request, actor, username, tokenName string) {
+	if err := s.backend.DeleteUserToken(r.Context(), username, tokenName); err != nil {
+		backendErr(w, err)
+		return
+	}
+	s.st.Audit(actor, "delete-git-token", username, tokenName)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// apiTokens / apiTokenDelete：自助凭证管理（自己的 token）。
+func (s *server) apiTokens(w http.ResponseWriter, r *http.Request, u *User) {
+	s.listTokens(w, r, u.Username)
+}
+
+func (s *server) apiTokenDelete(w http.ResponseWriter, r *http.Request, u *User) {
+	s.deleteToken(w, r, u.Username, u.Username, r.PathValue("name"))
+}
+
+// apiUserTokens / apiUserTokenDelete：管理员查看/清理任意用户 token。
+func (s *server) apiUserTokens(w http.ResponseWriter, r *http.Request, u *User) {
+	s.listTokens(w, r, r.PathValue("name"))
+}
+
+func (s *server) apiUserTokenDelete(w http.ResponseWriter, r *http.Request, u *User) {
+	s.deleteToken(w, r, u.Username, r.PathValue("name"), r.PathValue("token"))
+}
+
 // ---------- 用户管理 ----------
 
 func (s *server) apiUsers(w http.ResponseWriter, _ *http.Request, _ *User) {
@@ -480,6 +529,7 @@ func (s *server) apiUserDelete(w http.ResponseWriter, r *http.Request, u *User) 
 		writeErr(w, http.StatusForbidden, "仅 root 可删除 admin")
 		return
 	}
+	// Gitea 删用户级联清掉其全部 token（凭证管理语义随事实成立，无需逐条删）
 	if err := s.backend.DeleteUser(r.Context(), name); err != nil {
 		backendErr(w, err)
 		return

@@ -561,3 +561,81 @@ func TestApiGitToken(t *testing.T) {
 		t.Fatalf("gate: %d %v", code, body)
 	}
 }
+
+// TestApiTokens 凭证管理：自助列/删自己的 git token；管理员列/删任意用户；
+// 非管理员越权 403；带强制改密标记的会话被 gate 拦 403。
+func TestApiTokens(t *testing.T) {
+	srv, st, _ := newTestServer(t)
+	defer srv.Close()
+	rootTok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
+
+	tokenNames := func(out map[string]any) map[string]bool {
+		names := map[string]bool{}
+		for _, tk := range out["tokens"].([]any) {
+			names[tk.(map[string]any)["name"].(string)] = true
+		}
+		return names
+	}
+
+	// 建 bob（member，建用户时已发 ok-sync token），清强制改密标记后登录
+	code, out := call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "bob"})
+	if code != 200 {
+		t.Fatalf("create bob: %d %v", code, out)
+	}
+	bobPW := out["password"].(string)
+	if err := st.SetMustChangePassword("bob", false); err != nil {
+		t.Fatal(err)
+	}
+	bobTok := login(t, srv, "bob", bobPW)
+
+	// 1. bob 自助重发 token（name_hint → ok-sync-r-NB1）
+	code, _ = call(t, srv, "POST", "/api/v1/git-token", bobTok, map[string]string{"name_hint": "NB1"})
+	if code != 200 {
+		t.Fatalf("git-token: %d", code)
+	}
+
+	// 2. bob 列自己的 token：含 ok-sync-r-NB1 与建用户时的 ok-sync
+	code, out = call(t, srv, "GET", "/api/v1/tokens", bobTok, nil)
+	if code != 200 {
+		t.Fatalf("list tokens: %d %v", code, out)
+	}
+	names := tokenNames(out)
+	if !names["ok-sync-r-NB1"] || !names["ok-sync"] || len(names) != 2 {
+		t.Fatalf("tokens must contain ok-sync-r-NB1 and ok-sync: %v", names)
+	}
+
+	// 3. bob 删 ok-sync-r-NB1 → 204；再列已消失
+	code, _ = call(t, srv, "DELETE", "/api/v1/tokens/ok-sync-r-NB1", bobTok, nil)
+	if code != 204 {
+		t.Fatalf("delete token: %d", code)
+	}
+	code, out = call(t, srv, "GET", "/api/v1/tokens", bobTok, nil)
+	if code != 200 || tokenNames(out)["ok-sync-r-NB1"] {
+		t.Fatalf("deleted token must be gone: %d %v", code, out)
+	}
+
+	// 4. bob（非管理员）访问管理员端点 → 403
+	code, _ = call(t, srv, "GET", "/api/v1/users/root/tokens", bobTok, nil)
+	if code != 403 {
+		t.Fatalf("member on admin endpoint must be 403: %d", code)
+	}
+
+	// 5. root 列 bob 剩余 token（ok-sync）→ 200；root 删 bob 的 ok-sync → 204
+	code, out = call(t, srv, "GET", "/api/v1/users/bob/tokens", rootTok, nil)
+	if code != 200 || !tokenNames(out)["ok-sync"] {
+		t.Fatalf("admin list bob tokens: %d %v", code, out)
+	}
+	code, _ = call(t, srv, "DELETE", "/api/v1/users/bob/tokens/ok-sync", rootTok, nil)
+	if code != 204 {
+		t.Fatalf("admin delete bob token: %d", code)
+	}
+
+	// 6. bob 置强制改密标记 → 自助列 token 被 gate 拦 403 must_change_password
+	if err := st.SetMustChangePassword("bob", true); err != nil {
+		t.Fatal(err)
+	}
+	code, out = call(t, srv, "GET", "/api/v1/tokens", bobTok, nil)
+	if code != 403 || out["error"] != "must_change_password" {
+		t.Fatalf("gate must 403: %d %v", code, out)
+	}
+}

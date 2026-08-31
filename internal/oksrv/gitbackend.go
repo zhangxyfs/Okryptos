@@ -3,7 +3,15 @@ package oksrv
 import (
 	"context"
 	"errors"
+	"time"
 )
+
+// TokenInfo 是 git token 列表项（UpdatedAt 由 Gitea 在每次使用时刷新 = 最近使用）。
+type TokenInfo struct {
+	Name      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
 
 // GitRepo 描述一个 git 仓库的最小信息。
 type GitRepo struct {
@@ -20,6 +28,8 @@ type GitBackend interface {
 	// DeleteUserToken 删除同名 token（自助重发前的撞名清理；不存在时返回 nil 或
 	// 可忽略错误——调用方尽力而为语义，成败以随后的 CreateUserToken 为准）。
 	DeleteUserToken(ctx context.Context, username, tokenName string) error
+	// ListUserTokens 列用户全部 token（凭证管理页数据源）。
+	ListUserTokens(ctx context.Context, username string) ([]TokenInfo, error)
 	// DeleteUser 用于建用户流程半途失败的回滚（尽力而为，错误只记审计不阻断）。
 	DeleteUser(ctx context.Context, username string) error
 	SetUserActive(ctx context.Context, username string, active bool) error

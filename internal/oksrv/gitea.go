@@ -128,6 +128,24 @@ func (g *GiteaBackend) DeleteUserToken(ctx context.Context, username, tokenName 
 	return err
 }
 
+// ListUserTokens 核实：GET /users/{username}/tokens（同 CreateUserToken 走 Basic 头），
+// 返回 AccessToken 数组 {name, created_at, updated_at}——updated_at 即 Gitea UI 的"最近使用"。
+func (g *GiteaBackend) ListUserTokens(ctx context.Context, username string) ([]TokenInfo, error) {
+	var raw []struct {
+		Name      string    `json:"name"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	if err := g.do(ctx, http.MethodGet, "/users/"+url.PathEscape(username)+"/tokens", nil, &raw, true); err != nil {
+		return nil, err
+	}
+	out := make([]TokenInfo, 0, len(raw))
+	for _, t := range raw {
+		out = append(out, TokenInfo{Name: t.Name, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt})
+	}
+	return out, nil
+}
+
 // DeleteUser 核实：DELETE /admin/users/{username}（204）。用于建用户流程半途失败的回滚。
 func (g *GiteaBackend) DeleteUser(ctx context.Context, username string) error {
 	return g.call(ctx, http.MethodDelete, "/admin/users/"+url.PathEscape(username), nil, nil)
