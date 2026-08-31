@@ -48,6 +48,30 @@ func StoreCredential(dir, remoteURL, username, password string) error {
 	return nil
 }
 
+// HasStoredCredential 查询本机 credential helper 是否已存指定 remote 的凭据
+// （git credential fill 非交互探测；无 helper 或拿不到 password 均 false）。
+func HasStoredCredential(dir, remoteURL, username string) bool {
+	if !HasCredentialHelper(dir) {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), localTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "credential", "fill")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
+	procx.HideWindow(cmd)
+	cmd.Stdin = strings.NewReader("url=" + remoteURL + "\nusername=" + username + "\n\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if v, ok := strings.CutPrefix(line, "password="); ok && v != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // CredentialURLWithAuth 回退：把凭据嵌进 remote URL（无 helper 环境）。
 // token 经 url.PathEscape（UserPassword 内部处理转义）。
 // file:// 等无认证语义的 scheme 原样返回（嵌凭据会把 URL 搞坏，如 file://C:/...）。

@@ -51,6 +51,31 @@ func TestStoreCredentialNoHelper(t *testing.T) {
 	}
 }
 
+// TestHasStoredCredential 无 helper → false；helper 指向测试脚本后可分辨有/无存凭据。
+func TestHasStoredCredential(t *testing.T) {
+	dir := t.TempDir()
+	// 隔离配置：无 helper
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "gitconfig-sys"))
+	if HasStoredCredential(dir, "http://h/u/r.git", "alice") {
+		t.Fatal("no helper should be false")
+	}
+	// 配一个永远返回固定凭据的 helper（shell 脚本），验证 true 分支
+	gitconfig := filepath.Join(t.TempDir(), "gitconfig2")
+	helper := filepath.Join(t.TempDir(), "helper.sh")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\necho username=alice\necho password=secret\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "[credential]\n\thelper = !sh " + filepath.ToSlash(helper) + "\n"
+	if err := os.WriteFile(gitconfig, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
+	if !HasStoredCredential(dir, "http://h/u/r.git", "alice") {
+		t.Fatal("helper with stored cred should be true")
+	}
+}
+
 func TestCredentialURLWithAuth(t *testing.T) {
 	got := CredentialURLWithAuth("http://nas:3000/alice/ok-demo.git", "alice", "tok/with special")
 	if !strings.Contains(got, "alice:tok") || !strings.Contains(got, "@nas:3000") {

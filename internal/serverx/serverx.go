@@ -186,6 +186,18 @@ func (c *Client) ChangePassword(ctx context.Context, oldPassword, newPassword st
 	return c.call(ctx, "POST", "/change-password", map[string]string{"old_password": oldPassword, "new_password": newPassword}, nil)
 }
 
+// GitToken 自助重发 git token（okserver v2.25 起；旧服务端返回 404 *Error，
+// 调用方据此提示升级服务端或回退旧文案）。
+func (c *Client) GitToken(ctx context.Context) (string, error) {
+	var out struct {
+		GitToken string `json:"git_token"`
+	}
+	if err := c.call(ctx, "POST", "/git-token", nil, &out); err != nil {
+		return "", err
+	}
+	return out.GitToken, nil
+}
+
 func (c *Client) ProvisionPersonalRepo(ctx context.Context, project string) (*ProvisionResult, error) {
 	var out ProvisionResult
 	if err := c.call(ctx, "POST", "/repos/personal", map[string]string{"project": project}, &out); err != nil {
