@@ -5592,7 +5592,7 @@ async function srvTestConnect(addr, port){
 async function srvDisconnect(){
   try{ await api("/api/server/logout", { method:"POST", skip401Reload:true }); }catch(_){}
   try{ await api("/api/server/config", { method:"PUT", body:{ url:"" }, skip401Reload:true }); }catch(_){}
-  Object.assign(SRV, { url:"", username:"", loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, wizardStep:null, testFb:null });
+  Object.assign(SRV, { url:"", username:"", loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, tokens:null, adminTokens:null, wizardStep:null, testFb:null });
   render();
 }
 
