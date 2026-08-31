@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 var usernameRe = regexp.MustCompile(`^[a-z0-9_-]{2,32}$`)
@@ -265,18 +266,44 @@ func (s *server) apiPersonalRepo(w http.ResponseWriter, r *http.Request, u *User
 	writeJSON(w, http.StatusOK, map[string]any{"repo": gitRepoJSON(repo), "git_token": token})
 }
 
-// apiGitToken 自助重发 git token：删旧建新（规避同名撞名），明文返回一次。
-// 解决新机器拉取已有仓时拿不到凭据的断链（token 原本只在建仓首发）。
+// apiGitToken 自助重发 git token：按机器分名（ok-sync-r-<hostname>），删本机同名旧 token
+// 再建——每台机器各持一份凭据，多端互不吊销（终审裁决；固定名单用户唯一会断他机）。
 func (s *server) apiGitToken(w http.ResponseWriter, r *http.Request, u *User) {
-	const tokenName = "ok-sync-reissue"
+	var in struct {
+		NameHint string `json:"name_hint"`
+	}
+	if r.ContentLength != 0 && !decodeJSON(w, r, &in) { // 空 body 容忍：hint 缺省落 unknown
+		return
+	}
+	tokenName := "ok-sync-r-" + sanitizeTokenName(in.NameHint)
 	_ = s.backend.DeleteUserToken(r.Context(), u.Username, tokenName) // 尽力而为，以建为准
 	token, err := s.backend.CreateUserToken(r.Context(), u.Username, tokenName)
 	if err != nil {
 		backendErr(w, err)
 		return
 	}
-	s.st.Audit(u.Username, "reissue-git-token", u.Username, "")
-	writeJSON(w, http.StatusOK, map[string]string{"git_token": token})
+	s.st.Audit(u.Username, "reissue-git-token", u.Username, tokenName)
+	writeJSON(w, http.StatusOK, map[string]any{"git_token": token, "token_name": tokenName})
+}
+
+// sanitizeTokenName：Gitea token 名只留 [a-zA-Z0-9_-]，其余折成 '-'；空/全非法落 "unknown"；截 32。
+func sanitizeTokenName(hint string) string {
+	var b []rune
+	for _, r := range hint {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			b = append(b, r)
+		} else {
+			b = append(b, '-')
+		}
+	}
+	s := string(b)
+	if strings.Trim(s, "-") == "" {
+		s = "unknown"
+	}
+	if len(s) > 32 {
+		s = s[:32]
+	}
+	return s
 }
 
 // ---------- 用户管理 ----------

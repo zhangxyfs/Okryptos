@@ -514,8 +514,9 @@ func TestChangePasswordKeepsCurrentKicksOthers(t *testing.T) {
 	}
 }
 
-// TestApiGitToken 自助重发：未认证 401；认证后返回非空 token 且审计落库；
-// 重复调用成功（删旧建新不撞名）；带强制改密标记的账号被 gate 拦 403。
+// TestApiGitToken 自助重发：未认证 401；按机器分名（name_hint → ok-sync-r-<hint>，
+// token_name 回显、审计 detail 含该名）；同名重复调仍 200（删本机同名再建）；
+// 空 body 容忍落 unknown；带强制改密标记的账号被 gate 拦 403。
 func TestApiGitToken(t *testing.T) {
 	srv, st, _ := newTestServer(t)
 	// 未认证
@@ -525,25 +526,31 @@ func TestApiGitToken(t *testing.T) {
 	}
 	// 认证（root 已在 newTestServer 里清掉强制改密标记；初始密码经包级 testEnv 取用）
 	tok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
-	code, body := call(t, srv, "POST", "/api/v1/git-token", tok, nil)
-	if code != 200 || body["git_token"] == "" {
-		t.Fatalf("reissue: %d %v", code, body)
+	// 带 hint：token 按机器分名并回显
+	code, body := call(t, srv, "POST", "/api/v1/git-token", tok, map[string]string{"name_hint": "DESKTOP-1"})
+	if code != 200 || body["git_token"] == "" || body["token_name"] != "ok-sync-r-DESKTOP-1" {
+		t.Fatalf("reissue with hint: %d %v", code, body)
 	}
 	first := body["git_token"].(string)
-	// 重复调用不撞名
-	code, body = call(t, srv, "POST", "/api/v1/git-token", tok, nil)
-	if code != 200 || body["git_token"] == "" || body["git_token"] == first {
+	// 同名重复调（同 hint）：删本机同名再建，不撞名不失败
+	code, body = call(t, srv, "POST", "/api/v1/git-token", tok, map[string]string{"name_hint": "DESKTOP-1"})
+	if code != 200 || body["git_token"] == "" || body["git_token"] == first || body["token_name"] != "ok-sync-r-DESKTOP-1" {
 		t.Fatalf("re-reissue: %d %v", code, body)
 	}
-	// 审计落库
+	// 空 body 容忍：hint 缺省落 unknown
+	code, body = call(t, srv, "POST", "/api/v1/git-token", tok, nil)
+	if code != 200 || body["token_name"] != "ok-sync-r-unknown" {
+		t.Fatalf("empty body: %d %v", code, body)
+	}
+	// 审计落库（detail 含 token 名）
 	found := false
 	for _, a := range st.ListAudit(10, 0) {
-		if a.Action == "reissue-git-token" {
+		if a.Action == "reissue-git-token" && strings.Contains(a.Detail, "ok-sync-r-DESKTOP-1") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("audit missing reissue-git-token")
+		t.Fatal("audit missing reissue-git-token with token name")
 	}
 	// gate：带标记账号 403 must_change_password
 	if err := st.SetMustChangePassword("root", true); err != nil {

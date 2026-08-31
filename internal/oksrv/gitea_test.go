@@ -23,6 +23,7 @@ func fakeGitea(t *testing.T) *httptest.Server {
 	t.Helper()
 	type user struct{ active bool }
 	users := map[string]*user{}
+	userTokens := map[string]map[string]bool{} // username → token 名集合
 	repos := map[string]bool{}
 	orgs := map[string]map[string]bool{}
 	orgTeam := map[string]int64{}  // org → Owners 队 id（真实 Gitea 建组织自动创建）
@@ -71,8 +72,25 @@ func fakeGitea(t *testing.T) *httptest.Server {
 			w.WriteHeader(404)
 			return
 		}
+		if userTokens[u] == nil {
+			userTokens[u] = map[string]bool{}
+		}
+		userTokens[u][req.Name] = true
 		w.WriteHeader(201)
 		json.NewEncoder(w).Encode(map[string]string{"sha1": "tok-" + u})
+	})
+	mux.HandleFunc("DELETE /api/v1/users/{username}/tokens/{token}", func(w http.ResponseWriter, r *http.Request) {
+		if _, _, ok := r.BasicAuth(); !ok {
+			w.WriteHeader(401) // 同 POST：真实 Gitea 要求 Basic auth
+			return
+		}
+		u, name := r.PathValue("username"), r.PathValue("token")
+		if !userTokens[u][name] {
+			w.WriteHeader(404) // 真实 Gitea：token 不存在 → 404
+			return
+		}
+		delete(userTokens[u], name)
+		w.WriteHeader(204)
 	})
 	mux.HandleFunc("DELETE /api/v1/admin/users/{username}", func(w http.ResponseWriter, r *http.Request) {
 		u := r.PathValue("username")
@@ -239,5 +257,31 @@ func TestGiteaAuthHeader(t *testing.T) {
 	_, _ = b.Ping(context.Background())
 	if sawAuth != "token admin-token" {
 		t.Fatalf("auth header: %q", sawAuth)
+	}
+}
+
+// TestGiteaDeleteUserToken404 删 token 的 404 容忍：旧 token 不存在（按机器分名后
+// 本机首发即此情形）不视为失败——apiGitToken "删本机同名再建"的兜底分支回归。
+func TestGiteaDeleteUserToken404(t *testing.T) {
+	srv := fakeGitea(t)
+	defer srv.Close()
+	b := NewGitea(srv.URL, "admin-token")
+	ctx := context.Background()
+	if err := b.CreateUser(ctx, "alice", "pw"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// 不存在 → Gitea 404 → DeleteUserToken 容忍返回 nil
+	if err := b.DeleteUserToken(ctx, "alice", "ok-sync-r-NB1"); err != nil {
+		t.Fatalf("missing token delete must be tolerated: %v", err)
+	}
+	// 存在 → 204 → nil；再删又回到 404 → 仍 nil
+	if _, err := b.CreateUserToken(ctx, "alice", "ok-sync-r-NB1"); err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+	if err := b.DeleteUserToken(ctx, "alice", "ok-sync-r-NB1"); err != nil {
+		t.Fatalf("delete existing: %v", err)
+	}
+	if err := b.DeleteUserToken(ctx, "alice", "ok-sync-r-NB1"); err != nil {
+		t.Fatalf("re-delete must be tolerated: %v", err)
 	}
 }

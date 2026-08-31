@@ -384,3 +384,52 @@ func TestApiServerPullNewMachine(t *testing.T) {
 		t.Fatalf("re-pull: %d", res)
 	}
 }
+
+// TestApiServerReposOldServerNoGitToken 仓已存在+本机无凭据+服务端过旧（无 git-token
+// 路由 → 404）：报"服务端版本过旧"升级提示，项目仓不 init。
+func TestApiServerReposOldServerNoGitToken(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "gitconfig-sys"))
+	fake := fakeOKServer(t, "http://gitea/alice/ok-x.git", "") // 无 git-token 路由
+	defer fake.Close()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	res, body := do(t, "POST", srv.URL+"/api/server/login", testToken, map[string]any{"url": fake.URL, "username": "alice", "password": "pw"})
+	if res != 200 {
+		t.Fatalf("login: %d %s", res, body)
+	}
+	mkProjectAt(t, okHome, "oldsrv", filepath.Join(t.TempDir(), "work"))
+	st := stFor(t, okHome, "oldsrv")
+	res, body = do(t, "POST", srv.URL+"/api/server/repos", testToken, map[string]any{"project": "oldsrv"})
+	if res != 200 {
+		t.Fatalf("repos: %d %s", res, body)
+	}
+	if !strings.Contains(string(body), "服务端版本过旧") {
+		t.Fatalf("expect upgrade hint: %s", body)
+	}
+	if syncx.Open(st.Root).IsRepo() {
+		t.Fatal("must not init when server too old and no credential")
+	}
+}
+
+// TestApiServerPullNotConfigured 未配置/未登录服务器时 pull：409 not_configured 且
+// 不注册空壳项目（宁可 409 也不留孤儿项目——终审 #3 前置检查回归）。
+func TestApiServerPullNotConfigured(t *testing.T) {
+	h, _, _ := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	res, body := do(t, "POST", srv.URL+"/api/server/pull", testToken, map[string]any{"project": "np1"})
+	if res != 409 || !strings.Contains(string(body), "not_configured") {
+		t.Fatalf("pull not configured: %d %s", res, body)
+	}
+	reg, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range reg.Projects {
+		if p.Name == "np1" {
+			t.Fatal("must not register shell project when server not configured")
+		}
+	}
+}

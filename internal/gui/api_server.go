@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -173,6 +174,9 @@ type serverReposRequest struct {
 	Project string `json:"project"`
 }
 
+// errProjectExists 哨兵：apiServerPull 注册空壳时区分"项目已存在"（409）与锁/IO 错误（500）。
+var errProjectExists = errors.New("项目已存在")
+
 // apiServerRepos 建仓一条龙：已注册项目直接进共用绑定管线。
 func (h *Handler) apiServerRepos(w http.ResponseWriter, r *http.Request) {
 	var req serverReposRequest
@@ -197,6 +201,14 @@ func (h *Handler) apiServerPull(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("非法项目名: %q", req.Project))
 		return
 	}
+	// 未配置/未登录服务器时不注册空壳——宁可 409 也不留孤儿项目（终审 #3）
+	if c, _, err := h.serverClient(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if c == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "not_configured"})
+		return
+	}
 	_, _, found, err := findProject(req.Project)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -207,17 +219,21 @@ func (h *Handler) apiServerPull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 锁内读-改-写注册空壳（并发 ok init / GUI 删除互斥，与 cli.go init 同口径）；
-	// 二次检查放锁内，防并发双注册。
+	// 二次检查放锁内，防并发双注册。哨兵 errProjectExists 区分 409（已存在）/500（锁/IO）。
 	if err := registry.Update(func(reg *registry.Registry) error {
 		for _, p := range reg.Projects {
 			if p.Name == req.Project {
-				return fmt.Errorf("项目 %q 已存在", req.Project)
+				return errProjectExists
 			}
 		}
 		reg.Projects = append(reg.Projects, registry.Project{Name: req.Project})
 		return nil
 	}); err != nil {
-		writeErr(w, http.StatusConflict, err.Error())
+		if errors.Is(err, errProjectExists) {
+			writeErr(w, http.StatusConflict, "项目已注册："+req.Project)
+		} else {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 	st := store.New(filepath.Join(registry.Home(), "projects", req.Project))
@@ -251,7 +267,8 @@ func (h *Handler) serveBindRepo(w http.ResponseWriter, r *http.Request, st *stor
 	credNote := ""
 	gitToken := pr.GitToken
 	if gitToken == "" && !syncx.HasStoredCredential(st.Root, pr.Repo.CloneURL, cfgServer.Username) {
-		tok, terr := c.GitToken(r.Context())
+		host, _ := os.Hostname()
+		tok, terr := c.GitToken(r.Context(), host)
 		if terr != nil {
 			var se *serverx.Error
 			if errors.As(terr, &se) && se.Code == http.StatusNotFound {
