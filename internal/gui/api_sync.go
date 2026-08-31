@@ -62,6 +62,24 @@ func hasKnowledgeContent(st *store.Store) bool {
 	return false
 }
 
+// knowledgeDirty：knowledge/ 下最新 .md 的 mtime 晚于 lastSync = 有未同步变更。
+// 纯文件系统检查（一次 ReadDir），不起 git 子进程；LastSync 零值（从未同步）且有内容即为 dirty。
+func knowledgeDirty(st *store.Store, lastSync time.Time) bool {
+	entries, err := os.ReadDir(st.KnowledgeDir())
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		if fi, err := e.Info(); err == nil && fi.ModTime().After(lastSync) {
+			return true
+		}
+	}
+	return false
+}
+
 // describeOutcome 人话状态（与 CLI 文案同族，供 toast 展示）。
 func describeOutcome(o syncx.Outcome) string {
 	switch {

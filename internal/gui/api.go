@@ -346,6 +346,8 @@ type syncStatusJSON struct {
 	Ahead    int  `json:"ahead"`
 	Behind   int  `json:"behind"`
 	Conflict bool `json:"conflict"`
+	Dirty    bool `json:"dirty"`
+	Syncing  bool `json:"syncing"`
 }
 
 type projectJSON struct {
@@ -371,6 +373,8 @@ func projectSyncStatus(st *store.Store) *syncStatusJSON {
 		Ahead:    l.Ahead,
 		Behind:   l.Behind,
 		Conflict: l.Conflict || repo.MergeInProgress(),
+		Dirty:    knowledgeDirty(st, l.LastSync),
+		Syncing:  syncx.IsSyncing(st.StateDir()),
 	}
 }
 

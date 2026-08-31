@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"openknowledge/internal/store"
 	"openknowledge/internal/syncx"
@@ -546,4 +547,76 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 	return string(out)
+}
+
+// syncProbe 是 /api/projects 响应中 sync 字段的探测结构（dirty/syncing 断言复用）。
+type syncProbe struct {
+	Name string `json:"name"`
+	Sync struct {
+		Dirty   bool `json:"dirty"`
+		Syncing bool `json:"syncing"`
+	} `json:"sync"`
+}
+
+// TestProjectSyncStatusDirtySyncing dirty：knowledge .md mtime 晚于 LastSync → true，
+// 早于 → false；syncing 标记存在 → true。
+func TestProjectSyncStatusDirtySyncing(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	mkProjectAt(t, okHome, "dirtydemo", filepath.Join(t.TempDir(), "src"))
+	st := stFor(t, okHome, "dirtydemo")
+	if err := st.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	// 从未同步（LastSync 零值）+ 有内容 → dirty
+	if err := os.WriteFile(filepath.Join(st.KnowledgeDir(), "a.md"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, body := do(t, "GET", srv.URL+"/api/projects", testToken, nil)
+	if res != 200 {
+		t.Fatalf("projects: %d", res)
+	}
+	var ps []syncProbe
+	if err := json.Unmarshal(body, &ps); err != nil {
+		t.Fatal(err)
+	}
+	var got *syncProbe
+	for i := range ps {
+		if ps[i].Name == "dirtydemo" {
+			got = &ps[i]
+		}
+	}
+	if got == nil || !got.Sync.Dirty {
+		t.Fatalf("dirty expected: %s", body)
+	}
+	// LastSync 拨到现在 → 不 dirty
+	sf := &syncx.StatusFile{Layers: map[string]*syncx.LayerStatus{}}
+	sf.Layer("personal").LastSync = time.Now().Add(time.Minute)
+	if err := sf.Save(st.StateDir()); err != nil {
+		t.Fatal(err)
+	}
+	res, body = do(t, "GET", srv.URL+"/api/projects", testToken, nil)
+	if res != 200 {
+		t.Fatalf("projects 2: %d", res)
+	}
+	ps = nil
+	if err := json.Unmarshal(body, &ps); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range ps {
+		if p.Name == "dirtydemo" && p.Sync.Dirty {
+			t.Fatal("dirty should be false after LastSync now")
+		}
+	}
+	// syncing 标记
+	unmark := syncx.MarkSyncing(st.StateDir())
+	defer unmark()
+	res, body = do(t, "GET", srv.URL+"/api/projects", testToken, nil)
+	if res != 200 {
+		t.Fatalf("projects 3: %d", res)
+	}
+	if !strings.Contains(string(body), `"syncing":true`) {
+		t.Fatalf("syncing expected: %s", body)
+	}
 }
