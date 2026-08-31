@@ -45,6 +45,10 @@ func (s *Store) EnsureRoot() (string, bool, error) {
 	if _, err := s.CreateUser("root", "root", hash); err != nil {
 		return "", false, err
 	}
+	// 初始 root 密码强制首登改密（自助改密成功后清除）
+	if err := s.SetMustChangePassword("root", true); err != nil {
+		return "", false, err
+	}
 	return pw, true, nil
 }
 

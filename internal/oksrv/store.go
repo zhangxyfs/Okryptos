@@ -309,6 +309,15 @@ func (s *Store) ResetRoot() (string, error) {
 	if err := s.SetUserPasswordHash("root", hash); err != nil {
 		return "", fmt.Errorf("更新 root 密码失败: %w", err)
 	}
+	// 重置 = 强制改密 + 踢掉 root 全部旧会话
+	if err := s.SetMustChangePassword("root", true); err != nil {
+		return "", err
+	}
+	if root := s.GetUser("root"); root != nil {
+		if err := s.DeleteUserSessionsExcept(root.ID, ""); err != nil {
+			return "", err
+		}
+	}
 	initFile := filepath.Join(s.dir, "INITIAL_ROOT_PASSWORD")
 	if err := os.WriteFile(initFile, []byte(pw+"\n"), 0o600); err != nil {
 		return "", fmt.Errorf("重写 INITIAL_ROOT_PASSWORD 失败: %w", err)

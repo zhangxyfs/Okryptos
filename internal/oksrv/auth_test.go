@@ -37,6 +37,10 @@ func TestPasswordAndRoot(t *testing.T) {
 	if s.VerifyLogin("root", "bad") != nil {
 		t.Fatal("bad password must fail")
 	}
+	// 初始 root 密码强制首登改密
+	if !s.GetUser("root").MustChangePassword {
+		t.Fatal("初始 root 密码必须置强制改密标记")
+	}
 	// 禁用用户不可登录
 	if _, err := s.CreateUser("bob", "member", mustHash(t, "pw1")); err != nil {
 		t.Fatal(err)

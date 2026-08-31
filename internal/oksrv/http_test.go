@@ -357,3 +357,46 @@ func getenv(t *testing.T, key string) string {
 func getEnvForTest(key string) string { return testEnv[key] }
 
 var testEnv = map[string]string{}
+
+// TestUserCreateAndResetSetFlag 钉住置位点：建用户（随机/自选密码）与管理员重置
+// 都置强制改密标记；重置同时踢掉目标用户全部旧会话。
+func TestUserCreateAndResetSetFlag(t *testing.T) {
+	srv, st, _ := newTestServer(t)
+	defer srv.Close()
+	rootTok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
+
+	code, out := call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "alice"})
+	if code != 200 {
+		t.Fatalf("create alice: %d %v", code, out)
+	}
+	if !st.GetUser("alice").MustChangePassword {
+		t.Fatal("建用户应置强制改密标记")
+	}
+	code, out = call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "dave", "password": "mypass123"})
+	if code != 200 {
+		t.Fatalf("create dave: %d %v", code, out)
+	}
+	if !st.GetUser("dave").MustChangePassword {
+		t.Fatal("自选密码建用户同样置标记")
+	}
+
+	// dave 登录两次拿两个会话；清标记模拟已自助改过密
+	daveTok1 := login(t, srv, "dave", "mypass123")
+	daveTok2 := login(t, srv, "dave", "mypass123")
+	if err := st.SetMustChangePassword("dave", false); err != nil {
+		t.Fatal(err)
+	}
+
+	// root 重置 dave → 标记置位 + 全部旧会话失效 + 新密码可登录
+	code, out = call(t, srv, "POST", "/api/v1/users/dave/reset-password", rootTok, nil)
+	if code != 200 || out["password"].(string) == "" {
+		t.Fatalf("reset dave: %d %v", code, out)
+	}
+	if !st.GetUser("dave").MustChangePassword {
+		t.Fatal("重置应置强制改密标记")
+	}
+	if st.SessionUser(daveTok1) != nil || st.SessionUser(daveTok2) != nil {
+		t.Fatal("重置应踢掉该用户全部旧会话")
+	}
+	login(t, srv, "dave", out["password"].(string))
+}

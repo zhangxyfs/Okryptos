@@ -277,6 +277,11 @@ func (s *server) apiUserCreate(w http.ResponseWriter, r *http.Request, u *User) 
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// 他人代设的初始密码（自选或随机）一律强制首登改密
+	if err := s.st.SetMustChangePassword(in.Username, true); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	s.st.Audit(u.Username, "create-user", in.Username, "role="+role)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"username": in.Username, "password": pw, "git_token": token,
@@ -303,6 +308,15 @@ func (s *server) apiUserResetPassword(w http.ResponseWriter, r *http.Request, u 
 		return
 	}
 	if err := s.st.SetUserPasswordHash(name, hash); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// 重置 = 强制下次登录改密 + 踢掉该用户全部旧会话
+	if err := s.st.SetMustChangePassword(name, true); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.st.DeleteUserSessionsExcept(target.ID, ""); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

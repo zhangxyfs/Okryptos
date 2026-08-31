@@ -140,6 +140,12 @@ func TestResetRoot(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("EnsureRoot: created=%v err=%v", created, err)
 	}
+	// 重置前置一个 root 会话
+	root := st.GetUser("root")
+	tok, err := st.CreateSession(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	new1, err := st.ResetRoot()
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +159,13 @@ func TestResetRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(st.dir, "INITIAL_ROOT_PASSWORD")); err != nil {
 		t.Fatal("应重写 INITIAL_ROOT_PASSWORD")
+	}
+	// 重置 = 强制改密 + 踢掉 root 全部旧会话
+	if !st.GetUser("root").MustChangePassword {
+		t.Fatal("ResetRoot 应置强制改密标记")
+	}
+	if st.SessionUser(tok) != nil {
+		t.Fatal("ResetRoot 应踢掉 root 全部旧会话")
 	}
 }
 
