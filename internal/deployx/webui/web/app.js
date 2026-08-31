@@ -1097,16 +1097,16 @@ function pageManage(content) {
   unBtnRow.append(unBtn);
   uninstall.append(unRow, delLab, unBtnRow);
 
-  // ---- 操作日志区（SSE）与底部容器日志面板（一次性拉取）----
+  // ---- 操作日志区（SSE）与容器日志面板（一次性拉取，放在升级/日志卡之下）----
   const opsSlot = el("div");
   const foldSlot = el("div");
-  foldSlot.style.marginTop = "12px";
-  renderFold(foldSlot, null, 0);
-  // 六张操作卡两两一行（升级+日志 / 重置+备份 / 恢复+卸载），充分利用最大化窗口宽度
+  foldSlot.style.marginBottom = "12px";
+  renderFold(foldSlot, null, 0, "", pullLogs);
+  // 六张操作卡两两一行（升级+日志 / 重置+备份 / 恢复+卸载），容器日志面板夹在一二行之间
   const row1 = el("div", "cardrow"); row1.append(upgrade, viewLogs);
   const row2 = el("div", "cardrow"); row2.append(reset, backup);
   const row3 = el("div", "cardrow"); row3.append(restore, uninstall);
-  content.append(row1, row2, row3, opsSlot, foldSlot);
+  content.append(row1, foldSlot, row2, row3, opsSlot);
 
   // 版本号比较：vX.Y.Z 逐段数值比（非标准串视为最小）
   function semverGt(a, b) {
@@ -1194,15 +1194,16 @@ function pageManage(content) {
   upBtn.onclick = () => doUpgrade(tagI.value.trim());
   reBtn.onclick = () => doUpgrade(curImageTag());
 
-  pullBtn.onclick = async () => {
-    renderFold(foldSlot, null, 0, t("pulling"));
+  async function pullLogs() {
+    renderFold(foldSlot, null, 0, t("pulling"), pullLogs);
     try {
       const r = await api("/api/remote-logs?dir=" + encodeURIComponent(S.deployDir) + "&tail=" + tailSel.value);
-      renderFold(foldSlot, r.logs || "", tailSel.value);
+      renderFold(foldSlot, r.logs || "", tailSel.value, "", pullLogs);
     } catch (e) {
-      renderFold(foldSlot, null, 0, "✗ " + e.message);
+      renderFold(foldSlot, null, 0, "✗ " + e.message, pullLogs);
     }
-  };
+  }
+  pullBtn.onclick = pullLogs;
 
   rsBtn.onclick = async () => {
     errSlot.innerHTML = "";
@@ -1270,14 +1271,16 @@ function pageManage(content) {
   };
 }
 
-// 底部容器日志面板（照原型 logfold 折叠块 + .log h160，非 SSE，一次性拉取）
-function renderFold(slot, logs, tail, hint) {
+// 底部容器日志面板（照原型 logfold 折叠块 + .log h480，非 SSE，一次性拉取）。
+// onOpen：折叠态点头行也可触发拉取（"点击展开"不再是死文案）。
+function renderFold(slot, logs, tail, hint, onOpen) {
   slot.innerHTML = "";
   const open = logs !== null;
   const title = logs !== null ? t("foldTitleTail", { n: tail }) : t("foldTitle");
   const head = el("div", "logfold", (open ? "▾ " : "▸ ") + title + (open ? t("foldClose") : t("foldOpen")));
   head.onclick = () => {
-    if (logs !== null) renderFold(slot, null, 0);
+    if (open) renderFold(slot, null, 0, "", onOpen);
+    else if (onOpen) onOpen();
   };
   slot.append(head);
   if (open) {
