@@ -29,10 +29,14 @@ a:hover { text-decoration:underline; }
          align-items:center; gap:6px; white-space:nowrap; }
 .badge.off { background:var(--hover); color:var(--muted); }
 .badge.on  { background:var(--ok-bg); color:var(--ok); }
+/* 中/EN 语言切换胶囊（照主 GUI .lang-seg：当前语言高亮） */
+.lang-seg { display:flex; border:1px solid var(--border); border-radius:999px; overflow:hidden; }
+.lang-seg button { border:none; background:none; padding:3px 10px; cursor:pointer; font-size:12px; color:var(--muted); }
+.lang-seg button.on { background:var(--fg); color:var(--bg); font-weight:600; }
 
-/* ---------- 内容区 ---------- */
-.content { padding:22px 28px 70px; max-width:920px; margin:0 auto; }
-.content.narrow { max-width:920px; display:flex; justify-content:center; }
+/* ---------- 内容区（窗口打开即最大化，页面按全宽布局；连接页 narrow 居中） ---------- */
+.content { padding:22px 34px 70px; }
+.content.narrow { max-width:920px; margin:0 auto; display:flex; justify-content:center; }
 .pagehead { margin:0 0 4px; font-size:18px; }
 .pagesub { color:var(--muted); font-size:12.5px; margin-bottom:16px; }
 

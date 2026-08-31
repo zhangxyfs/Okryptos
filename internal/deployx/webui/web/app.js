@@ -2,6 +2,215 @@
 // 视觉事实源：docs/prototypes/prototype-okdeploy-final.html（gitignored，本地评审产物）
 "use strict";
 
+/* ================= i18n（仅界面文案；后端返回的错误消息与日志行原文透传，不翻译） ================= */
+const I18N = {
+  zh: {
+    pageTitle: "OpenKnowledge 服务端部署",
+    badgeConnected: "已连接 ", badgeDisconnected: "未连接",
+    downloadLog: "下载日志",
+    onceOnly: "（只显示这一次）", copy: "复制", copied: "已复制", copyFail: "复制失败，请手动选择",
+    pickDirTitle: "选择部署目录", currentPrefix: "当前：", pickThisDir: "选此目录", cancel: "取消", noSubdirs: "（无子目录）",
+    connectTitle: "连接到 NAS", connectSub: "通过 SSH 部署 OpenKnowledge 服务端",
+    connectedGo: "已连接 {c}，直接进入环境探测 →",
+    hostPh: "<user>@<ip> 或 <ip>", sshAddr: "SSH 地址", port: "端口",
+    username: "用户名", userPh: "地址里写了 user@ 可留空",
+    authMethod: "认证方式", password: "密码", privateKey: "私钥", keyFile: "私钥文件",
+    keyHint: "支持 OpenSSH 格式，passphrase 将在连接时询问",
+    connect: "连接", connecting: "连接中…",
+    connectFoot: "连接仅用于部署与管理，不会留存你的凭证",
+    probeTitle: "环境探测", connectedPrefix: "已连接 ", unknownConn: "（未知）",
+    reprobe: "重新探测", backToConnect: "返回连接页", probing: "探测中，请稍候…",
+    probeFail: "✗ 探测失败：", retry: "重试",
+    dockerNoAccess: "Docker 已安装但当前用户无法访问", dockerMissing: "未检测到 Docker", dockerCmdMissing: "docker 命令不存在",
+    composeOk: "Compose 插件可用", composeMissing: "未检测到 compose 插件", composePluginMissing: "docker compose 插件缺失",
+    dockerSudo: "Docker 命令将以 sudo 执行", sudoVerified: "已验证通过；密码仅存内存，不落盘",
+    portBusy: "端口 {p} 已被占用", portBusyOwn: "容器 {c}（本部署的 {what}）",
+    portBusyAvoid: "容器 {c}，部署时将自动避让到 {p2}",
+    portFree: "端口 {p} 空闲", portGiteaUse: "将用于 Gitea Web", portOkUse: "将用于 okserver API",
+    giteaFound: "检测到已有 Gitea", existingFound: "✓ 检测到已有部署：", enterManage: "进入管理模式",
+    cannotDeploy: "✗ 无法继续部署",
+    dockerPermDesc: "Docker 已安装，但当前用户无权访问 daemon。okdeploy 可以直接用 sudo 执行部署（密码仅存内存，不落盘）：",
+    sudoPwPhSame: "sudo 密码（默认同登录密码）", sudoPwPhKey: "sudo 密码（私钥登录必填）",
+    enableSudo: "启用 sudo 并重新探测", verifying: "验证中…",
+    manualFix: "或者手动处理：在 NAS 上执行 sudo usermod -aG docker {u}，重新登录 SSH 后点「重新探测」",
+    needDockerDesc: "okdeploy 需要 NAS 已安装 Docker 与 compose 插件，请先安装后重新探测：",
+    nasSyno: "群晖 Synology", nasQnap: "威联通 QNAP", nasOther: "其他 Linux NAS",
+    synoHint: "：套件中心安装「Container Manager」（DSM 7.2+）",
+    qnapHint: "：App Center 安装「Container Station」",
+    otherHint: "：安装 Docker Engine 24+ 及 docker compose 插件",
+    fullDeployTitle: "📦 全新部署",
+    fullDeployDesc: "部署 okserver + Gitea 双容器。新 Gitea 使用 {p} 端口，与已有 Gitea 互不干扰。适合想独立管理知识库仓库的场景。",
+    extTitle: "🔗 接入已有 Gitea", extDeployHead: "接入已有 Gitea",
+    extDesc: "仅部署 okserver 单容器，复用已有 Gitea 作为 Git 后端。需要提供管理员 token，并完成治理项确认。适合已有统一 Git 服务的场景。",
+    startDeploy: "开始部署",
+    extDeploySub: "仅部署 okserver 单容器，复用已有 Gitea{d}作为 Git 后端", detailParens: "（{d}）",
+    fullDeployHead: "全新部署", fullDeploySub: "将在 NAS 上创建 okserver + Gitea 双容器（docker compose）",
+    backToProbe: "← 返回探测页",
+    browse: "浏览…", deployDir: "部署目录", giteaPort: "Gitea 端口", portAvoided: "⚠ {p} 被占用，已自动避让",
+    okPort: "okserver 端口", imageTag: "镜像版本",
+    giteaUrl: "已有 Gitea 地址", testGitea: "测试 Gitea", adminToken: "管理员 token",
+    testing: "测试中…", smokeOk: "✓ 兼容性验证通过（API v1）",
+    checklistTitle: "⚠ 接入已有 Gitea 前请逐项确认",
+    checklistDesc: "okdeploy 不会修改你的 Gitea 配置，以下治理项需要你已在 Gitea 中自行设置：",
+    checklistHint: "全部确认后可开始",
+    deploying: "部署中…", deployHead: "部署中",
+    deploySub: "表单已锁定，部署完成后将显示一次性 root 初始密码",
+    sumDir: "部署目录 ", sumGiteaPort: " Gitea 端口 ", sumOkPort: " okserver 端口 ", sumImage: " 镜像 ", readonly: "（只读）",
+    logHint: "日志实时滚动，断网中断后可从断点重试", currentStep: "当前步骤：",
+    deployDone: "✓ 部署完成", deployFailed: "✗ 部署失败", deployFailSuffix: "（可修正后重试，已完成步骤会保留）",
+    backToEdit: "← 返回修改配置",
+    doneRunning: "✓ 部署完成：okserver 已在 {h} 上运行",
+    rootPwTitle: "root 初始密码", rootPwWarn: "请立即保存：此密码已在服务器上删除，无法再次查看",
+    rootPwFail: "未能读取 root 初始密码，请稍后在管理模式中重置",
+    nextSteps: "下一步",
+    nextLi1a: "在客户端 ", nextLi1b: "OkManager → 服务器页", nextLi1c: " 填服务器地址 ",
+    nextLi2a: "用 ", nextLi2b: " + 上方初始密码登录，并按提示修改密码",
+    nextLi3: "创建用户和项目仓库，开始使用",
+    closeWindow: "关闭窗口",
+    manageTitle: "管理模式", deployDirPrefix: "部署目录 ", unknownProbe: "（未知，请先探测）",
+    disconnect: "断开连接",
+    noDirWarn: "尚未确定部署目录：请先在探测页检测已有部署，或完成一次部署",
+    goProbe: "前往环境探测", statusLoading: "状态查询中…",
+    upgrade: "升级", upgradeDesc: "拉取新镜像并重建容器，数据卷不受影响，停机约 10 秒",
+    curPrefix: "当前 ", repull: "重拉镜像", newVersion: "🔔 有新版本 ", upToDate: "✓ 已是最新",
+    viewLogs: "查看日志", viewLogsDesc: "拉取容器最近日志用于排障",
+    linesUnit: "行", pullLogs: "拉取日志", pullHint: "结果显示在页面底部日志面板",
+    resetTitle: "重置 root 密码",
+    resetDesc: "root 密码丢失时使用。将在服务器上重新生成 32 位随机密码，旧密码立即失效",
+    resetPh: "输入 RESET 确认", resetBtn: "重置密码",
+    backupTitle: "备份", backupDesc: "停机数秒打包数据卷并下载到本机", backupNow: "立即备份",
+    restoreTitle: "恢复", pickFile: "选择备份文件…", noneSelected: "（未选择）",
+    restorePh: "输入 RESTORE 确认",
+    restoreWarn: "⚠ 恢复将删除并覆盖服务器现有数据，不可撤销。建议先执行备份。",
+    restoreBtn: "开始恢复",
+    uninstallTitle: "卸载", uninstallDesc: "删除 okdeploy 创建的容器与 compose 项目",
+    deletePh: "输入 DELETE 确认", deleteData: "同时删除数据目录（不可恢复）",
+    containerSuffix: " 容器", runningPrefix: "运行中 · ", statusUnknown: "未知",
+    imageDiskCap: "镜像版本 / 数据占用", runningVer: "（运行 {v}）",
+    statusFail: "✗ 状态查询失败：", upgradeDone: "✓ 升级完成", pulling: "拉取中…",
+    newRootPw: "新 root 密码", newRootPwWarn: "请立即保存：旧密码已失效，此密码不会再次显示",
+    resetReadFail: "重置完成但未能读取新密码：",
+    restoreDone: "✓ 恢复完成", uninstalled: "✓ 已卸载，即将返回连接页…",
+    foldTitleTail: "容器日志（最近 {n} 行）", foldTitle: "容器日志",
+    foldClose: "（点击收起）", foldOpen: "（点击展开）", noLogs: "（无日志）",
+  },
+  en: {
+    pageTitle: "OpenKnowledge Server Deployment",
+    badgeConnected: "Connected to ", badgeDisconnected: "Disconnected",
+    downloadLog: "Download log",
+    onceOnly: " (shown only once)", copy: "Copy", copied: "Copied", copyFail: "Copy failed; select it manually",
+    pickDirTitle: "Choose deploy directory", currentPrefix: "Current: ", pickThisDir: "Use this directory", cancel: "Cancel", noSubdirs: "(no subdirectories)",
+    connectTitle: "Connect to NAS", connectSub: "Deploy the OpenKnowledge server over SSH",
+    connectedGo: "Connected to {c}, go straight to environment probe →",
+    hostPh: "<user>@<ip> or <ip>", sshAddr: "SSH address", port: "Port",
+    username: "Username", userPh: "Optional if the address includes user@",
+    authMethod: "Auth method", password: "Password", privateKey: "Private key", keyFile: "Key file",
+    keyHint: "OpenSSH format; passphrase will be asked on connect",
+    connect: "Connect", connecting: "Connecting…",
+    connectFoot: "The connection is used only for deploy & manage; your credentials are never stored",
+    probeTitle: "Environment Probe", connectedPrefix: "Connected to ", unknownConn: "(unknown)",
+    reprobe: "Re-probe", backToConnect: "Back to connect page", probing: "Probing, please wait…",
+    probeFail: "✗ Probe failed: ", retry: "Retry",
+    dockerNoAccess: "Docker is installed but not accessible by the current user", dockerMissing: "Docker not detected", dockerCmdMissing: "docker command not found",
+    composeOk: "Compose plugin available", composeMissing: "Compose plugin not detected", composePluginMissing: "docker compose plugin missing",
+    dockerSudo: "Docker commands will run via sudo", sudoVerified: "Verified; the password stays in memory only, never on disk",
+    portBusy: "Port {p} is busy", portBusyOwn: "Container {c} (the {what} of this deployment)",
+    portBusyAvoid: "Container {c}; will auto-switch to {p2} on deploy",
+    portFree: "Port {p} is free", portGiteaUse: "Will serve Gitea Web", portOkUse: "Will serve okserver API",
+    giteaFound: "Existing Gitea detected", existingFound: "✓ Existing deployment detected: ", enterManage: "Enter manage mode",
+    cannotDeploy: "✗ Cannot continue deployment",
+    dockerPermDesc: "Docker is installed, but the current user cannot access the daemon. okdeploy can deploy via sudo (password stays in memory only):",
+    sudoPwPhSame: "sudo password (defaults to login password)", sudoPwPhKey: "sudo password (required for key login)",
+    enableSudo: "Enable sudo and re-probe", verifying: "Verifying…",
+    manualFix: "Or fix it manually: run sudo usermod -aG docker {u} on the NAS, log back in over SSH, then click Re-probe",
+    needDockerDesc: "okdeploy requires Docker and the compose plugin on the NAS. Install them, then re-probe:",
+    nasSyno: "Synology", nasQnap: "QNAP", nasOther: "Other Linux NAS",
+    synoHint: ": install Container Manager from Package Center (DSM 7.2+)",
+    qnapHint: ": install Container Station from App Center",
+    otherHint: ": install Docker Engine 24+ and the docker compose plugin",
+    fullDeployTitle: "📦 Fresh deployment",
+    fullDeployDesc: "Deploys okserver + Gitea containers. The new Gitea uses port {p} and won't interfere with the existing one. Best if you want to manage knowledge repos independently.",
+    extTitle: "🔗 Use existing Gitea", extDeployHead: "Use existing Gitea",
+    extDesc: "Deploys only okserver, reusing the existing Gitea as the Git backend. Requires an admin token and governance checklist confirmation. Best if you already run a unified Git service.",
+    startDeploy: "Start deployment",
+    extDeploySub: "Deploy only okserver, reusing the existing Gitea{d} as the Git backend", detailParens: " ({d})",
+    fullDeployHead: "Fresh deployment", fullDeploySub: "Will create okserver + Gitea containers on the NAS (docker compose)",
+    backToProbe: "← Back to probe page",
+    browse: "Browse…", deployDir: "Deploy directory", giteaPort: "Gitea port", portAvoided: "⚠ {p} is busy; auto-switched",
+    okPort: "okserver port", imageTag: "Image tag",
+    giteaUrl: "Existing Gitea URL", testGitea: "Test Gitea", adminToken: "Admin token",
+    testing: "Testing…", smokeOk: "✓ Compatibility verified (API v1)",
+    checklistTitle: "⚠ Confirm each item before using an existing Gitea",
+    checklistDesc: "okdeploy won't change your Gitea config; the following governance items must already be set up in Gitea:",
+    checklistHint: "Enabled once all are checked",
+    deploying: "Deploying…", deployHead: "Deploying",
+    deploySub: "The form is locked; a one-time root password will be shown when done",
+    sumDir: "Deploy directory ", sumGiteaPort: " Gitea port ", sumOkPort: " okserver port ", sumImage: " Image ", readonly: "(read-only)",
+    logHint: "Logs stream live; if interrupted, you can resume from where it stopped", currentStep: "Current step: ",
+    deployDone: "✓ Deployment complete", deployFailed: "✗ Deployment failed", deployFailSuffix: " (fix and retry; completed steps are kept)",
+    backToEdit: "← Back to edit config",
+    doneRunning: "✓ Deployment complete: okserver is running on {h}",
+    rootPwTitle: "Initial root password", rootPwWarn: "Save it now: it has been deleted on the server and cannot be shown again",
+    rootPwFail: "Could not read the initial root password; reset it later in manage mode",
+    nextSteps: "Next steps",
+    nextLi1a: "In the client ", nextLi1b: "OkManager → Server page", nextLi1c: " enter the server address ",
+    nextLi2a: "Log in with ", nextLi2b: " + the initial password above, and change it as prompted",
+    nextLi3: "Create users and project repos, and start using it",
+    closeWindow: "Close window",
+    manageTitle: "Manage Mode", deployDirPrefix: "Deploy directory ", unknownProbe: "(unknown, probe first)",
+    disconnect: "Disconnect",
+    noDirWarn: "Deploy directory not set: probe for an existing deployment first, or finish a deployment",
+    goProbe: "Go to environment probe", statusLoading: "Loading status…",
+    upgrade: "Upgrade", upgradeDesc: "Pulls the new image and recreates containers; volumes are untouched, ~10s downtime",
+    curPrefix: "Current ", repull: "Re-pull image", newVersion: "🔔 New version ", upToDate: "✓ Up to date",
+    viewLogs: "View logs", viewLogsDesc: "Pull recent container logs for troubleshooting",
+    linesUnit: "lines", pullLogs: "Pull logs", pullHint: "Results appear in the log panel at the bottom",
+    resetTitle: "Reset root password",
+    resetDesc: "Use when the root password is lost. Generates a new 32-char random password on the server; the old one expires immediately",
+    resetPh: "Type RESET to confirm", resetBtn: "Reset password",
+    backupTitle: "Backup", backupDesc: "Packs the data volumes and downloads them here; a few seconds of downtime", backupNow: "Back up now",
+    restoreTitle: "Restore", pickFile: "Choose backup file…", noneSelected: "(none)",
+    restorePh: "Type RESTORE to confirm",
+    restoreWarn: "⚠ Restoring deletes and overwrites existing server data; irreversible. Back up first.",
+    restoreBtn: "Start restore",
+    uninstallTitle: "Uninstall", uninstallDesc: "Removes the containers and compose project created by okdeploy",
+    deletePh: "Type DELETE to confirm", deleteData: "Also delete the data directory (irreversible)",
+    containerSuffix: " container", runningPrefix: "Running · ", statusUnknown: "Unknown",
+    imageDiskCap: "Image / Disk usage", runningVer: " (running {v})",
+    statusFail: "✗ Status query failed: ", upgradeDone: "✓ Upgrade complete", pulling: "Pulling…",
+    newRootPw: "New root password", newRootPwWarn: "Save it now: the old password is expired and this one won't be shown again",
+    resetReadFail: "Reset done but failed to read the new password: ",
+    restoreDone: "✓ Restore complete", uninstalled: "✓ Uninstalled; returning to the connect page…",
+    foldTitleTail: "Container logs (last {n} lines)", foldTitle: "Container logs",
+    foldClose: " (click to collapse)", foldOpen: " (click to expand)", noLogs: "(no logs)",
+  },
+};
+let LANG = "zh";
+try { LANG = localStorage.getItem("okdeploy_lang") === "en" ? "en" : "zh"; } catch (e) {}
+// 取文案：当前语言缺失回退 zh，再缺回退 key 本身；vars 做 {x} 插值
+function t(key, vars) {
+  let s = (I18N[LANG] && I18N[LANG][key]) || I18N.zh[key] || key;
+  if (vars) { for (const k in vars) s = s.split("{" + k + "}").join(String(vars[k])); }
+  return s;
+}
+// 徽标按当前语言与连接态重刷（语言切换后调用）
+function refreshBadge() {
+  if (S.connStr) setBadge(true, t("badgeConnected") + S.connStr);
+  else setBadge(false, t("badgeDisconnected"));
+}
+// 切换语言：写 localStorage → 同步 title/<html lang>/胶囊高亮/徽标 → 重渲染当前页
+function setLang(l, skipRoute) {
+  LANG = l;
+  try { localStorage.setItem("okdeploy_lang", l); } catch (e) {}
+  document.documentElement.lang = l === "zh" ? "zh-CN" : "en";
+  document.title = t("pageTitle");
+  document.querySelectorAll("#lang-seg button").forEach((b) => {
+    b.className = b.getAttribute("data-lang") === l ? "on" : "";
+  });
+  refreshBadge();
+  if (!skipRoute) route();
+}
+
 async function api(path, opts = {}) {
   const o = { method: opts.method || "GET", headers: { "X-Ok-Token": window.OK_TOKEN } };
   if (opts.body !== undefined) {
@@ -59,10 +268,6 @@ function route() {
     location.hash = "#/connect";
     return;
   }
-  // 通知 WebView2 宿主当前页名：按页调整窗口尺寸（浏览器回退路径无 chrome.webview，跳过）
-  if (window.chrome && chrome.webview) {
-    chrome.webview.postMessage({ type: "page", page });
-  }
   const app = document.getElementById("app");
   app.innerHTML = "";
   const content = el("div", "content");
@@ -78,7 +283,7 @@ function mountLogPane(container, onEvent, heightCls) {
   container.innerHTML = "";
   const wrap = el("div", "logwrap");
   const dlw = el("div", "dl");
-  const dl = el("button", "btn btn-mini", "下载日志");
+  const dl = el("button", "btn btn-mini", t("downloadLog"));
   const body = el("div", "log " + (heightCls || "h320"));
   dl.onclick = () => downloadLog(body);
   dlw.append(dl);
@@ -91,9 +296,9 @@ function mountLogPane(container, onEvent, heightCls) {
     // 每行带 HH:MM:SS 时间戳：超时类问题需要对时间轴
     const d = ev.ts ? new Date(ev.ts) : new Date();
     const pad = (n) => String(n).padStart(2, "0");
-    const t = el("span", "ts");
-    t.textContent = pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()) + " ";
-    body.append(t);
+    const tsEl = el("span", "ts");
+    tsEl.textContent = pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()) + " ";
+    body.append(tsEl);
     if (ev.step) {
       const s = el("span", "step");
       s.textContent = "[" + ev.step + "] ";
@@ -149,15 +354,15 @@ function pwdCard(title, pw, warnText) {
   const head = el("div");
   head.style.cssText = "font-weight:700;font-size:14.5px";
   head.append(document.createTextNode(title));
-  const once = el("span", "muted small", "（只显示这一次）");
+  const once = el("span", "muted small", t("onceOnly"));
   once.style.fontWeight = "400";
   head.append(once);
   const pwe = el("div", "pw", pw);
   const cpw = el("div");
-  const copyBtn = el("button", "btn", "复制");
+  const copyBtn = el("button", "btn", t("copy"));
   copyBtn.onclick = async () => {
-    try { await navigator.clipboard.writeText(pw); copyBtn.textContent = "已复制"; }
-    catch (e) { copyBtn.textContent = "复制失败，请手动选择"; }
+    try { await navigator.clipboard.writeText(pw); copyBtn.textContent = t("copied"); }
+    catch (e) { copyBtn.textContent = t("copyFail"); }
   };
   cpw.append(copyBtn);
   const warn = el("div", "fb-err", warnText);
@@ -177,8 +382,8 @@ function openDirPicker(input) {
 
   async function load(path) {
     modal.innerHTML = "";
-    modal.append(el("h3", "", "选择部署目录"));
-    const curRow = el("div", "small muted", "当前：" + (path || "$HOME"));
+    modal.append(el("h3", "", t("pickDirTitle")));
+    const curRow = el("div", "small muted", t("currentPrefix") + (path || "$HOME"));
     curRow.style.marginBottom = "10px";
     modal.append(curRow);
     const list = el("div");
@@ -186,9 +391,9 @@ function openDirPicker(input) {
     modal.append(list);
     const foot = el("div");
     foot.style.cssText = "display:flex;gap:10px;justify-content:flex-end";
-    const pick = el("button", "btn btn-primary", "选此目录");
+    const pick = el("button", "btn btn-primary", t("pickThisDir"));
     pick.onclick = () => { input.value = path || "~/openknowledge"; mask.remove(); };
-    const cancel = el("button", "btn", "取消");
+    const cancel = el("button", "btn", t("cancel"));
     cancel.onclick = () => mask.remove();
     foot.append(cancel, pick);
     modal.append(foot);
@@ -196,7 +401,7 @@ function openDirPicker(input) {
     try { res = await api("/api/ls", { method: "POST", body: { path: path } }); }
     catch (e) { list.append(el("div", "fb-err", e.message)); return; }
     const dirs = res.dirs || [];
-    if (!dirs.length) list.append(el("div", "small muted", "（无子目录）"));
+    if (!dirs.length) list.append(el("div", "small muted", t("noSubdirs")));
     for (const d of dirs) {
       const clean = d.replace(/\/+$/, "");
       const name = clean.split("/").pop() || clean;
@@ -216,9 +421,9 @@ function pageConnect(content) {
   wrap.style.cssText = "width:640px;margin-top:48px";
   const card = el("div", "pcard");
   card.style.padding = "24px 28px";
-  const head = el("h2", "pagehead", "连接到 NAS");
+  const head = el("h2", "pagehead", t("connectTitle"));
   head.style.cssText = "text-align:center;margin-bottom:2px";
-  const sub = el("div", "pagesub", "通过 SSH 部署 OpenKnowledge 服务端");
+  const sub = el("div", "pagesub", t("connectSub"));
   sub.style.cssText = "text-align:center;margin-bottom:18px";
   card.append(head, sub);
   const errSlot = el("div");
@@ -227,7 +432,7 @@ function pageConnect(content) {
   if (S.connStr) {
     const go = el("div", "small");
     go.style.cssText = "text-align:center;margin-bottom:12px";
-    const a = el("a", "", "已连接 " + S.connStr + "，直接进入环境探测 →");
+    const a = el("a", "", t("connectedGo", { c: S.connStr }));
     a.href = "javascript:void(0)";
     a.onclick = () => { location.hash = "#/probe"; };
     go.append(a);
@@ -235,12 +440,12 @@ function pageConnect(content) {
   }
 
   const hostI = pinput("mono", "", "290px");
-  hostI.placeholder = "<user>@<ip> 或 <ip>";
+  hostI.placeholder = t("hostPh");
   const portI = pinput("mono", "22", "56px");
-  card.append(prow("SSH 地址", [hostI, el("span", "muted small", "端口"), portI]));
+  card.append(prow(t("sshAddr"), [hostI, el("span", "muted small", t("port")), portI]));
   const userI = pinput("", "", "290px");
-  userI.placeholder = "地址里写了 user@ 可留空";
-  card.append(prow("用户名", [userI]));
+  userI.placeholder = t("userPh");
+  card.append(prow(t("username"), [userI]));
 
   // user@host 一把输：地址框每次输入都实时解析；用户名框的值若等于上次自动填入
   // 的值（或为空）则继续跟随，一旦用户手动改过就不再覆盖。
@@ -270,13 +475,13 @@ function pageConnect(content) {
   }
 
   // 认证方式 tabs：密码 / 私钥（二选一）
-  const authRow = prow("认证方式", []);
+  const authRow = prow(t("authMethod"), []);
   authRow.style.marginBottom = "2px";
   card.append(authRow);
   const tabs = el("div", "tabs");
   tabs.style.marginLeft = "0";
-  const tabPwd = el("button", "on", "密码");
-  const tabKey = el("button", "", "私钥");
+  const tabPwd = el("button", "on", t("password"));
+  const tabKey = el("button", "", t("privateKey"));
   tabs.append(tabPwd, tabKey);
   card.append(tabs);
   const authSlot = el("div");
@@ -289,10 +494,10 @@ function pageConnect(content) {
     tabKey.className = which === "key" ? "on" : "";
     authSlot.innerHTML = "";
     if (which === "pwd") {
-      authSlot.append(prow("密码", [pwdI]));
+      authSlot.append(prow(t("password"), [pwdI]));
     } else {
-      authSlot.append(prow("私钥文件", [keyI]));
-      const hint = el("div", "small muted", "支持 OpenSSH 格式，passphrase 将在连接时询问");
+      authSlot.append(prow(t("keyFile"), [keyI]));
+      const hint = el("div", "small muted", t("keyHint"));
       hint.style.margin = "-4px 0 4px 120px";
       authSlot.append(hint);
     }
@@ -303,10 +508,10 @@ function pageConnect(content) {
 
   const btnWrap = el("div");
   btnWrap.style.marginTop = "18px";
-  const btn = el("button", "btn btn-primary btn-block", "连接");
+  const btn = el("button", "btn btn-primary btn-block", t("connect"));
   btnWrap.append(btn);
   card.append(btnWrap);
-  const foot = el("div", "small muted", "连接仅用于部署与管理，不会留存你的凭证");
+  const foot = el("div", "small muted", t("connectFoot"));
   foot.style.textAlign = "center";
   wrap.append(card, foot);
   content.append(wrap);
@@ -316,7 +521,7 @@ function pageConnect(content) {
     btn.disabled = true;
     btn.textContent = "";
     const spin = el("span", "spin", "◌");
-    btn.append(spin, document.createTextNode("连接中…"));
+    btn.append(spin, document.createTextNode(t("connecting")));
     const uh = splitUserHost();
     const body = {
       host: uh.host,
@@ -330,13 +535,13 @@ function pageConnect(content) {
       S.connStr = uh.user + "@" + uh.host;
       S.connHost = uh.host;
       S.pwdAuth = pwdI.value !== ""; // 密码登录才可能有登录密码供 sudo 回退
-      setBadge(true, "已连接 " + S.connStr);
+      setBadge(true, t("badgeConnected") + S.connStr);
       location.hash = "#/probe";
     } catch (e) {
       errSlot.innerHTML = "";
       errSlot.append(alertBar("err", "✗ " + e.message));
       btn.disabled = false;
-      btn.textContent = "连接";
+      btn.textContent = t("connect");
     }
   };
 }
@@ -353,24 +558,24 @@ function probeItem(kind, icon, title, desc) {
 }
 
 function pageProbe(content) {
-  content.append(el("h2", "pagehead", "环境探测"));
+  content.append(el("h2", "pagehead", t("probeTitle")));
   const sub = el("div", "pagesub");
-  sub.append(document.createTextNode("已连接 "));
-  sub.append(el("b", "", S.connStr || "（未知）"));
+  sub.append(document.createTextNode(t("connectedPrefix")));
+  sub.append(el("b", "", S.connStr || t("unknownConn")));
   sub.append(document.createTextNode(" · "));
-  const again = el("a", "", "重新探测");
+  const again = el("a", "", t("reprobe"));
   again.href = "javascript:void(0)";
   again.onclick = () => route();
   sub.append(again);
   sub.append(document.createTextNode(" · "));
-  const back = el("a", "", "返回连接页");
+  const back = el("a", "", t("backToConnect"));
   back.href = "javascript:void(0)";
   back.onclick = () => { location.hash = "#/connect"; };
   sub.append(back);
   content.append(sub);
   const slot = el("div");
   content.append(slot);
-  slot.append(el("div", "muted", "探测中，请稍候…"));
+  slot.append(el("div", "muted", t("probing")));
 
   api("/api/probe").then((p) => {
     S.probe = p;
@@ -378,8 +583,8 @@ function pageProbe(content) {
     renderProbeResult(slot, p);
   }).catch((e) => {
     slot.innerHTML = "";
-    slot.append(alertBar("err", "✗ 探测失败：" + e.message));
-    const retry = el("button", "btn btn-primary", "重试");
+    slot.append(alertBar("err", t("probeFail") + e.message));
+    const retry = el("button", "btn btn-primary", t("retry"));
     retry.onclick = () => route();
     slot.append(retry);
   });
@@ -389,38 +594,38 @@ function renderProbeResult(slot, p) {
   const items = el("div");
   // Docker / Compose
   if (p.docker_ok) items.append(probeItem("ok", "✓", "Docker " + (p.docker_version || ""), ""));
-  else if (p.docker_cli) items.append(probeItem("err", "✗", "Docker 已安装但当前用户无法访问", p.docker_detail || ""));
-  else items.append(probeItem("err", "✗", "未检测到 Docker", p.docker_detail || "docker 命令不存在"));
-  if (p.compose_ok) items.append(probeItem("ok", "✓", "Compose 插件可用", ""));
-  else items.append(probeItem("err", "✗", "未检测到 compose 插件", "docker compose 插件缺失"));
-  if (p.need_sudo) items.append(probeItem("info", "ℹ", "Docker 命令将以 sudo 执行", "已验证通过；密码仅存内存，不落盘"));
+  else if (p.docker_cli) items.append(probeItem("err", "✗", t("dockerNoAccess"), p.docker_detail || ""));
+  else items.append(probeItem("err", "✗", t("dockerMissing"), p.docker_detail || t("dockerCmdMissing")));
+  if (p.compose_ok) items.append(probeItem("ok", "✓", t("composeOk"), ""));
+  else items.append(probeItem("err", "✗", t("composeMissing"), t("composePluginMissing")));
+  if (p.need_sudo) items.append(probeItem("info", "ℹ", t("dockerSudo"), t("sudoVerified")));
   // 端口：已有部署时用 info 中性提示，否则 warn 并预告自动避让
   if (p.port_gitea_busy) {
-    if (p.existing) items.append(probeItem("info", "ℹ", "端口 3000 已被占用", "容器 " + p.port_gitea_busy + "（本部署的 Gitea）"));
-    else items.append(probeItem("warn", "⚠", "端口 3000 已被占用", "容器 " + p.port_gitea_busy + "，部署时将自动避让到 3001"));
+    if (p.existing) items.append(probeItem("info", "ℹ", t("portBusy", { p: 3000 }), t("portBusyOwn", { c: p.port_gitea_busy, what: "Gitea" })));
+    else items.append(probeItem("warn", "⚠", t("portBusy", { p: 3000 }), t("portBusyAvoid", { c: p.port_gitea_busy, p2: 3001 })));
   } else {
-    items.append(probeItem("ok", "✓", "端口 3000 空闲", "将用于 Gitea Web"));
+    items.append(probeItem("ok", "✓", t("portFree", { p: 3000 }), t("portGiteaUse")));
   }
   if (p.port_ok_busy) {
-    if (p.existing) items.append(probeItem("info", "ℹ", "端口 3100 已被占用", "容器 " + p.port_ok_busy + "（本部署的 okserver）"));
-    else items.append(probeItem("warn", "⚠", "端口 3100 已被占用", "容器 " + p.port_ok_busy + "，部署时将自动避让到 3101"));
+    if (p.existing) items.append(probeItem("info", "ℹ", t("portBusy", { p: 3100 }), t("portBusyOwn", { c: p.port_ok_busy, what: "okserver" })));
+    else items.append(probeItem("warn", "⚠", t("portBusy", { p: 3100 }), t("portBusyAvoid", { c: p.port_ok_busy, p2: 3101 })));
   } else {
-    items.append(probeItem("ok", "✓", "端口 3100 空闲", "将用于 okserver API"));
+    items.append(probeItem("ok", "✓", t("portFree", { p: 3100 }), t("portOkUse")));
   }
-  if (p.gitea_found) items.append(probeItem("info", "ℹ", "检测到已有 Gitea", p.gitea_detail || ""));
+  if (p.gitea_found) items.append(probeItem("info", "ℹ", t("giteaFound"), p.gitea_detail || ""));
 
   // 已有部署：直接进入管理模式
   if (p.existing) {
     const note = alertBar("ok", "");
     note.textContent = "";
-    note.append(document.createTextNode("✓ 检测到已有部署："));
+    note.append(document.createTextNode(t("existingFound")));
     const dirSpan = el("span", "mono", p.deploy_dir || "");
     note.append(dirSpan);
     slot.append(note, items);
     S.deployDir = p.deploy_dir;
     const bottom = el("div");
     bottom.style.marginTop = "18px";
-    const btn = el("button", "btn btn-primary btn-block", "进入管理模式");
+    const btn = el("button", "btn btn-primary btn-block", t("enterManage"));
     btn.style.padding = "12px";
     btn.onclick = () => { location.hash = "#/manage"; };
     bottom.append(btn);
@@ -433,47 +638,47 @@ function renderProbeResult(slot, p) {
     const block = el("div", "pcard card-danger");
     block.style.borderWidth = "2px";
     const permDenied = p.docker_cli && !p.docker_ok && (p.docker_detail || "").toLowerCase().indexOf("permission denied") >= 0;
-    const h = el("h3", "", "✗ 无法继续部署");
+    const h = el("h3", "", t("cannotDeploy"));
     h.style.color = "var(--danger)";
     const d = el("div", "pdesc");
     d.style.color = "var(--danger)";
     const ul = el("ul", "small");
     ul.style.cssText = "margin:0;padding-left:20px;line-height:2";
     if (permDenied) {
-      d.textContent = "Docker 已安装，但当前用户无权访问 daemon。okdeploy 可以直接用 sudo 执行部署（密码仅存内存，不落盘）：";
+      d.textContent = t("dockerPermDesc");
       const row = el("div");
       row.style.cssText = "display:flex;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap";
       const sudoPwI = el("input", "pinput");
       sudoPwI.type = "password";
-      sudoPwI.placeholder = S.pwdAuth ? "sudo 密码（默认同登录密码）" : "sudo 密码（私钥登录必填）";
+      sudoPwI.placeholder = S.pwdAuth ? t("sudoPwPhSame") : t("sudoPwPhKey");
       sudoPwI.style.width = "240px";
-      const sudoBtn = el("button", "btn btn-primary", "启用 sudo 并重新探测");
+      const sudoBtn = el("button", "btn btn-primary", t("enableSudo"));
       sudoBtn.onclick = async () => {
         sudoBtn.disabled = true;
-        sudoBtn.textContent = "验证中…";
+        sudoBtn.textContent = t("verifying");
         try {
           await api("/api/enable-sudo", { method: "POST", body: { password: sudoPwI.value } });
           route(); // 重新探测
         } catch (e2) {
           block.append(alertBar("err", "✗ " + e2.message));
           sudoBtn.disabled = false;
-          sudoBtn.textContent = "启用 sudo 并重新探测";
+          sudoBtn.textContent = t("enableSudo");
         }
       };
       row.append(sudoPwI, sudoBtn);
       const manual = el("div", "small muted");
-      manual.textContent = "或者手动处理：在 NAS 上执行 sudo usermod -aG docker " + (S.connStr || "").split("@")[0] + "，重新登录 SSH 后点「重新探测」";
+      manual.textContent = t("manualFix", { u: (S.connStr || "").split("@")[0] });
       block.append(h, d, row, manual);
       slot.append(block);
       return;
     }
-    d.textContent = "okdeploy 需要 NAS 已安装 Docker 与 compose 插件，请先安装后重新探测：";
+    d.textContent = t("needDockerDesc");
     const li1 = el("li");
-    li1.append(el("b", "", "群晖 Synology"), document.createTextNode("：套件中心安装「Container Manager」（DSM 7.2+）"));
+    li1.append(el("b", "", t("nasSyno")), document.createTextNode(t("synoHint")));
     const li2 = el("li");
-    li2.append(el("b", "", "威联通 QNAP"), document.createTextNode("：App Center 安装「Container Station」"));
+    li2.append(el("b", "", t("nasQnap")), document.createTextNode(t("qnapHint")));
     const li3 = el("li");
-    li3.append(el("b", "", "其他 Linux NAS"), document.createTextNode("：安装 Docker Engine 24+ 及 docker compose 插件"));
+    li3.append(el("b", "", t("nasOther")), document.createTextNode(t("otherHint")));
     ul.append(li1, li2, li3);
     block.append(h, d, ul);
     slot.append(block);
@@ -484,14 +689,14 @@ function renderProbeResult(slot, p) {
     slot.append(items);
     const wrap = el("div", "branch-wrap");
     const c1 = el("div", "branch-card");
-    const h41 = el("h4", "", "📦 全新部署");
+    const h41 = el("h4", "", t("fullDeployTitle"));
     const giteaPort = p.port_gitea_busy ? 3001 : 3000;
-    const p1 = el("p", "", "部署 okserver + Gitea 双容器。新 Gitea 使用 " + giteaPort + " 端口，与已有 Gitea 互不干扰。适合想独立管理知识库仓库的场景。");
+    const p1 = el("p", "", t("fullDeployDesc", { p: giteaPort }));
     c1.append(h41, p1);
     c1.onclick = () => { location.hash = "#/deploy?mode=full"; };
     const c2 = el("div", "branch-card");
-    const h42 = el("h4", "", "🔗 接入已有 Gitea");
-    const p2 = el("p", "", "仅部署 okserver 单容器，复用已有 Gitea 作为 Git 后端。需要提供管理员 token，并完成治理项确认。适合已有统一 Git 服务的场景。");
+    const h42 = el("h4", "", t("extTitle"));
+    const p2 = el("p", "", t("extDesc"));
     c2.append(h42, p2);
     c2.onclick = () => { location.hash = "#/deploy?mode=external"; };
     wrap.append(c1, c2);
@@ -502,7 +707,7 @@ function renderProbeResult(slot, p) {
   slot.append(items);
   const bottom = el("div");
   bottom.style.marginTop = "18px";
-  const btn = el("button", "btn btn-primary btn-block", "开始部署");
+  const btn = el("button", "btn btn-primary btn-block", t("startDeploy"));
   btn.style.padding = "12px";
   btn.onclick = () => { location.hash = "#/deploy"; };
   bottom.append(btn);
@@ -517,14 +722,14 @@ function pageDeploy(content, query) {
   const okPortDef = p.port_ok_busy ? "3101" : "3100";
 
   if (mode === "external") {
-    content.append(el("h2", "pagehead", "接入已有 Gitea"));
-    content.append(el("div", "pagesub", "仅部署 okserver 单容器，复用已有 Gitea" + (p.gitea_detail ? "（" + p.gitea_detail + "）" : "") + "作为 Git 后端"));
+    content.append(el("h2", "pagehead", t("extDeployHead")));
+    content.append(el("div", "pagesub", t("extDeploySub", { d: p.gitea_detail ? t("detailParens", { d: p.gitea_detail }) : "" })));
   } else {
-    content.append(el("h2", "pagehead", "全新部署"));
-    content.append(el("div", "pagesub", "将在 NAS 上创建 okserver + Gitea 双容器（docker compose）"));
+    content.append(el("h2", "pagehead", t("fullDeployHead")));
+    content.append(el("div", "pagesub", t("fullDeploySub")));
   }
   // 未正式开始部署前可回退上一步（开始部署后 runDeployView 清屏锁表单）
-  const backProbe = el("a", "small", "← 返回探测页");
+  const backProbe = el("a", "small", t("backToProbe"));
   backProbe.href = "javascript:void(0)";
   backProbe.onclick = () => { location.hash = "#/probe"; };
   content.append(backProbe);
@@ -534,47 +739,47 @@ function pageDeploy(content, query) {
   const card = el("div", "pcard");
   // 部署目录（原样传给远端，~ 由远端 sh 展开，前端不做本地展开）
   const dirI = pinput("mono", "~/openknowledge", "230px");
-  const browse = el("button", "btn", "浏览…");
+  const browse = el("button", "btn", t("browse"));
   browse.onclick = () => openDirPicker(dirI);
-  card.append(prow("部署目录", [dirI, browse]));
+  card.append(prow(t("deployDir"), [dirI, browse]));
   let giteaPortI = null;
   if (mode === "full") {
     giteaPortI = pinput("mono", giteaPortDef, "90px");
-    card.append(prow("Gitea 端口", [giteaPortI]));
+    card.append(prow(t("giteaPort"), [giteaPortI]));
     if (p.port_gitea_busy) {
-      const w = el("div", "fb-warn", "⚠ 3000 被占用，已自动避让");
+      const w = el("div", "fb-warn", t("portAvoided", { p: 3000 }));
       w.style.margin = "-4px 0 4px 120px";
       card.append(w);
     }
   }
   const okPortI = pinput("mono", okPortDef, "90px");
-  card.append(prow("okserver 端口", [okPortI]));
+  card.append(prow(t("okPort"), [okPortI]));
   if (p.port_ok_busy) {
-    const w = el("div", "fb-warn", "⚠ 3100 被占用，已自动避让");
+    const w = el("div", "fb-warn", t("portAvoided", { p: 3100 }));
     w.style.margin = "-4px 0 4px 120px";
     card.append(w);
   }
   const tagI = pinput("mono", "latest", "140px");
-  card.append(prow("镜像版本", [tagI, el("span", "muted small", "z7dream/openknowledge-okserver:latest")]));
+  card.append(prow(t("imageTag"), [tagI, el("span", "muted small", "z7dream/openknowledge-okserver:latest")]));
   let giteaUrlI = null, tokenI = null, smokeFb = null;
   if (mode === "external") {
     giteaUrlI = pinput("mono", S.connHost ? "http://" + S.connHost + ":3000" : "", "230px");
     if (!S.connHost) giteaUrlI.placeholder = "http://192.168.1.10:3000";
-    card.append(prow("已有 Gitea 地址", [giteaUrlI]));
+    card.append(prow(t("giteaUrl"), [giteaUrlI]));
     tokenI = pinput("", "", "230px", "password");
     tokenI.placeholder = "gitea admin token";
-    const smokeBtn = el("button", "btn", "测试 Gitea");
-    card.append(prow("管理员 token", [tokenI, smokeBtn]));
+    const smokeBtn = el("button", "btn", t("testGitea"));
+    card.append(prow(t("adminToken"), [tokenI, smokeBtn]));
     smokeFb = el("div");
     smokeFb.style.margin = "-4px 0 4px 120px";
     card.append(smokeFb);
     smokeBtn.onclick = async () => {
       smokeFb.innerHTML = "";
-      smokeFb.append(el("span", "small muted", "测试中…"));
+      smokeFb.append(el("span", "small muted", t("testing")));
       try {
         await api("/api/smoke-external", { method: "POST", body: { gitea_url: giteaUrlI.value.trim(), admin_token: tokenI.value } });
         smokeFb.innerHTML = "";
-        smokeFb.append(el("span", "fb-ok", "✓ 兼容性验证通过（API v1）"));
+        smokeFb.append(el("span", "fb-ok", t("smokeOk")));
       } catch (e) {
         smokeFb.innerHTML = "";
         smokeFb.append(el("span", "fb-err", "✗ " + e.message));
@@ -583,7 +788,7 @@ function pageDeploy(content, query) {
   }
   const btnWrap = el("div");
   btnWrap.style.marginTop = "18px";
-  const deployBtn = el("button", "btn btn-primary btn-block", "开始部署");
+  const deployBtn = el("button", "btn btn-primary btn-block", t("startDeploy"));
   btnWrap.append(deployBtn);
   card.append(btnWrap);
   content.append(card);
@@ -632,10 +837,10 @@ function renderChecklist(slot, items, onConfirm) {
   slot.innerHTML = "";
   const card = el("div", "pcard card-warn");
   card.style.borderWidth = "2px";
-  const h = el("h3", "", "⚠ 接入已有 Gitea 前请逐项确认");
+  const h = el("h3", "", t("checklistTitle"));
   h.style.color = "var(--warn)";
   card.append(h);
-  card.append(el("div", "pdesc", "okdeploy 不会修改你的 Gitea 配置，以下治理项需要你已在 Gitea 中自行设置："));
+  card.append(el("div", "pdesc", t("checklistDesc")));
   const boxes = [];
   for (const text of items) {
     const lab = el("label", "ck");
@@ -647,10 +852,10 @@ function renderChecklist(slot, items, onConfirm) {
   }
   const row = el("div", "prow");
   row.style.cssText = "margin-top:14px;margin-bottom:0";
-  const btn = el("button", "btn btn-primary", "开始部署");
+  const btn = el("button", "btn btn-primary", t("startDeploy"));
   btn.disabled = true;
   btn.onclick = onConfirm;
-  row.append(btn, el("span", "small muted", "全部确认后可开始"));
+  row.append(btn, el("span", "small muted", t("checklistHint")));
   for (const cb of boxes) {
     cb.onchange = () => { btn.disabled = !boxes.every((b) => b.checked); };
   }
@@ -666,33 +871,33 @@ function runDeployView(content, spec) {
   const st = el("span", "st");
   const spin = el("span", "spin", "◌");
   spin.style.color = "var(--primary)";
-  st.append(spin, document.createTextNode("部署中…"));
+  st.append(spin, document.createTextNode(t("deploying")));
   const bar = el("div", "bar");
   const barI = el("i");
   barI.style.width = "0%";
   bar.append(barI);
   stepbar.append(st, bar);
   content.append(stepbar);
-  content.append(el("h2", "pagehead", "部署中"));
-  content.append(el("div", "pagesub", "表单已锁定，部署完成后将显示一次性 root 初始密码"));
+  content.append(el("h2", "pagehead", t("deployHead")));
+  content.append(el("div", "pagesub", t("deploySub")));
   const summary = el("div", "summary");
-  summary.append(document.createTextNode("部署目录 "));
+  summary.append(document.createTextNode(t("sumDir")));
   summary.append(el("b", "mono", spec.dir));
   if (spec.mode === "full") {
-    summary.append(document.createTextNode(" Gitea 端口 "));
+    summary.append(document.createTextNode(t("sumGiteaPort")));
     summary.append(el("b", "mono", String(spec.gitea_port)));
   }
-  summary.append(document.createTextNode(" okserver 端口 "));
+  summary.append(document.createTextNode(t("sumOkPort")));
   summary.append(el("b", "mono", String(spec.ok_port)));
-  summary.append(document.createTextNode(" 镜像 "));
+  summary.append(document.createTextNode(t("sumImage")));
   summary.append(el("b", "mono", spec.tag));
-  summary.append(el("span", "muted", "（只读）"));
+  summary.append(el("span", "muted", t("readonly")));
   content.append(summary);
   const logSlot = el("div");
   content.append(logSlot);
   const doneSlot = el("div");
   content.append(doneSlot);
-  const logHint = el("div", "small muted", "日志实时滚动，断网中断后可从断点重试");
+  const logHint = el("div", "small muted", t("logHint"));
   logHint.style.marginTop = "8px";
   content.append(logHint);
 
@@ -707,21 +912,21 @@ function runDeployView(content, spec) {
       st.textContent = "";
       const sp = el("span", "spin", "◌");
       sp.style.color = "var(--primary)";
-      st.append(sp, document.createTextNode("当前步骤：" + ev.step));
+      st.append(sp, document.createTextNode(t("currentStep") + ev.step));
       barI.style.width = Math.min(90, seenSteps.size * 12) + "%";
     }
     if (done) return;
     if (ev.text.indexOf("任务完成：") >= 0) {
       done = true;
       barI.style.width = "100%";
-      st.textContent = "✓ 部署完成";
+      st.textContent = t("deployDone");
       showDeployDone(doneSlot, spec);
     } else if (ev.text.indexOf("失败：") >= 0) {
       done = true;
-      st.textContent = "✗ 部署失败";
-      doneSlot.append(alertBar("err", "✗ " + ev.text + "（可修正后重试，已完成步骤会保留）"));
+      st.textContent = t("deployFailed");
+      doneSlot.append(alertBar("err", "✗ " + ev.text + t("deployFailSuffix")));
       // 失败即任务结束：允许回表单改配置重试（hash 未变，直接重跑 route 渲染表单）
-      const backBtn = el("button", "btn", "← 返回修改配置");
+      const backBtn = el("button", "btn", t("backToEdit"));
       backBtn.style.marginTop = "10px";
       backBtn.onclick = () => route();
       doneSlot.append(backBtn);
@@ -736,28 +941,28 @@ async function showDeployDone(slot, spec) {
     const r = await api("/api/deploy/result");
     pw = r.root_password || "";
   } catch (e) { /* 404=暂无，落到下方提示 */ }
-  slot.append(alertBar("ok", "✓ 部署完成：okserver 已在 " + (S.connHost || "NAS") + " 上运行"));
+  slot.append(alertBar("ok", t("doneRunning", { h: S.connHost || "NAS" })));
   if (pw) {
-    slot.append(pwdCard("root 初始密码", pw, "请立即保存：此密码已在服务器上删除，无法再次查看"));
+    slot.append(pwdCard(t("rootPwTitle"), pw, t("rootPwWarn")));
   } else {
-    slot.append(alertBar("err", "未能读取 root 初始密码，请稍后在管理模式中重置"));
+    slot.append(alertBar("err", t("rootPwFail")));
   }
-  const next = pcard("下一步");
+  const next = pcard(t("nextSteps"));
   const ol = el("ol", "steps");
   ol.style.cssText = "margin:8px 0 0;padding-left:20px";
   const li1 = el("li");
-  li1.append(document.createTextNode("在客户端 "), el("b", "", "OkManager → 服务器页"), document.createTextNode(" 填服务器地址 "));
+  li1.append(document.createTextNode(t("nextLi1a")), el("b", "", t("nextLi1b")), document.createTextNode(t("nextLi1c")));
   li1.append(el("span", "mono", "http://" + (S.connHost || "<nas>") + ":" + spec.ok_port));
   const li2 = el("li");
-  li2.append(document.createTextNode("用 "), el("span", "mono", "root"), document.createTextNode(" + 上方初始密码登录，并按提示修改密码"));
-  const li3 = el("li", "", "创建用户和项目仓库，开始使用");
+  li2.append(document.createTextNode(t("nextLi2a")), el("span", "mono", "root"), document.createTextNode(t("nextLi2b")));
+  const li3 = el("li", "", t("nextLi3"));
   ol.append(li1, li2, li3);
   next.append(ol);
   slot.append(next);
   const row = el("div", "prow");
-  const manage = el("button", "btn btn-primary", "进入管理模式");
+  const manage = el("button", "btn btn-primary", t("enterManage"));
   manage.onclick = () => { S.deployDir = spec.dir; location.hash = "#/manage"; };
-  const close = el("button", "btn", "关闭窗口");
+  const close = el("button", "btn", t("closeWindow"));
   close.onclick = () => window.close();
   row.append(manage, close);
   slot.append(row);
@@ -765,19 +970,19 @@ async function showDeployDone(slot, spec) {
 
 /* ================== 管理模式页 ================== */
 function pageManage(content) {
-  content.append(el("h2", "pagehead", "管理模式"));
+  content.append(el("h2", "pagehead", t("manageTitle")));
   const sub = el("div", "pagesub");
-  sub.append(document.createTextNode("部署目录 "));
-  sub.append(el("span", "mono", S.deployDir || "（未知，请先探测）"));
+  sub.append(document.createTextNode(t("deployDirPrefix")));
+  sub.append(el("span", "mono", S.deployDir || t("unknownProbe")));
   sub.append(document.createTextNode(" · "));
-  const re = el("a", "", "重新探测");
+  const re = el("a", "", t("reprobe"));
   re.href = "javascript:void(0)";
   re.onclick = () => { location.hash = "#/probe"; };
-  const disc = el("a", "", "断开连接");
+  const disc = el("a", "", t("disconnect"));
   disc.href = "javascript:void(0)";
   disc.onclick = async () => {
     try { await api("/api/disconnect", { method: "POST" }); } catch (e) { /* 忽略 */ }
-    setBadge(false, "未连接");
+    setBadge(false, t("badgeDisconnected"));
     S.connStr = ""; S.connHost = ""; S.probe = null; S.deployDir = "";
     location.hash = "#/connect";
   };
@@ -785,9 +990,9 @@ function pageManage(content) {
   content.append(sub);
 
   if (!S.deployDir) {
-    const a = alertBar("err", "尚未确定部署目录：请先在探测页检测已有部署，或完成一次部署");
+    const a = alertBar("err", t("noDirWarn"));
     content.append(a);
-    const btn = el("button", "btn btn-primary", "前往环境探测");
+    const btn = el("button", "btn btn-primary", t("goProbe"));
     btn.onclick = () => { location.hash = "#/probe"; };
     content.append(btn);
     return;
@@ -797,23 +1002,23 @@ function pageManage(content) {
   content.append(errSlot);
   const statSlot = el("div");
   content.append(statSlot);
-  statSlot.append(el("div", "muted", "状态查询中…"));
+  statSlot.append(el("div", "muted", t("statusLoading")));
   let status = null;
 
   // ---- 升级 ----
-  const upgrade = pcard("升级", "拉取新镜像并重建容器，数据卷不受影响，停机约 10 秒");
+  const upgrade = pcard(t("upgrade"), t("upgradeDesc"));
   const upRow = el("div", "prow");
-  const curTag = el("span", "muted small", "当前 … →");
+  const curTag = el("span", "muted small", t("curPrefix") + "… →");
   const tagI = pinput("mono", "latest", "120px");
-  const upBtn = el("button", "btn btn-primary", "升级");
+  const upBtn = el("button", "btn btn-primary", t("upgrade"));
   // 同 tag 重拉：镜像 tag 被覆盖更新（测试期常见）时强制 pull 刷新
-  const reBtn = el("button", "btn", "重拉当前版本");
+  const reBtn = el("button", "btn", t("repull"));
   const verHint = el("span", "small");
   upRow.append(curTag, tagI, upBtn, reBtn, verHint);
   upgrade.append(upRow);
 
   // ---- 查看日志 ----
-  const viewLogs = pcard("查看日志", "拉取容器最近日志用于排障");
+  const viewLogs = pcard(t("viewLogs"), t("viewLogsDesc"));
   const lgRow = el("div", "prow");
   const tailSel = el("select", "pselect mono");
   for (const n of ["100", "200", "500", "2000"]) {
@@ -822,18 +1027,18 @@ function pageManage(content) {
     if (n === "200") op.selected = true;
     tailSel.append(op);
   }
-  const pullBtn = el("button", "btn", "拉取日志");
-  lgRow.append(tailSel, el("span", "muted small", "行"), pullBtn, el("span", "small muted", "结果显示在页面底部日志面板"));
+  const pullBtn = el("button", "btn", t("pullLogs"));
+  lgRow.append(tailSel, el("span", "muted small", t("linesUnit")), pullBtn, el("span", "small muted", t("pullHint")));
   viewLogs.append(lgRow);
 
   // ---- 重置 root 密码 ----
-  const reset = pcard("重置 root 密码", "root 密码丢失时使用。将在服务器上重新生成 32 位随机密码，旧密码立即失效");
+  const reset = pcard(t("resetTitle"), t("resetDesc"));
   reset.classList.add("card-danger");
   reset.style.borderWidth = "2px";
   const rsRow = el("div", "prow");
   const rsI = pinput("", "", "180px");
-  rsI.placeholder = "输入 RESET 确认";
-  const rsBtn = el("button", "btn btn-danger", "重置密码");
+  rsI.placeholder = t("resetPh");
+  const rsBtn = el("button", "btn btn-danger", t("resetBtn"));
   rsBtn.disabled = true;
   rsI.oninput = () => { rsBtn.disabled = rsI.value !== "RESET"; };
   rsRow.append(rsI, rsBtn);
@@ -841,14 +1046,14 @@ function pageManage(content) {
   reset.append(rsRow, rsResult);
 
   // ---- 备份 ----
-  const backup = pcard("备份", "停机数秒打包数据卷并下载到本机");
+  const backup = pcard(t("backupTitle"), t("backupDesc"));
   const bkRow = el("div", "prow");
-  const bkBtn = el("button", "btn", "立即备份");
+  const bkBtn = el("button", "btn", t("backupNow"));
   bkRow.append(bkBtn);
   backup.append(bkRow);
 
   // ---- 恢复 ----
-  const restore = pcard("恢复");
+  const restore = pcard(t("restoreTitle"));
   restore.classList.add("card-danger");
   restore.style.borderWidth = "2px";
   const rtRow = el("div", "prow");
@@ -856,37 +1061,37 @@ function pageManage(content) {
   fileI.type = "file";
   fileI.accept = ".tar";
   fileI.style.display = "none";
-  const pickBtn = el("button", "btn", "选择备份文件…");
-  const fileName = el("span", "mono small muted", "（未选择）");
+  const pickBtn = el("button", "btn", t("pickFile"));
+  const fileName = el("span", "mono small muted", t("noneSelected"));
   const rtI = pinput("", "", "180px");
-  rtI.placeholder = "输入 RESTORE 确认";
+  rtI.placeholder = t("restorePh");
   pickBtn.onclick = () => fileI.click();
   // 按钮需同时满足：已选文件 + 确认词 RESTORE（照卸载卡 DELETE 模式）
   const rtCheck = () => { rtBtn.disabled = !(fileI.files.length && rtI.value === "RESTORE"); };
-  fileI.onchange = () => { fileName.textContent = fileI.files.length ? fileI.files[0].name : "（未选择）"; rtCheck(); };
+  fileI.onchange = () => { fileName.textContent = fileI.files.length ? fileI.files[0].name : t("noneSelected"); rtCheck(); };
   rtI.oninput = rtCheck;
   rtRow.append(fileI, pickBtn, fileName, rtI);
-  const rtWarn = el("div", "fb-err", "⚠ 恢复将删除并覆盖服务器现有数据，不可撤销。建议先执行备份。");
+  const rtWarn = el("div", "fb-err", t("restoreWarn"));
   rtWarn.style.margin = "2px 0 8px";
-  const rtBtn = el("button", "btn btn-danger", "开始恢复");
+  const rtBtn = el("button", "btn btn-danger", t("restoreBtn"));
   rtBtn.disabled = true;
   restore.append(rtRow, rtWarn, rtBtn);
 
   // ---- 卸载 ----
-  const uninstall = pcard("卸载", "删除 okdeploy 创建的容器与 compose 项目");
+  const uninstall = pcard(t("uninstallTitle"), t("uninstallDesc"));
   uninstall.classList.add("card-danger");
   uninstall.style.borderWidth = "2px";
   const unRow = el("div", "prow");
   const unI = pinput("", "", "180px");
-  unI.placeholder = "输入 DELETE 确认";
+  unI.placeholder = t("deletePh");
   unRow.append(unI);
   const delLab = el("label", "ck");
   const delCb = el("input");
   delCb.type = "checkbox";
-  delLab.append(delCb, document.createTextNode("同时删除数据目录（不可恢复）"));
+  delLab.append(delCb, document.createTextNode(t("deleteData")));
   const unBtnRow = el("div", "prow");
   unBtnRow.style.marginTop = "12px";
-  const unBtn = el("button", "btn btn-danger", "卸载");
+  const unBtn = el("button", "btn btn-danger", t("uninstallTitle"));
   unBtn.disabled = true;
   unI.oninput = () => { unBtn.disabled = unI.value !== "DELETE"; };
   unBtnRow.append(unBtn);
@@ -918,18 +1123,18 @@ function pageManage(content) {
       const row = el("div", "stat3");
       for (const c of st.containers || []) {
         const card = el("div", "pcard");
-        card.append(el("div", "cap", c.name + " 容器"));
+        card.append(el("div", "cap", c.name + t("containerSuffix")));
         const val = el("div", "val");
         const dot = el("span", "dot");
         const up = /^Up/i.test(c.status || "");
         dot.style.background = up ? "var(--ok)" : "var(--danger)";
-        val.append(dot, document.createTextNode(up ? "运行中 · " + c.status : (c.status || "未知")));
+        val.append(dot, document.createTextNode(up ? t("runningPrefix") + c.status : (c.status || t("statusUnknown"))));
         card.append(val);
         row.append(card);
       }
       const info = el("div", "pcard");
-      info.append(el("div", "cap", "镜像版本 / 数据占用"));
-      const val = el("div", "val mono", (st.image || "未知") + (st.version ? "（运行 " + st.version + "）" : "") + " · " + (st.disk_usage || "?"));
+      info.append(el("div", "cap", t("imageDiskCap")));
+      const val = el("div", "val mono", (st.image || t("statusUnknown")) + (st.version ? t("runningVer", { v: st.version }) : "") + " · " + (st.disk_usage || "?"));
       val.style.fontSize = "12.5px";
       info.append(val);
       row.append(info);
@@ -937,24 +1142,24 @@ function pageManage(content) {
       const tag = curImageTag();
       // 当前显示：优先运行版本（meta 自报），镜像 tag 括注；取不到运行版本就显示 tag
       curTag.textContent = "";
-      curTag.append(document.createTextNode("当前 "));
-      const m = el("span", "mono", st.version ? st.version + (st.version !== tag ? "（" + tag + "）" : "") : tag);
+      curTag.append(document.createTextNode(t("curPrefix")));
+      const m = el("span", "mono", st.version ? st.version + (st.version !== tag ? t("detailParens", { d: tag }) : "") : tag);
       curTag.append(m, document.createTextNode(" →"));
       // 有新版本：提示并把输入框预填成最新版；否则预填当前 tag
       const cur = st.version || tag;
       if (st.latest_version && semverGt(st.latest_version, cur)) {
         verHint.textContent = "";
-        verHint.append(el("span", "", "🔔 有新版本 "), el("b", "", st.latest_version));
+        verHint.append(el("span", "", t("newVersion")), el("b", "", st.latest_version));
         verHint.style.color = "var(--warn, #b7791f)";
         tagI.value = st.latest_version;
       } else {
-        verHint.textContent = st.latest_version ? "✓ 已是最新" : "";
+        verHint.textContent = st.latest_version ? t("upToDate") : "";
         verHint.style.color = "var(--ok)";
         tagI.value = tag;
       }
     }).catch((e) => {
       statSlot.innerHTML = "";
-      errSlot.append(alertBar("err", "✗ 状态查询失败：" + e.message));
+      errSlot.append(alertBar("err", t("statusFail") + e.message));
     });
   }
   loadStatus();
@@ -977,7 +1182,7 @@ function pageManage(content) {
     api("/api/upgrade", { method: "POST", body: { dir: S.deployDir, tag: tag } }).then(() => {
       watchOps(t0, (err) => {
         if (err) errSlot.append(alertBar("err", "✗ " + err.message));
-        else { errSlot.append(alertBar("ok", "✓ 升级完成")); loadStatus(); }
+        else { errSlot.append(alertBar("ok", t("upgradeDone"))); loadStatus(); }
       });
     }).catch((e) => { errSlot.append(alertBar("err", "✗ " + e.message)); });
   }
@@ -986,7 +1191,7 @@ function pageManage(content) {
   reBtn.onclick = () => doUpgrade(curImageTag());
 
   pullBtn.onclick = async () => {
-    renderFold(foldSlot, null, 0, "拉取中…");
+    renderFold(foldSlot, null, 0, t("pulling"));
     try {
       const r = await api("/api/remote-logs?dir=" + encodeURIComponent(S.deployDir) + "&tail=" + tailSel.value);
       renderFold(foldSlot, r.logs || "", tailSel.value);
@@ -1006,9 +1211,9 @@ function pageManage(content) {
         if (err) { rsResult.append(alertBar("err", "✗ " + err.message)); return; }
         try {
           const r = await api("/api/deploy/result");
-          rsResult.append(pwdCard("新 root 密码", r.root_password, "请立即保存：旧密码已失效，此密码不会再次显示"));
+          rsResult.append(pwdCard(t("newRootPw"), r.root_password, t("newRootPwWarn")));
         } catch (e2) {
-          rsResult.append(alertBar("err", "重置完成但未能读取新密码：" + e2.message));
+          rsResult.append(alertBar("err", t("resetReadFail") + e2.message));
         }
       });
     } catch (e) { errSlot.append(alertBar("err", "✗ " + e.message)); }
@@ -1036,7 +1241,7 @@ function pageManage(content) {
       if (!r.ok) throw new Error((data && data.error) || ("HTTP " + r.status));
       watchOps(t0, (err) => {
         if (err) errSlot.append(alertBar("err", "✗ " + err.message));
-        else errSlot.append(alertBar("ok", "✓ 恢复完成"));
+        else errSlot.append(alertBar("ok", t("restoreDone")));
         rtBtn.disabled = false;
       });
     } catch (e) {
@@ -1054,7 +1259,7 @@ function pageManage(content) {
       watchOps(t0, (err) => {
         if (err) { errSlot.append(alertBar("err", "✗ " + err.message)); unBtn.disabled = false; return; }
         S.deployDir = "";
-        errSlot.append(alertBar("ok", "✓ 已卸载，即将返回连接页…"));
+        errSlot.append(alertBar("ok", t("uninstalled")));
         setTimeout(() => { location.hash = "#/connect"; }, 1200);
       });
     } catch (e) { errSlot.append(alertBar("err", "✗ " + e.message)); unBtn.disabled = false; }
@@ -1065,8 +1270,8 @@ function pageManage(content) {
 function renderFold(slot, logs, tail, hint) {
   slot.innerHTML = "";
   const open = logs !== null;
-  const title = logs !== null ? "容器日志（最近 " + tail + " 行）" : "容器日志";
-  const head = el("div", "logfold", (open ? "▾ " : "▸ ") + title + (open ? "（点击收起）" : "（点击展开）"));
+  const title = logs !== null ? t("foldTitleTail", { n: tail }) : t("foldTitle");
+  const head = el("div", "logfold", (open ? "▾ " : "▸ ") + title + (open ? t("foldClose") : t("foldOpen")));
   head.onclick = () => {
     if (logs !== null) renderFold(slot, null, 0);
   };
@@ -1074,7 +1279,7 @@ function renderFold(slot, logs, tail, hint) {
   if (open) {
     const body = el("div", "log h160");
     body.style.borderRadius = "0 0 8px 8px";
-    body.textContent = logs || "（无日志）";
+    body.textContent = logs || t("noLogs");
     slot.append(body);
   } else if (hint) {
     const body = el("div", "log h160");
@@ -1084,4 +1289,9 @@ function renderFold(slot, logs, tail, hint) {
   }
 }
 
+// 顶栏中/EN 切换胶囊（index.html 静态放置，这里只接管交互与初始高亮）
+document.querySelectorAll("#lang-seg button").forEach((b) => {
+  b.onclick = () => setLang(b.getAttribute("data-lang"));
+});
+setLang(LANG, true); // 应用持久化语言（title/html lang/徽标），不触发额外 route
 route();

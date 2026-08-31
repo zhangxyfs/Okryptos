@@ -2,14 +2,13 @@
 
 package main
 
-// okdeploy 窗口宿主（Windows）：自建 Win32 窗口 + 内嵌 WebView2，固定 972×686
-// 居中窗口——Edge app 模式的几何记忆/最大化开关都不可控，内嵌窗口尺寸标题全自主。
+// okdeploy 窗口宿主（Windows）：自建 Win32 窗口 + 内嵌 WebView2，打开即最大化——
+// Edge app 模式的几何记忆/最大化开关都不可控，内嵌窗口尺寸标题全自主。
 // 模式参照 cmd/okmanager/host_windows.go（离屏可见创建 + 导航完成才入屏，零白帧），
-// 裁掉 okdeploy 用不到的部分：无 placement 持久化（每次固定尺寸）、无过渡页
-// （服务已在跑，直接导航）、无 token 注入脚本（#token= fragment 自带）。
+// 裁掉 okdeploy 用不到的部分：无 placement 持久化、无过渡页（服务已在跑，直接导航）、
+// 无 token 注入脚本（#token= fragment 自带）。
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -29,7 +28,6 @@ var (
 	dUser32              = windows.NewLazySystemDLL("user32.dll")
 	procShowWindow       = dUser32.NewProc("ShowWindow")
 	procUpdateWindow     = dUser32.NewProc("UpdateWindow")
-	procGetSystemMetrics = dUser32.NewProc("GetSystemMetrics")
 	procRegisterClassExW = dUser32.NewProc("RegisterClassExW")
 	procCreateWindowExW  = dUser32.NewProc("CreateWindowExW")
 	procDestroyWindow    = dUser32.NewProc("DestroyWindow")
@@ -38,8 +36,6 @@ var (
 	procTranslateMessage = dUser32.NewProc("TranslateMessage")
 	procDispatchMessageW = dUser32.NewProc("DispatchMessageW")
 	procPostQuitMessage  = dUser32.NewProc("PostQuitMessage")
-	procMoveWindow       = dUser32.NewProc("MoveWindow")
-	procGetWindowRect    = dUser32.NewProc("GetWindowRect")
 	dShell32             = windows.NewLazySystemDLL("shell32.dll")
 	procExtractIconW     = dShell32.NewProc("ExtractIconW")
 	dGdi32               = windows.NewLazySystemDLL("gdi32.dll")
@@ -58,15 +54,12 @@ const (
 	dWmClose   = 0x0010
 	dWmDestroy = 0x0002
 
+	dSwMaximize = 3
+
+	// 初始离屏尺寸（创建时随便给个合法值，入屏即最大化）
 	deployWinW = 972
 	deployWinH = 686
 )
-
-// deployPageSizes 各页窗口尺寸（前端 route 切页时 postMessage 通知宿主换尺寸）；
-// 未列出的页用默认 deployWinW×deployWinH。
-var deployPageSizes = map[string][2]int{
-	"probe": {958, 793},
-}
 
 type dWndClassExW struct {
 	CbSize        uint32
@@ -101,52 +94,19 @@ type deployCtx struct {
 	chromium *edge.Chromium
 	url      string
 	showOnce sync.Once
-	curW     int
-	curH     int
 }
 
-type dRect struct{ Left, Top, Right, Bottom int32 }
-
-// onPageMessage 前端 route() 切页通知：按 deployPageSizes 换窗口尺寸，保持窗口中心不动。
-func (c *deployCtx) onPageMessage(msg string) {
-	var m struct {
-		Type string `json:"type"`
-		Page string `json:"page"`
-	}
-	if err := json.Unmarshal([]byte(msg), &m); err != nil || m.Type != "page" {
-		return
-	}
-	w, h := deployWinW, deployWinH
-	if s, ok := deployPageSizes[m.Page]; ok {
-		w, h = s[0], s[1]
-	}
-	if w == c.curW && h == c.curH {
-		return
-	}
-	var r dRect
-	procGetWindowRect.Call(c.hwnd, uintptr(unsafe.Pointer(&r)))
-	x := (r.Left + r.Right - int32(w)) / 2
-	y := (r.Top + r.Bottom - int32(h)) / 2
-	c.curW, c.curH = w, h
-	procMoveWindow.Call(c.hwnd, uintptr(x), uintptr(y), uintptr(w), uintptr(h), 1)
+// show 首次入屏：打开即最大化（各页按最大化窗口布局），离屏创建 → 最大化入屏，零白帧。
+func (c *deployCtx) show() {
+	procShowWindow.Call(c.hwnd, dSwMaximize)
+	procUpdateWindow.Call(c.hwnd)
+	c.chromium.Focus()
 }
 
 var (
 	deployContexts   = map[uintptr]*deployCtx{}
 	deployContextsMu sync.RWMutex
 )
-
-// show 首次入屏：把离屏窗口搬到屏内居中位置并刷新（导航在 Embed 后只发一次）。
-func (c *deployCtx) show() {
-	sw, _, _ := procGetSystemMetrics.Call(0)
-	sh, _, _ := procGetSystemMetrics.Call(1)
-	x := (int32(sw) - deployWinW) / 2
-	y := (int32(sh) - deployWinH) / 2
-	procMoveWindow.Call(c.hwnd, uintptr(x), uintptr(y), deployWinW, deployWinH, 1)
-	procShowWindow.Call(c.hwnd, 1) // SW_SHOWNORMAL
-	procUpdateWindow.Call(c.hwnd)
-	c.chromium.Focus()
-}
 
 func deployWndProc(hwnd, message, wp, lp uintptr) uintptr {
 	deployContextsMu.RLock()
@@ -227,7 +187,7 @@ func openUI(url string, serveErr chan error, stderr io.Writer) int {
 
 	chromium := edge.NewChromium()
 	chromium.DataPath = filepath.Join(registry.Home(), "webview2-data-okdeploy")
-	ctx := &deployCtx{hwnd: hwnd, chromium: chromium, url: url, curW: deployWinW, curH: deployWinH}
+	ctx := &deployCtx{hwnd: hwnd, chromium: chromium, url: url}
 	deployContextsMu.Lock()
 	deployContexts[hwnd] = ctx
 	deployContextsMu.Unlock()
@@ -258,7 +218,6 @@ func openUI(url string, serveErr chan error, stderr io.Writer) int {
 		_ = settings.PutAreDefaultContextMenusEnabled(false)
 		_ = settings.PutAreDevToolsEnabled(false)
 	}
-	chromium.MessageCallback = ctx.onPageMessage // 前端切页时按需换窗口尺寸
 	chromium.Resize()
 	chromium.Navigate(ctx.url)
 

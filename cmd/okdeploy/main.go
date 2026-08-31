@@ -45,8 +45,8 @@ func run(stderr *os.File) int {
 }
 
 // browserOpts 是回退浏览器路径（WebView2 不可用时）的窗口形态：
-// 固定尺寸不最大化，标题匹配部署页 <title>。
-var browserOpts = gui.BrowserOptions{WindowTitle: "OpenKnowledge 服务端部署", WindowSize: "972,686"}
+// 空 WindowSize = 默认最大化（与内嵌窗口"打开即最大化"一致），标题匹配部署页 <title>。
+var browserOpts = gui.BrowserOptions{WindowTitle: "OpenKnowledge 服务端部署"}
 
 // waitServe 回退路径：浏览器打开后驻留 HTTP 服务直至出错或进程被杀。
 func waitServe(serveErr chan error, stderr io.Writer) int {
