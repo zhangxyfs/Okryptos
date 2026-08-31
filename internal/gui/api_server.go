@@ -11,6 +11,7 @@ import (
 
 	"openknowledge/internal/config"
 	"openknowledge/internal/serverx"
+	"openknowledge/internal/store"
 	"openknowledge/internal/syncx"
 )
 
@@ -168,7 +169,7 @@ type serverReposRequest struct {
 	Project string `json:"project"`
 }
 
-// apiServerRepos 建仓一条龙：provision → 写凭据 → init/SetRemote → SetSync → 首次同步。
+// apiServerRepos 建仓一条龙：已注册项目直接进共用绑定管线。
 func (h *Handler) apiServerRepos(w http.ResponseWriter, r *http.Request) {
 	var req serverReposRequest
 	if !decodeJSON(w, r, &req) {
@@ -178,6 +179,12 @@ func (h *Handler) apiServerRepos(w http.ResponseWriter, r *http.Request) {
 	if st == nil {
 		return
 	}
+	h.serveBindRepo(w, r, st, req.Project)
+}
+
+// serveBindRepo 绑定管线（apiServerRepos 与 apiServerPull 共用）：
+// provision → 凭据（空 token 时查本机已存凭据，没有则自助重发）→ init/clone → SetSync → 首次同步。
+func (h *Handler) serveBindRepo(w http.ResponseWriter, r *http.Request, st *store.Store, project string) {
 	c, cfgServer, err := h.serverClient()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -187,18 +194,34 @@ func (h *Handler) apiServerRepos(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "not_configured"})
 		return
 	}
-	pr, err := c.ProvisionPersonalRepo(r.Context(), req.Project)
+	pr, err := c.ProvisionPersonalRepo(r.Context(), project)
 	if err != nil {
 		writeServerErr(w, err)
 		return
 	}
-	// 凭据：优先系统 credential helper；无 helper（或本次未发 token）回退 URL 内嵌
+	// 凭据：优先系统 credential helper；仓已存在（token 仅建仓首发）且本机未存凭据时
+	// 自助重发（v2.25 服务端起）；无 helper 回退 URL 内嵌（credNote 警告）。
 	remote := pr.Repo.CloneURL
 	credNote := ""
-	if pr.GitToken != "" {
-		if cerr := syncx.StoreCredential(st.Root, pr.Repo.CloneURL, cfgServer.Username, pr.GitToken); cerr != nil {
+	gitToken := pr.GitToken
+	if gitToken == "" && !syncx.HasStoredCredential(st.Root, pr.Repo.CloneURL, cfgServer.Username) {
+		tok, terr := c.GitToken(r.Context())
+		if terr != nil {
+			var se *serverx.Error
+			if errors.As(terr, &se) && se.Code == http.StatusNotFound {
+				writeJSON(w, http.StatusOK, map[string]any{"status": "error", "clone_url": pr.Repo.CloneURL,
+					"message": "仓已存在但本机无 git 凭据，且服务端版本过旧（不支持自助重发 token）：请升级 okserver，或联系管理员重置密码重发 token"})
+				return
+			}
+			writeServerErr(w, terr)
+			return
+		}
+		gitToken = tok
+	}
+	if gitToken != "" {
+		if cerr := syncx.StoreCredential(st.Root, pr.Repo.CloneURL, cfgServer.Username, gitToken); cerr != nil {
 			if errors.Is(cerr, syncx.ErrNoCredentialHelper) {
-				remote = syncx.CredentialURLWithAuth(pr.Repo.CloneURL, cfgServer.Username, pr.GitToken)
+				remote = syncx.CredentialURLWithAuth(pr.Repo.CloneURL, cfgServer.Username, gitToken)
 				credNote = "（凭据已内嵌 remote URL（本机无 git credential helper）——注意：项目 config.toml 会随仓同步，凭据将进入远端 git 历史。建议配置 credential helper 后重新绑定）"
 			} else {
 				writeErr(w, http.StatusInternalServerError, "写入 git 凭据失败："+cerr.Error())
@@ -206,8 +229,6 @@ func (h *Handler) apiServerRepos(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else if !syncx.HasCredentialHelper(st.Root) {
-		// 仓已存在（token 仅建仓首发）且本机无 credential helper——内嵌回退也无 token 可用，
-		// 闷头推进必然推送失败且状态半绑定，直接报错给出出路
 		writeJSON(w, http.StatusOK, map[string]any{"status": "error", "clone_url": pr.Repo.CloneURL,
 			"message": "仓已存在但本机无 git 凭据（token 仅建仓首发、本机无 credential helper）：请在终端手工绑定或联系管理员重置密码重发 token"})
 		return
