@@ -1097,16 +1097,17 @@ function pageManage(content) {
   unBtnRow.append(unBtn);
   uninstall.append(unRow, delLab, unBtnRow);
 
-  // ---- 操作日志区（SSE）与容器日志面板（一次性拉取，放在升级/日志卡之下）----
+  // ---- 操作日志区（SSE）与容器日志面板 ----
   const opsSlot = el("div");
   const foldSlot = el("div");
   foldSlot.style.marginBottom = "12px";
   renderFold(foldSlot, null, 0, "", pullLogs);
-  // 六张操作卡两两一行（升级+日志 / 重置+备份 / 恢复+卸载），容器日志面板夹在一二行之间
+  // 六张操作卡两两一行（升级+日志 / 重置+备份 / 恢复+卸载），
+  // SSE 操作日志放在升级/日志卡之下，容器日志折叠面板沉到页底
   const row1 = el("div", "cardrow"); row1.append(upgrade, viewLogs);
   const row2 = el("div", "cardrow"); row2.append(reset, backup);
   const row3 = el("div", "cardrow"); row3.append(restore, uninstall);
-  content.append(row1, foldSlot, row2, row3, opsSlot);
+  content.append(row1, opsSlot, row2, row3, foldSlot);
 
   // 版本号比较：vX.Y.Z 逐段数值比（非标准串视为最小）
   function semverGt(a, b) {
