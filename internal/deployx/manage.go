@@ -16,9 +16,12 @@ type ContainerStatus struct {
 
 // ServerStatus 是管理模式的状态总览。
 type ServerStatus struct {
-	Containers []ContainerStatus `json:"containers"`
-	Image      string            `json:"image"`
-	DiskUsage  string            `json:"disk_usage"`
+	Containers    []ContainerStatus `json:"containers"`
+	Image         string            `json:"image"`
+	DiskUsage     string            `json:"disk_usage"`
+	OKPort        string            `json:"ok_port"`        // .env 的 OKSERVER_PORT（版本探测/展示用）
+	Version       string            `json:"version"`        // 运行中 okserver 自报版本（/meta；取不到为空）
+	LatestVersion string            `json:"latest_version"` // Docker Hub 最高 vX.Y.Z（取不到为空）
 }
 
 // QueryStatus 同步查询已部署服务端状态（快查询，API 层直接调，不走 Task）。
@@ -39,6 +42,8 @@ func QueryStatus(ctx context.Context, ex Executor, dir string) (*ServerStatus, e
 	}
 	img, _ := runQuiet(ctx, ex, "grep '^OKSERVER_IMAGE=' "+dir+"/.env | cut -d= -f2-")
 	st.Image = strings.TrimSpace(img)
+	port, _ := runQuiet(ctx, ex, "grep '^OKSERVER_PORT=' "+dir+"/.env | cut -d= -f2")
+	st.OKPort = strings.TrimSpace(port)
 	// cut -f1 在远端已截取首列，这里再按 tab 取一次兜底（输出含路径列时仍只取容量）。
 	du, _ := runQuiet(ctx, ex, "du -sh "+dir+" | cut -f1")
 	st.DiskUsage = strings.TrimSpace(strings.SplitN(du, "\t", 2)[0])

@@ -806,7 +806,10 @@ function pageManage(content) {
   const curTag = el("span", "muted small", "当前 … →");
   const tagI = pinput("mono", "latest", "120px");
   const upBtn = el("button", "btn btn-primary", "升级");
-  upRow.append(curTag, tagI, upBtn);
+  // 同 tag 重拉：镜像 tag 被覆盖更新（测试期常见）时强制 pull 刷新
+  const reBtn = el("button", "btn", "重拉当前版本");
+  const verHint = el("span", "small");
+  upRow.append(curTag, tagI, upBtn, reBtn, verHint);
   upgrade.append(upRow);
 
   // ---- 查看日志 ----
@@ -896,35 +899,65 @@ function pageManage(content) {
   renderFold(foldSlot, null, 0);
   content.append(upgrade, viewLogs, reset, backup, restore, uninstall, opsSlot, foldSlot);
 
-  // 状态查询
-  api("/api/status?dir=" + encodeURIComponent(S.deployDir)).then((st) => {
-    status = st;
-    statSlot.innerHTML = "";
-    const row = el("div", "stat3");
-    for (const c of st.containers || []) {
-      const card = el("div", "pcard");
-      card.append(el("div", "cap", c.name + " 容器"));
-      const val = el("div", "val");
-      const dot = el("span", "dot");
-      const up = /^Up/i.test(c.status || "");
-      dot.style.background = up ? "var(--ok)" : "var(--danger)";
-      val.append(dot, document.createTextNode(up ? "运行中 · " + c.status : (c.status || "未知")));
-      card.append(val);
-      row.append(card);
+  // 版本号比较：vX.Y.Z 逐段数值比（非标准串视为最小）
+  function semverGt(a, b) {
+    const pa = (a || "").replace(/^v/, "").split(".").map(Number);
+    const pb = (b || "").replace(/^v/, "").split(".").map(Number);
+    for (let i = 0; i < 3; i++) {
+      if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
     }
-    const info = el("div", "pcard");
-    info.append(el("div", "cap", "镜像版本 / 数据占用"));
-    const val = el("div", "val mono", (st.image || "未知") + " · " + (st.disk_usage || "?"));
-    val.style.fontSize = "12.5px";
-    info.append(val);
-    row.append(info);
-    statSlot.append(row);
-    const tag = (st.image || "").split(":").pop();
-    if (tag) { curTag.textContent = ""; curTag.append(document.createTextNode("当前 ")); const m = el("span", "mono", tag); curTag.append(m, document.createTextNode(" →")); tagI.value = tag; }
-  }).catch((e) => {
-    statSlot.innerHTML = "";
-    errSlot.append(alertBar("err", "✗ 状态查询失败：" + e.message));
-  });
+    return false;
+  }
+  const curImageTag = () => (status && status.image ? status.image.split(":").pop() : "latest");
+
+  // 状态查询（升级完成后也会重调，刷新版本显示）
+  function loadStatus() {
+    return api("/api/status?dir=" + encodeURIComponent(S.deployDir)).then((st) => {
+      status = st;
+      statSlot.innerHTML = "";
+      const row = el("div", "stat3");
+      for (const c of st.containers || []) {
+        const card = el("div", "pcard");
+        card.append(el("div", "cap", c.name + " 容器"));
+        const val = el("div", "val");
+        const dot = el("span", "dot");
+        const up = /^Up/i.test(c.status || "");
+        dot.style.background = up ? "var(--ok)" : "var(--danger)";
+        val.append(dot, document.createTextNode(up ? "运行中 · " + c.status : (c.status || "未知")));
+        card.append(val);
+        row.append(card);
+      }
+      const info = el("div", "pcard");
+      info.append(el("div", "cap", "镜像版本 / 数据占用"));
+      const val = el("div", "val mono", (st.image || "未知") + (st.version ? "（运行 " + st.version + "）" : "") + " · " + (st.disk_usage || "?"));
+      val.style.fontSize = "12.5px";
+      info.append(val);
+      row.append(info);
+      statSlot.append(row);
+      const tag = curImageTag();
+      // 当前显示：优先运行版本（meta 自报），镜像 tag 括注；取不到运行版本就显示 tag
+      curTag.textContent = "";
+      curTag.append(document.createTextNode("当前 "));
+      const m = el("span", "mono", st.version ? st.version + (st.version !== tag ? "（" + tag + "）" : "") : tag);
+      curTag.append(m, document.createTextNode(" →"));
+      // 有新版本：提示并把输入框预填成最新版；否则预填当前 tag
+      const cur = st.version || tag;
+      if (st.latest_version && semverGt(st.latest_version, cur)) {
+        verHint.textContent = "";
+        verHint.append(el("span", "", "🔔 有新版本 "), el("b", "", st.latest_version));
+        verHint.style.color = "var(--warn, #b7791f)";
+        tagI.value = st.latest_version;
+      } else {
+        verHint.textContent = st.latest_version ? "✓ 已是最新" : "";
+        verHint.style.color = "var(--ok)";
+        tagI.value = tag;
+      }
+    }).catch((e) => {
+      statSlot.innerHTML = "";
+      errSlot.append(alertBar("err", "✗ 状态查询失败：" + e.message));
+    });
+  }
+  loadStatus();
 
   // 操作通用：起任务 → SSE 日志 → 完成/失败提示。onDone(ev) 返回 true 表示已处理完成。
   function watchOps(t0, onDone) {
@@ -938,17 +971,19 @@ function pageManage(content) {
     }, "h160");
   }
 
-  upBtn.onclick = async () => {
+  function doUpgrade(tag) {
     errSlot.innerHTML = "";
     const t0 = Date.now();
-    try {
-      await api("/api/upgrade", { method: "POST", body: { dir: S.deployDir, tag: tagI.value.trim() } });
+    api("/api/upgrade", { method: "POST", body: { dir: S.deployDir, tag: tag } }).then(() => {
       watchOps(t0, (err) => {
         if (err) errSlot.append(alertBar("err", "✗ " + err.message));
-        else errSlot.append(alertBar("ok", "✓ 升级完成"));
+        else { errSlot.append(alertBar("ok", "✓ 升级完成")); loadStatus(); }
       });
-    } catch (e) { errSlot.append(alertBar("err", "✗ " + e.message)); }
-  };
+    }).catch((e) => { errSlot.append(alertBar("err", "✗ " + e.message)); });
+  }
+
+  upBtn.onclick = () => doUpgrade(tagI.value.trim());
+  reBtn.onclick = () => doUpgrade(curImageTag());
 
   pullBtn.onclick = async () => {
     renderFold(foldSlot, null, 0, "拉取中…");

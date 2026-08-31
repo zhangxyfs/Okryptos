@@ -20,6 +20,7 @@ type Server struct {
 
 	mu       sync.Mutex
 	ex       Executor          // 已连接的 SSH 会话（nil=未连接；sudo 模式下为 WrapSudo 包装）
+	host     string            // NAS 地址（状态页版本探测直连用）
 	pw       string            // 登录密码（仅内存，供 sudo 回退尝试；私钥登录为空）
 	sudo     bool              // 已切 sudo 包装
 	running  bool              // 任务 single-flight
@@ -173,6 +174,7 @@ func (s *Server) apiConnect(w http.ResponseWriter, r *http.Request) {
 		s.ex.Close()
 	}
 	s.ex = ex
+	s.host = req.Host
 	s.pw = req.Password // 仅内存留存，供 probe 的 sudo 回退尝试
 	s.sudo = false
 	s.mu.Unlock()
@@ -186,6 +188,7 @@ func (s *Server) apiDisconnect(w http.ResponseWriter, r *http.Request) {
 		s.ex.Close()
 		s.ex = nil
 	}
+	s.host = ""
 	s.pw = ""
 	s.sudo = false
 	s.mu.Unlock()
@@ -344,6 +347,25 @@ func (s *Server) apiStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	// 版本探测（辅助信息，全部静默降级为空串）：运行版本本机直连 NAS 的 /meta；
+	// 最新版本查 Docker Hub tag 列表。两路并行，各 3s 超时兜底。
+	s.mu.Lock()
+	host := s.host
+	s.mu.Unlock()
+	var wg sync.WaitGroup
+	if host != "" && st.OKPort != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			st.Version = queryRunningVersion(r.Context(), "http://"+host+":"+st.OKPort+"/api/v1/meta")
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		st.LatestVersion = latestImageTag(r.Context(), dockerHubTagsURL)
+	}()
+	wg.Wait()
 	writeJSON(w, st)
 }
 
