@@ -1917,6 +1917,12 @@ async function doProjectSync(project, btn){
           try{
             const r2 = await api("/api/server/repos", { method:"POST", body:{ project: project }, skip401Reload:true });
             toast(r2.message || t("syncToastLatest"), r2.status === "error");
+            // 与 srvBind 对齐：建仓后失效服务器页缓存并补拉，否则绑定卡/仓库总览停留旧状态
+            SRV.projects = null; SRV.repos = null; loadServerRoleData();
+            if(r2.status === "conflict"){
+              state.syncConflict = { project: project };
+              location.hash = "sync-conflict?project=" + encodeURIComponent(project);
+            }
           }catch(err2){ toast(err2.message, true); }
           refreshManage();
         }
