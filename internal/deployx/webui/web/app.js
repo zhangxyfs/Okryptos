@@ -1102,7 +1102,11 @@ function pageManage(content) {
   const foldSlot = el("div");
   foldSlot.style.marginTop = "12px";
   renderFold(foldSlot, null, 0);
-  content.append(upgrade, viewLogs, reset, backup, restore, uninstall, opsSlot, foldSlot);
+  // 六张操作卡两两一行（升级+日志 / 重置+备份 / 恢复+卸载），充分利用最大化窗口宽度
+  const row1 = el("div", "cardrow"); row1.append(upgrade, viewLogs);
+  const row2 = el("div", "cardrow"); row2.append(reset, backup);
+  const row3 = el("div", "cardrow"); row3.append(restore, uninstall);
+  content.append(row1, row2, row3, opsSlot, foldSlot);
 
   // 版本号比较：vX.Y.Z 逐段数值比（非标准串视为最小）
   function semverGt(a, b) {
@@ -1173,7 +1177,7 @@ function pageManage(content) {
       if (done) return;
       if (ev.text.indexOf("任务完成：") >= 0) { done = true; onDone(null); }
       else if (ev.text.indexOf("失败：") >= 0) { done = true; onDone(new Error(ev.text)); }
-    }, "h160");
+    }, "h480");
   }
 
   function doUpgrade(tag) {
@@ -1277,12 +1281,12 @@ function renderFold(slot, logs, tail, hint) {
   };
   slot.append(head);
   if (open) {
-    const body = el("div", "log h160");
+    const body = el("div", "log h480");
     body.style.borderRadius = "0 0 8px 8px";
     body.textContent = logs || t("noLogs");
     slot.append(body);
   } else if (hint) {
-    const body = el("div", "log h160");
+    const body = el("div", "log h480");
     body.style.borderRadius = "0 0 8px 8px";
     body.textContent = hint;
     slot.append(body);

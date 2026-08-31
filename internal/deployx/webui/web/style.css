@@ -117,6 +117,7 @@ a:hover { text-decoration:underline; }
        font:12px/1.75 Consolas,"Cascadia Code",monospace; overflow-y:auto; white-space:pre; }
 .log.h320 { height:320px; }
 .log.h160 { height:160px; }
+.log.h480 { height:480px; }
 .log .g { color:#4ade80; }
 .log .w { color:#e5e5e5; }
 .log .r { color:#f87171; }
@@ -135,6 +136,9 @@ a:hover { text-decoration:underline; }
 .stat3 .pcard { flex:1; margin-bottom:0; padding:14px 16px; }
 .stat3 .cap { color:var(--muted); font-size:12px; margin-bottom:4px; }
 .stat3 .val { font-weight:600; font-size:13.5px; display:flex; align-items:center; gap:7px; }
+/* 操作卡两两一行（最大化窗口全宽布局）；卡间距由 .cardrow 接管 */
+.cardrow { display:flex; gap:12px; margin-bottom:12px; }
+.cardrow > .pcard { flex:1; min-width:0; margin-bottom:0; }
 .card-danger { border-color:#fca5a5; }
 .card-warn { border-color:#fcd34d; }
 .prog { height:8px; border-radius:999px; background:var(--hover); overflow:hidden; width:260px; }
