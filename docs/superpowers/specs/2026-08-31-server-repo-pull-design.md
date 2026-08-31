@@ -98,3 +98,28 @@ v2.23.0 个人多端同步上线后，新机器全新安装的 onboarding 是断
 ## 发布口径
 
 - 服务端有新增端点（git-token）：okserver 镜像需与客户端同版本齐发；旧客户端 + 新服务端无影响（旧客户端不调用新端点）；新客户端 + 旧服务端时拉取链路在自助重发步骤报 404 → 文案提示升级服务端。
+
+---
+
+## 补充定稿（2026-08-31 终审后）：git token 生命周期与凭证管理
+
+终审发现：固定名 `ok-sync-reissue` 按用户唯一，第二台新机器重发会吊销第一台机器已存凭据（静默失效、GUI 无自愈）。裁决如下：
+
+### token 命名：按机器分名
+
+- 客户端调 `POST /api/v1/git-token` 时带 `name_hint`（hostname）；服务端 token 名 = `ok-sync-r-<sanitized hint>`（hint 空/非法回落 `unknown`），删旧只删本机同名再建。
+- 每台机器各持一份凭据，互不吊销；Gitea token 数随机器数累积（量小，可控），配套凭证管理入口（下文）供清理。
+
+### 凭证管理（自助 + 管理）
+
+- oksrv 新端点（全部过 auth+gate；管理类再过 admin）：
+  - `GET /api/v1/tokens`：列自己的 git token（name、created_at、updated_at=最近使用，Gitea 对每次使用刷新 updated_at；无则展示 created_at）。
+  - `DELETE /api/v1/tokens/{name}`：删自己的指定 token。
+  - `GET /api/v1/users/{name}/tokens`、`DELETE /api/v1/users/{name}/tokens/{token}`：管理员查看/删除任意用户 token。
+- 删除用户时 Gitea 侧 DeleteUser 级联清掉该用户全部 token（在 apiUserDelete 补注释钉住此语义）。
+- 客户端：服务器页成员视图加「我的凭证」卡（列表按时间倒序：最近使用(updated_at) 优先、回落创建时间；每条带删除按钮）；root/admin 管理视图加「凭证管理」卡（选用户 → 列表 → 删除）。
+
+### 终审另两项修复（合并前）
+
+- serveBindRepo 的"旧服务端 404"分支补 fake 回归测试（发布口径变成可回归契约）。
+- apiServerPull 把 serverClient 未配置检查前置到注册之前（避免孤儿壳项目）；registry.Update 错误分类："已存在" 409，其他（锁/IO）500。
