@@ -79,6 +79,15 @@ func fakeOKServer(t *testing.T, cloneURL, gitToken string, extra ...func(*http.S
 		}
 		w.WriteHeader(204)
 	})
+	mux.HandleFunc("GET /api/v1/tokens", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"tokens": []map[string]string{
+			{"name": "ok-sync", "created_at": "2026-08-01T00:00:00Z", "updated_at": "2026-08-30T00:00:00Z"},
+			{"name": "ok-sync-r-NB1", "created_at": "2026-08-29T00:00:00Z", "updated_at": "2026-08-30T12:00:00Z"},
+		}})
+	})
+	mux.HandleFunc("DELETE /api/v1/tokens/{name}", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(204)
+	})
 	for _, f := range extra {
 		f(mux)
 	}
@@ -431,5 +440,28 @@ func TestApiServerPullNotConfigured(t *testing.T) {
 		if p.Name == "np1" {
 			t.Fatal("must not register shell project when server not configured")
 		}
+	}
+}
+
+// TestApiServerTokens 凭证管理转发：登录后 GET /api/server/tokens 列出两条；
+// DELETE /api/server/tokens/ok-sync-r-NB1 → 204（多机互不吊销场景）。
+func TestApiServerTokens(t *testing.T) {
+	h, _, _ := newEnv(t)
+	fake := fakeOKServer(t, "http://gitea/alice/ok-x.git", "git-tok-1")
+	defer fake.Close()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	res, body := do(t, "POST", srv.URL+"/api/server/login", testToken, map[string]any{"url": fake.URL, "username": "alice", "password": "pw"})
+	if res != 200 {
+		t.Fatalf("login: %d %s", res, body)
+	}
+	res, body = do(t, "GET", srv.URL+"/api/server/tokens", testToken, nil)
+	if res != 200 || !strings.Contains(string(body), "ok-sync") || !strings.Contains(string(body), "ok-sync-r-NB1") {
+		t.Fatalf("list tokens: %d %s", res, body)
+	}
+	res, body = do(t, "DELETE", srv.URL+"/api/server/tokens/ok-sync-r-NB1", testToken, nil)
+	if res != 204 {
+		t.Fatalf("delete token: %d %s", res, body)
 	}
 }

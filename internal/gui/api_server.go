@@ -43,6 +43,10 @@ func (h *Handler) registerServerAPI(api func(string, http.HandlerFunc)) {
 	api("POST /api/server/repos/team", h.fwdTeamRepo)
 	api("GET /api/server/repos-all", h.fwdReposAll)
 	api("GET /api/server/audit", h.fwdAudit)
+	api("GET /api/server/tokens", h.fwdTokens)
+	api("DELETE /api/server/tokens/{name}", h.fwdTokenDelete)
+	api("GET /api/server/users/{name}/tokens", h.fwdUserTokens)
+	api("DELETE /api/server/users/{name}/tokens/{token}", h.fwdUserTokenDelete)
 }
 
 // serverClient 从全局配置构造 serverx 客户端；未配置返回 nil。
@@ -551,6 +555,62 @@ func (h *Handler) fwdAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+}
+
+// fwdTokens 自助列凭证（tokens 列/删走已登录用户自己，角色门控在服务端）。
+func (h *Handler) fwdTokens(w http.ResponseWriter, r *http.Request) {
+	c, _, err := h.serverClient()
+	if err != nil || c == nil {
+		writeNotConfigured(w, err)
+		return
+	}
+	tokens, err := c.ListTokens(r.Context())
+	if err != nil {
+		writeServerErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": tokens})
+}
+
+func (h *Handler) fwdTokenDelete(w http.ResponseWriter, r *http.Request) {
+	c, _, err := h.serverClient()
+	if err != nil || c == nil {
+		writeNotConfigured(w, err)
+		return
+	}
+	if err := c.DeleteToken(r.Context(), r.PathValue("name")); err != nil {
+		writeServerErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// fwdUserTokens 管理员列指定用户凭证。
+func (h *Handler) fwdUserTokens(w http.ResponseWriter, r *http.Request) {
+	c, _, err := h.serverClient()
+	if err != nil || c == nil {
+		writeNotConfigured(w, err)
+		return
+	}
+	tokens, err := c.ListUserTokens(r.Context(), r.PathValue("name"))
+	if err != nil {
+		writeServerErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": tokens})
+}
+
+func (h *Handler) fwdUserTokenDelete(w http.ResponseWriter, r *http.Request) {
+	c, _, err := h.serverClient()
+	if err != nil || c == nil {
+		writeNotConfigured(w, err)
+		return
+	}
+	if err := c.DeleteUserToken(r.Context(), r.PathValue("name"), r.PathValue("token")); err != nil {
+		writeServerErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeNotConfigured(w http.ResponseWriter, err error) {

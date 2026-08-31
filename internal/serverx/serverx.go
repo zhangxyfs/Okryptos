@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -197,6 +198,41 @@ func (c *Client) GitToken(ctx context.Context, nameHint string) (string, error) 
 		return "", err
 	}
 	return out.GitToken, nil
+}
+
+// TokenInfo 与 oksrv 契约同形状（updated_at 即最近使用，可能为零值时间串）。
+type TokenInfo struct {
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func (c *Client) ListTokens(ctx context.Context) ([]TokenInfo, error) {
+	var out struct {
+		Tokens []TokenInfo `json:"tokens"`
+	}
+	if err := c.call(ctx, "GET", "/tokens", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Tokens, nil
+}
+
+func (c *Client) DeleteToken(ctx context.Context, name string) error {
+	return c.call(ctx, "DELETE", "/tokens/"+url.PathEscape(name), nil, nil)
+}
+
+func (c *Client) ListUserTokens(ctx context.Context, name string) ([]TokenInfo, error) {
+	var out struct {
+		Tokens []TokenInfo `json:"tokens"`
+	}
+	if err := c.call(ctx, "GET", "/users/"+url.PathEscape(name)+"/tokens", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Tokens, nil
+}
+
+func (c *Client) DeleteUserToken(ctx context.Context, user, token string) error {
+	return c.call(ctx, "DELETE", "/users/"+url.PathEscape(user)+"/tokens/"+url.PathEscape(token), nil, nil)
 }
 
 func (c *Client) ProvisionPersonalRepo(ctx context.Context, project string) (*ProvisionResult, error) {
