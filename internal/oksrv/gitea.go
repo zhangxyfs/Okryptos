@@ -128,13 +128,15 @@ func (g *GiteaBackend) DeleteUserToken(ctx context.Context, username, tokenName 
 	return err
 }
 
-// ListUserTokens 核实：GET /users/{username}/tokens（同 CreateUserToken 走 Basic 头），
-// 返回 AccessToken 数组 {name, created_at, updated_at}——updated_at 即 Gitea UI 的"最近使用"。
+// ListUserTokens 核实：GET /users/{username}/tokens（同 CreateUserToken 走 Basic 头）。
+// Gitea 1.22/1.23 的 AccessToken 无任何时间字段（解析为零值）；1.24+ 为
+// created_at / last_used_at——last_used_at 即 Gitea UI 的"最近使用"。
+// 零值时间由 tokenJSON 输出空串，前端回落 created_at 或置空。
 func (g *GiteaBackend) ListUserTokens(ctx context.Context, username string) ([]TokenInfo, error) {
 	var raw []struct {
 		Name      string    `json:"name"`
 		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
+		UpdatedAt time.Time `json:"last_used_at"`
 	}
 	if err := g.do(ctx, http.MethodGet, "/users/"+url.PathEscape(username)+"/tokens", nil, &raw, true); err != nil {
 		return nil, err

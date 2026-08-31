@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // newTestServer 起完整 mux + fake backend。
@@ -637,5 +638,21 @@ func TestApiTokens(t *testing.T) {
 	code, out = call(t, srv, "GET", "/api/v1/tokens", bobTok, nil)
 	if code != 403 || out["error"] != "must_change_password" {
 		t.Fatalf("gate must 403: %d %v", code, out)
+	}
+}
+
+// TestTokenJSONZeroTime 钉死零值时间输出空串的契约：Gitea ≤1.23 的 token 无时间字段，
+// 前端靠 `updated_at || created_at` 回落，零值若输出 "0001-01-01T00:00:00Z" 会被当成真时间显示。
+func TestTokenJSONZeroTime(t *testing.T) {
+	z := tokenJSON(TokenInfo{Name: "x"})
+	if z["created_at"] != "" || z["updated_at"] != "" {
+		t.Fatalf("zero time must serialize as empty string, got %v", z)
+	}
+	ts := tokenJSON(TokenInfo{Name: "x", CreatedAt: time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)})
+	if ts["created_at"] != "2026-08-30T10:00:00Z" {
+		t.Fatalf("created_at: %v", ts["created_at"])
+	}
+	if ts["updated_at"] != "" {
+		t.Fatalf("updated_at must stay empty: %v", ts["updated_at"])
 	}
 }

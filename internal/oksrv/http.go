@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var usernameRe = regexp.MustCompile(`^[a-z0-9_-]{2,32}$`)
@@ -310,9 +311,16 @@ func sanitizeTokenName(hint string) string {
 	return s
 }
 
-// tokenJSON 是 token 列表响应形状（updated_at 即最近使用；零值时前端回落 created_at）。
+// tokenJSON 是 token 列表响应形状（updated_at 即最近使用；零值时间输出空串，
+// 前端回落 created_at，两者皆空则时间列置空——Gitea ≤1.23 的 token 无时间字段）。
 func tokenJSON(t TokenInfo) map[string]any {
-	return map[string]any{"name": t.Name, "created_at": t.CreatedAt, "updated_at": t.UpdatedAt}
+	fmtT := func(ts time.Time) string {
+		if ts.IsZero() {
+			return ""
+		}
+		return ts.Format(time.RFC3339)
+	}
+	return map[string]any{"name": t.Name, "created_at": fmtT(t.CreatedAt), "updated_at": fmtT(t.UpdatedAt)}
 }
 
 func (s *server) listTokens(w http.ResponseWriter, r *http.Request, username string) {

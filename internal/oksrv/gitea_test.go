@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeGitea 镜像核实后的 Gitea API 形状（内存态）。
@@ -91,6 +92,24 @@ func fakeGitea(t *testing.T) *httptest.Server {
 		}
 		delete(userTokens[u], name)
 		w.WriteHeader(204)
+	})
+	mux.HandleFunc("GET /api/v1/users/{username}/tokens", func(w http.ResponseWriter, r *http.Request) {
+		if _, _, ok := r.BasicAuth(); !ok {
+			w.WriteHeader(401) // 同 POST：真实 Gitea 要求 Basic auth
+			return
+		}
+		// 真实 Gitea 1.24+ 形状：created_at / last_used_at；
+		// 名带 "legacy-" 前缀的模拟 ≤1.23（响应里完全无时间字段）。
+		out := []map[string]any{}
+		for name := range userTokens[r.PathValue("username")] {
+			e := map[string]any{"name": name}
+			if !strings.HasPrefix(name, "legacy-") {
+				e["created_at"] = "2026-08-30T10:00:00Z"
+				e["last_used_at"] = "2026-08-31T12:34:56Z"
+			}
+			out = append(out, e)
+		}
+		json.NewEncoder(w).Encode(out)
 	})
 	mux.HandleFunc("DELETE /api/v1/admin/users/{username}", func(w http.ResponseWriter, r *http.Request) {
 		u := r.PathValue("username")
@@ -283,5 +302,52 @@ func TestGiteaDeleteUserToken404(t *testing.T) {
 	}
 	if err := b.DeleteUserToken(ctx, "alice", "ok-sync-r-NB1"); err != nil {
 		t.Fatalf("re-delete must be tolerated: %v", err)
+	}
+}
+
+// TestGiteaListUserTokens 钉死真实 Gitea 的 token 列表契约：1.24+ 的最近使用字段是
+// last_used_at（不是 updated_at）；≤1.23 完全无时间字段（解析为零值，输出层转空串）。
+// 字段名经 go-gitea/gitea v1.22.0 / v1.24.0 modules/structs/user_app.go 源码核实。
+func TestGiteaListUserTokens(t *testing.T) {
+	srv := fakeGitea(t)
+	defer srv.Close()
+	b := NewGitea(srv.URL, "admin-token")
+	ctx := context.Background()
+	if err := b.CreateUser(ctx, "alice", "pw"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := b.CreateUserToken(ctx, "alice", "ok-sync"); err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+	if _, err := b.CreateUserToken(ctx, "alice", "legacy-old"); err != nil {
+		t.Fatalf("create legacy token: %v", err)
+	}
+	ts, err := b.ListUserTokens(ctx, "alice")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(ts) != 2 {
+		t.Fatalf("want 2 tokens, got %d", len(ts))
+	}
+	byName := map[string]TokenInfo{}
+	for _, tk := range ts {
+		byName[tk.Name] = tk
+	}
+	modern, ok := byName["ok-sync"]
+	if !ok {
+		t.Fatalf("missing ok-sync in %v", ts)
+	}
+	if modern.CreatedAt.Format(time.RFC3339) != "2026-08-30T10:00:00Z" {
+		t.Fatalf("created_at: %v", modern.CreatedAt)
+	}
+	if modern.UpdatedAt.Format(time.RFC3339) != "2026-08-31T12:34:56Z" {
+		t.Fatalf("last_used_at → UpdatedAt: %v", modern.UpdatedAt)
+	}
+	legacy, ok := byName["legacy-old"]
+	if !ok {
+		t.Fatalf("missing legacy-old in %v", ts)
+	}
+	if !legacy.CreatedAt.IsZero() || !legacy.UpdatedAt.IsZero() {
+		t.Fatalf("legacy (≤1.23 无时间字段) must parse zero, got %+v", legacy)
 	}
 }

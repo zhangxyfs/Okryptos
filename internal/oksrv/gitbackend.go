@@ -6,7 +6,8 @@ import (
 	"time"
 )
 
-// TokenInfo 是 git token 列表项（UpdatedAt 由 Gitea 在每次使用时刷新 = 最近使用）。
+// TokenInfo 是 git token 列表项（UpdatedAt = Gitea 1.24+ 的 last_used_at，每次使用时刷新；
+// Gitea ≤1.23 无时间字段，两者均为零值，输出层转空串由前端回落/置空）。
 type TokenInfo struct {
 	Name      string
 	CreatedAt time.Time
