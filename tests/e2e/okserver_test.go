@@ -99,6 +99,15 @@ func TestOkserverDeploy(t *testing.T) {
 		t.Fatalf("root login: %d %v", code, out)
 	}
 	rootTok := out["token"].(string)
+	// 初始密码带强制改密标记：gate 拦截一切非改密操作，必须先自助改密
+	code, _ = call("POST", "/api/v1/users", rootTok, map[string]string{"username": "alice"})
+	if code != 403 {
+		t.Fatalf("gated create user want 403 must_change_password: %d", code)
+	}
+	code, out = call("POST", "/api/v1/change-password", rootTok, map[string]string{"old_password": rootPW, "new_password": "root-new-password-1"})
+	if code != 200 {
+		t.Fatalf("root change password: %d %v", code, out)
+	}
 	code, out = call("POST", "/api/v1/users", rootTok, map[string]string{"username": "alice"})
 	if code != 200 || out["password"] == nil || out["git_token"] == nil {
 		t.Fatalf("create alice: %d %v", code, out)
@@ -109,6 +118,11 @@ func TestOkserverDeploy(t *testing.T) {
 		t.Fatalf("alice login: %d", code)
 	}
 	aliceTok := out["token"].(string)
+	// alice 同样持初始密码，先改密解锁
+	code, out = call("POST", "/api/v1/change-password", aliceTok, map[string]string{"old_password": alicePW, "new_password": "alice-new-password-1"})
+	if code != 200 {
+		t.Fatalf("alice change password: %d %v", code, out)
+	}
 	code, out = call("POST", "/api/v1/repos/personal", aliceTok, map[string]string{"project": "demo"})
 	if code != 200 || out["repo"].(map[string]any)["name"] != "ok-demo" {
 		t.Fatalf("personal repo: %d %v", code, out)

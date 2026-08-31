@@ -66,9 +66,13 @@ func (r *Repo) MergeInProgress() bool {
 	return false
 }
 
-// ContinueRebase 全部解决后续推。GIT_EDITOR=true 防唤起编辑器挂起。
+// ContinueRebase 全部解决后续推。GIT_EDITOR=true 防唤起编辑器挂起；身份内置——
+// rebase 续推会新建提交，无全局 git 身份的环境（CI runner、全新机器）不能依赖外部配置。
 func (r *Repo) ContinueRebase() error {
-	_, err := execGit(r.Dir, localTimeout, "-c", "core.editor=true", "rebase", "--continue")
+	_, err := execGit(r.Dir, localTimeout,
+		"-c", "core.editor=true",
+		"-c", "user.name=OpenKnowledge Sync", "-c", "user.email=sync@openknowledge.local",
+		"rebase", "--continue")
 	return err
 }
 

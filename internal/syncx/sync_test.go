@@ -202,7 +202,11 @@ func TestSyncDuringMergeConflictRefuses(t *testing.T) {
 	}
 	// 复现 ok sync init 情形 3 的官方指引路径：用户手工 merge 远端，冲突停半途。
 	// pull 默认 merge 策略，两边改了同一行 → 冲突停下，留下 MERGE_HEAD。
-	_, _ = execGit(dirB, networkTimeout, "pull", "--no-rebase")
+	// 身份内置：模拟的是"用户已配好 git 身份的机器"——无全局身份的 CI runner 上
+	// git merge 起手就拒绝（留不下 MERGE_HEAD），与产品行为无关。
+	_, _ = execGit(dirB, networkTimeout,
+		"-c", "user.name=OpenKnowledge Sync", "-c", "user.email=sync@openknowledge.local",
+		"pull", "--no-rebase")
 	if _, err := execGit(dirB, localTimeout, "rev-parse", "--verify", "--quiet", "MERGE_HEAD"); err != nil {
 		t.Fatal("merge should be in progress (MERGE_HEAD)")
 	}

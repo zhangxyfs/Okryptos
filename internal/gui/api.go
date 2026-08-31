@@ -1796,8 +1796,11 @@ func (h *Handler) apiProjectReadmeAsset(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	name, rel := tk.project, tk.path
-	if filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" ||
-		strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, "\\") {
+	// 反斜杠全平台拒绝：Windows 语义下 `..\x` 是穿越，Linux 虽不把它当分隔符，
+	// 但条目跨端同步后同一 path 可能在 Windows 客户端被解读——口径统一才安全。
+	if strings.ContainsRune(rel, '\\') ||
+		filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" ||
+		strings.HasPrefix(rel, "/") {
 		writeErr(w, http.StatusForbidden, "非法路径：拒绝绝对路径与盘符")
 		return
 	}
