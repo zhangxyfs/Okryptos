@@ -94,7 +94,7 @@ func (s *Store) SessionUser(token string) *User {
 	// created_at 落库是 TEXT，直接 Scan 进 time.Time 会报类型错误，
 	// 走 store.go 的 scanUser（先扫 string 再 parseTime）。
 	u, err := scanUser(s.db.QueryRow(
-		"SELECT id, username, role, disabled, created_at FROM users WHERE id=?", userID).Scan)
+		"SELECT id, username, role, disabled, must_change_password, created_at FROM users WHERE id=?", userID).Scan)
 	if err != nil || u.Disabled {
 		return nil
 	}

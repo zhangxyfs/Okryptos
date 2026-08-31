@@ -1,6 +1,9 @@
 package oksrv
 
 import (
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -162,5 +165,96 @@ func TestResetRootWithoutRoot(t *testing.T) {
 	defer st.Close()
 	if _, err := st.ResetRoot(); err == nil {
 		t.Fatal("root 未初始化时应报错")
+	}
+}
+
+// 存量旧库（六列 users 表，无 must_change_password）OpenStore 应自动补列迁移，
+// 老行默认 0；迁移幂等（重开不报错）；标记可读写。
+func TestUserMustChangeMigration(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(dir, "okserver.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE users (
+	  id INTEGER PRIMARY KEY AUTOINCREMENT,
+	  username TEXT NOT NULL UNIQUE,
+	  role TEXT NOT NULL,
+	  password_hash TEXT NOT NULL,
+	  disabled INTEGER NOT NULL DEFAULT 0,
+	  created_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO users(username,role,password_hash,created_at) VALUES('old','member','h','2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := OpenStore(dir)
+	if err != nil {
+		t.Fatalf("OpenStore migrate: %v", err)
+	}
+	u := s.GetUser("old")
+	if u == nil || u.MustChangePassword {
+		t.Fatalf("migrated user: %+v", u)
+	}
+	if err := s.SetMustChangePassword("old", true); err != nil {
+		t.Fatal(err)
+	}
+	if !s.GetUser("old").MustChangePassword {
+		t.Fatal("flag should be set")
+	}
+	if err := s.SetMustChangePassword("old", false); err != nil {
+		t.Fatal(err)
+	}
+	if s.GetUser("old").MustChangePassword {
+		t.Fatal("flag should be cleared")
+	}
+	s.Close()
+	if s2, err := OpenStore(dir); err != nil { // 幂等：再开一次不报错
+		t.Fatalf("reopen: %v", err)
+	} else {
+		s2.Close()
+	}
+}
+
+// DeleteUserSessionsExcept：保留指定会话、删其余；空 keep 删全部。
+func TestDeleteUserSessionsExcept(t *testing.T) {
+	s, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	u, err := s.CreateUser("alice", "member", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok1, err := s.CreateSession(u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok2, err := s.CreateSession(u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(tok1))
+	if err := s.DeleteUserSessionsExcept(u.ID, hex.EncodeToString(sum[:])); err != nil {
+		t.Fatal(err)
+	}
+	if s.SessionUser(tok1) == nil {
+		t.Fatal("当前会话应保留")
+	}
+	if s.SessionUser(tok2) != nil {
+		t.Fatal("其他会话应被删除")
+	}
+	if err := s.DeleteUserSessionsExcept(u.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.SessionUser(tok1) != nil {
+		t.Fatal("空 keep 应删全部会话")
 	}
 }

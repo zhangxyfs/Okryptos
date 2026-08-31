@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL,
   password_hash TEXT NOT NULL,
   disabled INTEGER NOT NULL DEFAULT 0,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -86,7 +87,47 @@ func OpenStore(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("建 schema 失败: %w", err)
 	}
+	// 存量库补列：CREATE TABLE IF NOT EXISTS 不会改旧表，PRAGMA 检测 + ALTER，幂等
+	if err := migrateUserColumns(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("迁移 users 表失败: %w", err)
+	}
 	return &Store{db: db, dir: dataDir}, nil
+}
+
+// migrateUserColumns 给存量库补 users 表后加列。
+func migrateUserColumns(db *sql.DB) error {
+	has, err := hasColumn(db, "users", "must_change_password")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// hasColumn 用 PRAGMA table_info 检测列是否存在。
+func hasColumn(db *sql.DB, table, col string) (bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == col {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // Close 关闭存储句柄。
@@ -103,12 +144,14 @@ func parseTime(v string) time.Time {
 }
 
 // User 是一个管理面账号；Role ∈ root/admin/member，root 全库唯一。
+// MustChangePassword=true 表示持初始/重置密码，HTTP 层拦截其改密外的一切请求。
 type User struct {
-	ID        int64
-	Username  string
-	Role      string
-	Disabled  bool
-	CreatedAt time.Time
+	ID                 int64
+	Username           string
+	Role               string
+	Disabled           bool
+	MustChangePassword bool
+	CreatedAt          time.Time
 }
 
 // CreateUser 建账号。username 重复（UNIQUE）或已有 root 再建 root 时返回错误：
@@ -133,12 +176,13 @@ func (s *Store) CreateUser(username, role, bcryptHash string) (*User, error) {
 // scanUser 从一行 users 查询结果扫出 User；created_at TEXT 还原为 time.Time。
 func scanUser(scan func(dest ...any) error) (*User, error) {
 	var u User
-	var disabled int
+	var disabled, mustChange int
 	var createdAt string
-	if err := scan(&u.ID, &u.Username, &u.Role, &disabled, &createdAt); err != nil {
+	if err := scan(&u.ID, &u.Username, &u.Role, &disabled, &mustChange, &createdAt); err != nil {
 		return nil, err
 	}
 	u.Disabled = disabled != 0
+	u.MustChangePassword = mustChange != 0
 	u.CreatedAt = parseTime(createdAt)
 	return &u, nil
 }
@@ -146,7 +190,7 @@ func scanUser(scan func(dest ...any) error) (*User, error) {
 // getUserByID 按主键读用户；CreateUser 建完即读，保证返回的 CreatedAt 与库一致。
 func (s *Store) getUserByID(id int64) *User {
 	u, err := scanUser(s.db.QueryRow(
-		`SELECT id,username,role,disabled,created_at FROM users WHERE id=?`, id).Scan)
+		`SELECT id,username,role,disabled,must_change_password,created_at FROM users WHERE id=?`, id).Scan)
 	if err != nil {
 		return nil
 	}
@@ -156,7 +200,7 @@ func (s *Store) getUserByID(id int64) *User {
 // GetUser 按用户名读用户；不存在返回 nil（调用方用 nil 判定"无此账号"）。
 func (s *Store) GetUser(username string) *User {
 	u, err := scanUser(s.db.QueryRow(
-		`SELECT id,username,role,disabled,created_at FROM users WHERE username=?`, username).Scan)
+		`SELECT id,username,role,disabled,must_change_password,created_at FROM users WHERE username=?`, username).Scan)
 	if err != nil {
 		return nil
 	}
@@ -166,7 +210,7 @@ func (s *Store) GetUser(username string) *User {
 // ListUsers 按创建顺序列出全部用户；查询失败返回空切片（列表为空与出错同态，
 // 管理面列表场景下不出错页，错误会由后续写操作暴露）。
 func (s *Store) ListUsers() []User {
-	rows, err := s.db.Query(`SELECT id,username,role,disabled,created_at FROM users ORDER BY id`)
+	rows, err := s.db.Query(`SELECT id,username,role,disabled,must_change_password,created_at FROM users ORDER BY id`)
 	if err != nil {
 		return nil
 	}
@@ -201,6 +245,23 @@ func (s *Store) SetUserDisabled(username string, disabled bool) error {
 // SetUserPasswordHash 换密码哈希（bcrypt 哈希由调用方算好，存储层不碰明文）。
 func (s *Store) SetUserPasswordHash(username, bcryptHash string) error {
 	_, err := s.db.Exec(`UPDATE users SET password_hash=? WHERE username=?`, bcryptHash, username)
+	return err
+}
+
+// SetMustChangePassword 置/清"必须改密"标记（初始/重置密码置 1，自助改密成功清 0）。
+func (s *Store) SetMustChangePassword(username string, v bool) error {
+	n := 0
+	if v {
+		n = 1
+	}
+	_, err := s.db.Exec(`UPDATE users SET must_change_password=? WHERE username=?`, n, username)
+	return err
+}
+
+// DeleteUserSessionsExcept 删除该用户除 keepTokenHash 外的全部会话；
+// keepTokenHash 传空串即删全部（管理员重置/reset-root 场景）。
+func (s *Store) DeleteUserSessionsExcept(userID int64, keepTokenHash string) error {
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE user_id=? AND token_hash != ?`, userID, keepTokenHash)
 	return err
 }
 
