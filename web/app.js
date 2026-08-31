@@ -199,7 +199,7 @@ const I18N = {
     mgSync:"同步", mgSyncConflict:"同步冲突，待解决",
     syncToastPull:"已拉取 {n} 个提交", syncToastPush:"已推送 {n} 个提交",
     syncToastLatest:"已是最新", syncToastLocal:"已初始化（仅本地历史）", syncToastFail:"同步失败：",
-    syncDotSynced:"已同步", syncDotAhead:"有未同步变更", syncDotOff:"未启用同步", syncDotConflict:"同步冲突",
+    syncDotSynced:"已同步", syncDotAhead:"有未同步变更", syncDotOff:"未启用同步", syncDotConflict:"同步冲突", syncDotSyncing:"正在同步",
     syncNavConflict:"解决同步冲突",
     syncInitGuide:"该项目尚未初始化同步：请在终端执行 ok sync init [remote-url] 完成建仓绑定",
     syncServerBindConfirm:"该项目尚未初始化同步。经服务器建仓并初始化（建仓 + 绑定 remote + 首次推送）？",
@@ -396,7 +396,7 @@ const I18N = {
     mgSync:"Sync", mgSyncConflict:"Sync conflict, resolution needed",
     syncToastPull:"Pulled {n} commits", syncToastPush:"Pushed {n} commits",
     syncToastLatest:"Up to date", syncToastLocal:"Initialized (local history only)", syncToastFail:"Sync failed: ",
-    syncDotSynced:"Synced", syncDotAhead:"Unsynced changes", syncDotOff:"Sync disabled", syncDotConflict:"Sync conflict",
+    syncDotSynced:"Synced", syncDotAhead:"Unsynced changes", syncDotOff:"Sync disabled", syncDotConflict:"Sync conflict", syncDotSyncing:"Syncing",
     syncNavConflict:"Resolve sync conflict",
     syncInitGuide:"Sync is not initialized for this project: run 'ok sync init [remote-url]' in terminal to set it up",
     syncServerBindConfirm:"Sync is not initialized for this project. Provision and bind via the server (create repo + bind remote + first push)?",
@@ -1258,14 +1258,16 @@ async function pollManage(){
     if(names !== MGMT.list.map(p=>p.name).sort().join("\n")){ refreshManage(); return; }   // 项目增删 → 全量
     const lu = {}; ps.forEach(p=>{ lu[p.name] = p.last_update||0; });
     const luChanged = MGMT.list.some(p=>(p.lastUpdate||0)!==(lu[p.name]||0));
+    const syMap = {}; ps.forEach(p=>{ syMap[p.name] = JSON.stringify(p.sync||null); });
+    const syChanged = MGMT.list.some(p=>JSON.stringify(p.sync||null) !== syMap[p.name]);
     const openP = MGMT.list.find(p=>state.open[p.name]===true);
     let newEntries = null;
     if(openP && !openP.err){
       const es = await api("/api/entries?project="+encodeURIComponent(openP.name)).catch(()=>null);
       if(es && JSON.stringify(es)!==JSON.stringify(openP.entries)) newEntries = es;
     }
-    if(!luChanged && !newEntries) return;   // 无变化不重渲
-    MGMT.list.forEach(p=>{ p.lastUpdate = lu[p.name]||0; });
+    if(!luChanged && !newEntries && !syChanged) return;   // 无变化不重渲
+    MGMT.list.forEach(p=>{ p.lastUpdate = lu[p.name]||0; p.sync = ps.find(q=>q.name===p.name).sync; });
     MGMT.list.sort((a,b)=>(b.lastUpdate||0)-(a.lastUpdate||0) || (a.name<b.name?-1:a.name>b.name?1:0));
     if(newEntries){
       openP.entries = newEntries;
@@ -1856,17 +1858,19 @@ function fillTree(scroll){
   if(filtering && !hits)   // 需求 2：过滤无命中时给空态提示
     scroll.appendChild(Object.assign(el("div","tree-empty"),{textContent:t("noHit")}));
 }
-/* ---- P1-B 项目同步：状态点四态 + 行内同步按钮 ---- */
+/* ---- P1-B 项目同步：状态点五态 + 行内同步按钮 ---- */
 function syncDotClass(sy){
   if(!sy || !sy.enabled || !sy.is_repo) return "off";
   if(sy.conflict) return "conflict";
-  if(sy.ahead > 0 || sy.behind > 0) return "ahead";
+  if(sy.syncing) return "syncing";
+  if(sy.dirty || sy.ahead > 0 || sy.behind > 0) return "ahead";
   return "synced";
 }
 function syncDotKey(sy){
   if(!sy || !sy.enabled || !sy.is_repo) return "syncDotOff";
   if(sy.conflict) return "syncDotConflict";
-  if(sy.ahead > 0 || sy.behind > 0) return "syncDotAhead";
+  if(sy.syncing) return "syncDotSyncing";
+  if(sy.dirty || sy.ahead > 0 || sy.behind > 0) return "syncDotAhead";
   return "syncDotSynced";
 }
 

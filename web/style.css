@@ -592,6 +592,8 @@ textarea.ef-body { flex:1; min-height:0; resize:none; font:13px/1.7 Consolas,"Ca
 .pj-sync-dot.synced{ background:#2da44e; }
 .pj-sync-dot.ahead{ background:#d4a72c; }
 .pj-sync-dot.conflict{ background:#cf222e; }
+.pj-sync-dot.syncing{ background:#d4a72c; animation:okblink 1s ease-in-out infinite; }
+@keyframes okblink{ 0%,100%{ opacity:1; } 50%{ opacity:.25; } }
 .pj-sync-btn{ width:22px; height:22px; padding:2px; opacity:.55; flex:none; align-self:center; }
 .pj-sync-btn:hover{ opacity:1; }
 .pj-sync-btn.spinning svg{ animation:okspin 1s linear infinite; }
