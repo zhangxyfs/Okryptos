@@ -211,6 +211,8 @@ const I18N = {
     srvAudit:"审计", srvAuditDesc:"管理操作流水（倒序）。",
     srvBindCard:"我的项目绑定", srvBindDesc:"建仓 = okserver provisioning → init → 首次推送，一键完成。",
     srvBound:"已绑定", srvNotCreated:"未创建", srvBind:"一键建仓并绑定", srvBinding:"建仓中…",
+    srvAutoBindConfirm:"检测到 {n} 个项目在服务器已有你的数据、本地未初始化且为空：{l}\n一键拉取并绑定？（本地已有内容的项目不自动处理，请逐个手动绑定）",
+    srvAutoBindDone:"已自动绑定 {n} 个项目", srvAutoBindFail:"，失败：",
     srvMyOrgs:"我的组织", srvMyOrgsDesc:"只读（本期）；成员与团队仓由管理员维护。", srvNoOrg:"未加入任何组织。",
     srvDeploy:"部署指引（还没有服务器？展开）", srvUserCreated:"用户已创建", srvCopyHint:"初始密码与 git token 仅本次显示，请立即复制发给用户。",
     srvPwd:"初始密码", srvNewPwd:"新密码", srvGitTok:"git token", srvCopied:"我已复制", srvCopiedOk:"已复制到剪贴板",
@@ -402,6 +404,8 @@ const I18N = {
     srvAudit:"Audit", srvAuditDesc:"Administrative operations (newest first).",
     srvBindCard:"My project bindings", srvBindDesc:"Provision = okserver, init, first push — one click.",
     srvBound:"Bound", srvNotCreated:"Not created", srvBind:"Provision & bind", srvBinding:"Provisioning…",
+    srvAutoBindConfirm:"{n} project(s) have your data on the server, are uninitialized and empty locally: {l}\nPull and bind them now? (Projects with local content are left for manual binding.)",
+    srvAutoBindDone:"Auto-bound {n} project(s)", srvAutoBindFail:", failed: ",
     srvMyOrgs:"My organizations", srvMyOrgsDesc:"Read-only (this release); membership and team repos are admin-managed.", srvNoOrg:"No organization.",
     srvDeploy:"Deployment guide (no server yet? expand)", srvUserCreated:"User created", srvCopyHint:"The initial password and git token are shown only once — copy them now.",
     srvPwd:"Initial password", srvNewPwd:"New password", srvGitTok:"git token", srvCopied:"Done", srvCopiedOk:"Copied",
@@ -5591,6 +5595,7 @@ async function srvLogin(username, password){
     SRV.loginFb = (err.status === 401) ? t("srvLoginFail") : (err.message || t("srvLoginFail"));
   }
   render();
+  if(SRV.loggedIn) maybeAutoBind();   // 登录成功后：服务器有仓+本地空的项目一次确认批量拉取绑定
 }
 
 async function srvLogout(){
@@ -5598,6 +5603,37 @@ async function srvLogout(){
   Object.assign(SRV, { loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, wizardStep:2 });
   toast(t("srvLoggedOut"));
   render();
+}
+
+/* 登录后半自动首拉：服务器已有我的个人仓 + 本地未初始化 + 本地无内容 → 一次确认批量建仓绑定
+  （走 §14 clone 路径）。本地已有内容的项目不自动动（首次推送语义留给用户逐个点）。fail-open：
+   任何一步失败都不打扰登录流程。 */
+async function maybeAutoBind(){
+  try{
+    const ps = await api("/api/projects");
+    const me = SRV.user && SRV.user.repos ? SRV.user : await api("/api/server/me", { skip401Reload:true });
+    const srvHas = {};
+    (me.repos || []).forEach(r=>{ srvHas[r.project] = true; });
+    const cands = [];
+    for(const p of (ps || [])){
+      if(p.sync && p.sync.is_repo) continue;
+      if(!srvHas[p.name]) continue;
+      const es = await api("/api/entries?project=" + encodeURIComponent(p.name), { skip401Reload:true }).catch(()=>null);
+      if(es && es.length === 0) cands.push(p.name);
+    }
+    if(!cands.length) return;
+    if(!await uiConfirm(t("srvAutoBindConfirm").replace("{n}", cands.length).replace("{l}", cands.join("、")))) return;
+    let done = 0; const failed = [];
+    for(const name of cands){
+      try{
+        const r = await api("/api/server/repos", { method:"POST", body:{ project: name }, skip401Reload:true });
+        if(r.status === "error") failed.push(name); else done++;
+      }catch(_){ failed.push(name); }
+    }
+    toast(t("srvAutoBindDone").replace("{n}", done) + (failed.length ? t("srvAutoBindFail")+failed.join("、") : ""), failed.length > 0);
+    SRV.projects = null; SRV.repos = null; loadServerRoleData();
+    refreshManage();
+  }catch(_){ /* fail-open */ }
 }
 
 /* ---- 步骤 3 · 管理视图（root/admin） ---- */
