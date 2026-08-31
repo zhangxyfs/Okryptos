@@ -93,10 +93,11 @@ type RepoInfo struct {
 }
 
 type MeInfo struct {
-	Name  string     `json:"name"`
-	Role  string     `json:"role"`
-	Orgs  []string   `json:"orgs"`
-	Repos []RepoInfo `json:"repos"`
+	Name               string     `json:"name"`
+	Role               string     `json:"role"`
+	MustChangePassword bool       `json:"must_change_password"`
+	Orgs               []string   `json:"orgs"`
+	Repos              []RepoInfo `json:"repos"`
 }
 
 type ProvisionResult struct {
@@ -177,6 +178,12 @@ func (c *Client) Me(ctx context.Context) (*MeInfo, error) {
 		return nil, err
 	}
 	return &m, nil
+}
+
+// ChangePassword 自助改密（旧密码校验在服务端；401 旧密码错误、
+// 403 must_change_password 等以 *Error 透传状态码）。
+func (c *Client) ChangePassword(ctx context.Context, oldPassword, newPassword string) error {
+	return c.call(ctx, "POST", "/change-password", map[string]string{"old_password": oldPassword, "new_password": newPassword}, nil)
 }
 
 func (c *Client) ProvisionPersonalRepo(ctx context.Context, project string) (*ProvisionResult, error) {

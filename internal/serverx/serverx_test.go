@@ -40,7 +40,23 @@ func fakeOKServer(t *testing.T) *httptest.Server {
 		if !authed(w, r) {
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"name": "alice", "role": "member", "orgs": []string{"acme"}, "repos": []any{}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"name": "alice", "role": "member", "must_change_password": true, "orgs": []string{"acme"}, "repos": []any{}})
+	})
+	mux.HandleFunc("POST /api/v1/change-password", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(w, r) {
+			return
+		}
+		var req struct {
+			OldPassword string `json:"old_password"`
+			NewPassword string `json:"new_password"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.OldPassword != "pw" {
+			w.WriteHeader(401)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "旧密码错误"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	})
 	mux.HandleFunc("POST /api/v1/repos/personal", func(w http.ResponseWriter, r *http.Request) {
 		if !authed(w, r) {
@@ -100,5 +116,28 @@ func TestClientFlow(t *testing.T) {
 	// 服务器不可达 → 错误
 	if _, err := New("http://127.0.0.1:1", "").Meta(ctx); err == nil {
 		t.Fatal("unreachable must fail")
+	}
+}
+
+func TestChangePassword(t *testing.T) {
+	srv := fakeOKServer(t)
+	defer srv.Close()
+	ctx := context.Background()
+	c := New(srv.URL, "tok-1")
+
+	// 旧密码错误 → *Error 401 透传
+	err := c.ChangePassword(ctx, "bad", "newpass123")
+	var se *Error
+	if !errors.As(err, &se) || se.Code != 401 {
+		t.Fatalf("wrong old: %v", err)
+	}
+	// 正确改密 → nil
+	if err := c.ChangePassword(ctx, "pw", "newpass123"); err != nil {
+		t.Fatalf("change: %v", err)
+	}
+	// me 解析 must_change_password
+	me, err := c.Me(ctx)
+	if err != nil || !me.MustChangePassword {
+		t.Fatalf("me flag: %+v %v", me, err)
 	}
 }

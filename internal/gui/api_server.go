@@ -20,6 +20,7 @@ func (h *Handler) registerServerAPI(api func(string, http.HandlerFunc)) {
 	api("POST /api/server/test", h.apiServerTest)
 	api("POST /api/server/login", h.apiServerLogin)
 	api("POST /api/server/logout", h.apiServerLogout)
+	api("POST /api/server/change-password", h.fwdChangePassword)
 	api("GET /api/server/me", h.apiServerMe)
 	api("POST /api/server/repos", h.apiServerRepos)
 	// 管理类透传（角色门控在服务端）
@@ -308,6 +309,28 @@ func (h *Handler) fwdUserResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"password": pw})
+}
+
+// fwdChangePassword 透传自助改密；成功 204；401 旧密码错误 / 403 must_change_password
+// 等经 writeServerErr 原样透传状态码与 message（前端据 403 弹强制改密框）。
+func (h *Handler) fwdChangePassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	c, _, err := h.serverClient()
+	if err != nil || c == nil {
+		writeNotConfigured(w, err)
+		return
+	}
+	if err := c.ChangePassword(r.Context(), req.OldPassword, req.NewPassword); err != nil {
+		writeServerErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) fwdUserDisable(disabled bool) http.HandlerFunc {

@@ -55,6 +55,29 @@ func fakeOKServer(t *testing.T, cloneURL, gitToken string) *httptest.Server {
 			"git_token": gitToken,
 		})
 	})
+	mux.HandleFunc("POST /api/v1/change-password", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer tok-") {
+			w.WriteHeader(401)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "未认证"})
+			return
+		}
+		var req struct {
+			OldPassword string `json:"old_password"`
+			NewPassword string `json:"new_password"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.NewPassword == "force403xx" { // 模拟服务端 gate 命中
+			w.WriteHeader(403)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "must_change_password"})
+			return
+		}
+		if req.OldPassword != "pw" {
+			w.WriteHeader(401)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "旧密码错误"})
+			return
+		}
+		w.WriteHeader(204)
+	})
 	return httptest.NewServer(mux)
 }
 
@@ -250,5 +273,34 @@ func TestFwdOrgMemberAdd(t *testing.T) {
 	}
 	if gotOrg != "core" || gotUser != "alice" || gotRole != "member" {
 		t.Fatalf("forwarded: org=%q user=%q role=%q", gotOrg, gotUser, gotRole)
+	}
+}
+
+func TestApiServerChangePassword(t *testing.T) {
+	h, _, _ := newEnv(t)
+	fake := fakeOKServer(t, "http://gitea/alice/ok-x.git", "git-tok-1")
+	defer fake.Close()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// 登录落配置（change-password 走已存 token）
+	res, body := do(t, "POST", srv.URL+"/api/server/login", testToken, map[string]any{"url": fake.URL, "username": "alice", "password": "pw"})
+	if res != 200 {
+		t.Fatalf("login: %d %s", res, body)
+	}
+	// 旧密码错误 → 401 透传
+	res, _ = do(t, "POST", srv.URL+"/api/server/change-password", testToken, map[string]any{"old_password": "bad", "new_password": "newpass123"})
+	if res != 401 {
+		t.Fatalf("wrong old: %d", res)
+	}
+	// 403 must_change_password 原样透传（前端据此弹强制改密框）
+	res, body = do(t, "POST", srv.URL+"/api/server/change-password", testToken, map[string]any{"old_password": "pw", "new_password": "force403xx"})
+	if res != 403 || !strings.Contains(string(body), "must_change_password") {
+		t.Fatalf("403 passthrough: %d %s", res, body)
+	}
+	// 成功 → 204
+	res, _ = do(t, "POST", srv.URL+"/api/server/change-password", testToken, map[string]any{"old_password": "pw", "new_password": "newpass123"})
+	if res != 204 {
+		t.Fatalf("change: %d", res)
 	}
 }
