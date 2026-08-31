@@ -1076,3 +1076,511 @@ Expected: 无语法错误
 ```bash
 go test ./... && git add -A && git commit -m "fix: 终审修复"
 ```
+
+---
+
+## 终审后追加任务（2026-08-31，规格补充定稿对应）
+
+第一轮终审（db81fd8..11bd92c）结论 With fixes，对应规格「补充定稿」节。原 Task 9（全量回归+终审）顺延为 Task 13。
+
+### Task 9: 终审修复波——token 按机器分名 + 404 测试 + pull 前置检查
+
+**Files:**
+- Modify: `internal/oksrv/http.go`（apiGitToken 带 name_hint）
+- Modify: `internal/serverx/serverx.go`（GitToken 加参数）
+- Modify: `internal/gui/api_server.go`（调用点传 hostname；apiServerPull 前置检查 + 错误分类）
+- Test: `internal/oksrv/http_test.go`、`internal/gui/api_server_test.go`
+
+**Interfaces:**
+- Consumes: Task 1-4 全部产出。
+- Produces: `serverx.Client.GitToken(ctx context.Context, nameHint string) (string, error)`（签名变更，唯一调用点在 serveBindRepo）；oksrv `POST /api/v1/git-token` 接受 `{"name_hint": "..."}`，token 名 `ok-sync-r-<sanitized>`。
+
+- [ ] **Step 1: oksrv——apiGitToken 改为按机器分名**
+
+handler 替换为：
+
+```go
+// apiGitToken 自助重发 git token：按机器分名（ok-sync-r-<hostname>），删本机同名旧 token
+// 再建——每台机器各持一份凭据，多端互不吊销（终审裁决；固定名单用户唯一会断他机）。
+func (s *server) apiGitToken(w http.ResponseWriter, r *http.Request, u *User) {
+	var in struct {
+		NameHint string `json:"name_hint"`
+	}
+	_ = decodeJSON(w, r, &in) // 空 body 容忍：hint 缺省落 unknown
+	tokenName := "ok-sync-r-" + sanitizeTokenName(in.NameHint)
+	_ = s.backend.DeleteUserToken(r.Context(), u.Username, tokenName) // 尽力而为，以建为准
+	token, err := s.backend.CreateUserToken(r.Context(), u.Username, tokenName)
+	if err != nil {
+		backendErr(w, err)
+		return
+	}
+	s.st.Audit(u.Username, "reissue-git-token", u.Username, tokenName)
+	writeJSON(w, http.StatusOK, map[string]any{"git_token": token, "token_name": tokenName})
+}
+
+// sanitizeTokenName：Gitea token 名只留 [a-zA-Z0-9_-]，其余折成 '-'；空/全非法落 "unknown"；截 32。
+func sanitizeTokenName(hint string) string {
+	var b []rune
+	for _, r := range hint {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			b = append(b, r)
+		} else {
+			b = append(b, '-')
+		}
+	}
+	s := string(b)
+	if strings.Trim(s, "-") == "" {
+		s = "unknown"
+	}
+	if len(s) > 32 {
+		s = s[:32]
+	}
+	return s
+}
+```
+
+注意 decodeJSON 失败语义：decodeJSON 失败时已写 400。容忍空 body 的写法：ContentLength==0 时跳过解码（或按 http.go 既有 decodeJSON 语义选择等价写法）；测试覆盖"带 hint"与"空 body"两路。`strings` 导入如缺则补。
+
+- [ ] **Step 2: 测试更新**（http_test.go 的 TestApiGitToken）
+
+- 带 hint：`call(..., map[string]string{"name_hint": "DESKTOP-1"})` → 200 且 `token_name` == `ok-sync-r-DESKTOP-1`；审计 detail 含该名。
+- 同名重复调（同 hint）→ 仍 200（删本机同名再建）。
+- 空 body → 200，`token_name` == `ok-sync-r-unknown`。
+- gate/401 断言不动。
+
+- [ ] **Step 3: serverx——GitToken 加 nameHint**
+
+```go
+// GitToken 自助重发 git token（okserver v2.25 起；旧服务端返回 404 *Error）。
+// nameHint 一般是本机 hostname——服务端按 ok-sync-r-<hint> 分名，多机互不吊销。
+func (c *Client) GitToken(ctx context.Context, nameHint string) (string, error) {
+	var out struct {
+		GitToken string `json:"git_token"`
+	}
+	if err := c.call(ctx, "POST", "/git-token", map[string]string{"name_hint": nameHint}, &out); err != nil {
+		return "", err
+	}
+	return out.GitToken, nil
+}
+```
+
+- [ ] **Step 4: gui——serveBindRepo 调用点传 hostname + apiServerPull 前置检查**
+
+serveBindRepo 中 `c.GitToken(r.Context())` 改为：
+
+```go
+		host, _ := os.Hostname()
+		tok, terr := c.GitToken(r.Context(), host)
+```
+
+（`os` 导入如缺则补。）
+
+apiServerPull 在 `findProject` 之前加：
+
+```go
+	// 未配置/未登录服务器时不注册空壳——宁可 409 也不留孤儿项目（终审 #3）
+	if c, _, err := h.serverClient(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if c == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "not_configured"})
+		return
+	}
+```
+
+registry.Update 错误分类（apiServerPull 内）：
+
+```go
+	if err := registry.Update(func(reg *registry.Registry) error {
+		for _, p := range reg.Projects {
+			if p.Name == req.Project {
+				return errProjectExists
+			}
+		}
+		reg.Projects = append(reg.Projects, registry.Project{Name: req.Project})
+		return nil
+	}); err != nil {
+		if errors.Is(err, errProjectExists) {
+			writeErr(w, http.StatusConflict, "项目已注册："+req.Project)
+		} else {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+```
+
+api_server.go 包级加：`var errProjectExists = errors.New("项目已存在")`。
+
+- [ ] **Step 5: 404 旧服务端分支回归测试**（api_server_test.go 追加）
+
+```go
+// TestApiServerReposOldServerNoGitToken 仓已存在+本机无凭据+服务端过旧（无 git-token
+// 路由 → 404）：报"服务端版本过旧"升级提示，项目仓不 init。
+func TestApiServerReposOldServerNoGitToken(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "gitconfig-sys"))
+	fake := fakeOKServer(t, "http://gitea/alice/ok-x.git", "") // 无 git-token 路由
+	defer fake.Close()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	res, body := do(t, "POST", srv.URL+"/api/server/login", testToken, map[string]any{"url": fake.URL, "username": "alice", "password": "pw"})
+	if res != 200 {
+		t.Fatalf("login: %d %s", res, body)
+	}
+	mkProjectAt(t, okHome, "oldsrv", filepath.Join(t.TempDir(), "work"))
+	st := stFor(t, okHome, "oldsrv")
+	res, body = do(t, "POST", srv.URL+"/api/server/repos", testToken, map[string]any{"project": "oldsrv"})
+	if res != 200 {
+		t.Fatalf("repos: %d %s", res, body)
+	}
+	if !strings.Contains(string(body), "服务端版本过旧") {
+		t.Fatalf("expect upgrade hint: %s", body)
+	}
+	if syncx.Open(st.Root).IsRepo() {
+		t.Fatal("must not init when server too old and no credential")
+	}
+}
+```
+
+注意：既有 `TestApiServerReposNoTokenNoHelper` 与本用例走同一 404 分支（前者锚"仓已存在但本机无 git 凭据"前缀，后者锚"服务端版本过旧"），同一条消息两个锚点，都保留。
+
+- [ ] **Step 6: 跑测试**
+
+Run: `go test ./internal/oksrv/ ./internal/serverx/ ./internal/gui/ -v`
+Expected: 全部 PASS
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/oksrv/ internal/serverx/ internal/gui/
+git commit -m "fix: 终审修复——git token 按机器分名（多端互不吊销）+ 旧服务端 404 回归测试 + pull 前置检查与错误分类"
+```
+
+---
+
+### Task 10: oksrv 凭证列表/删除端点
+
+**Files:**
+- Modify: `internal/oksrv/gitbackend.go`（TokenInfo + ListUserTokens）
+- Modify: `internal/oksrv/gitbackend_fake.go`（fake 跟踪 token 列表）
+- Modify: `internal/oksrv/gitea.go`（ListUserTokens 实现）
+- Modify: `internal/oksrv/http.go`（4 条路由 + handler + apiUserDelete 注释）
+- Test: `internal/oksrv/http_test.go`
+
+**Interfaces:**
+- Produces: `GitBackend.ListUserTokens(ctx, username) ([]TokenInfo, error)`；`TokenInfo{Name string; CreatedAt, UpdatedAt time.Time}`（UpdatedAt=Gitea 每次使用刷新=最近使用）。端点：
+  - `GET /api/v1/tokens` → 200 `{"tokens":[{name,created_at,updated_at}]}`（自助）
+  - `DELETE /api/v1/tokens/{name}` → 204（自助）
+  - `GET /api/v1/users/{name}/tokens`、`DELETE /api/v1/users/{name}/tokens/{token}`（admin）
+
+- [ ] **Step 1: 写失败测试**（http_test.go 追加 TestApiTokens）
+
+断言点（建用户+拿初始密码+登录的写法参照既有 TestUserCreateAndResetSetFlag / TestForcePasswordChangeFlow，不新造流程）：
+
+1. bob（member，清掉强制改密标记）调 `POST /api/v1/git-token` 带 `name_hint: "NB1"` → 200。
+2. bob `GET /api/v1/tokens` → 列表含 `ok-sync-r-NB1` 与建用户时的 `ok-sync` 两条。
+3. bob `DELETE /api/v1/tokens/ok-sync-r-NB1` → 204；再 GET → 该名消失。
+4. bob `GET /api/v1/users/root/tokens` → 403（非管理员）。
+5. root `GET /api/v1/users/bob/tokens` → 200 含剩余 token；root `DELETE /api/v1/users/bob/tokens/ok-sync` → 204。
+6. bob 置 must_change_password → `GET /api/v1/tokens` → 403 must_change_password。
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `go test ./internal/oksrv/ -run TestApiTokens -v`
+Expected: FAIL（404）
+
+- [ ] **Step 3: GitBackend + Fake + Gitea**
+
+gitbackend.go（接口加在 DeleteUserToken 后）：
+
+```go
+// TokenInfo 是 git token 列表项（UpdatedAt 由 Gitea 在每次使用时刷新 = 最近使用）。
+type TokenInfo struct {
+	Name      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+```
+
+```go
+	// ListUserTokens 列用户全部 token（凭证管理页数据源）。
+	ListUserTokens(ctx context.Context, username string) ([]TokenInfo, error)
+```
+
+gitbackend_fake.go：FakeBackend 结构加 `tokenList map[string][]TokenInfo`（NewFakeBackend 里初始化）；CreateUserToken 里 append `TokenInfo{Name: tokenName, CreatedAt: time.Now(), UpdatedAt: time.Now()}`；DeleteUserToken 按名删除（仍返回 nil）；ListUserTokens 返回该用户切片的拷贝（nil → 空切片）。
+
+gitea.go：
+
+```go
+// ListUserTokens 核实：GET /users/{username}/tokens（同 CreateUserToken 走 Basic 头），
+// 返回 AccessToken 数组 {name, created_at, updated_at}——updated_at 即 Gitea UI 的"最近使用"。
+func (g *GiteaBackend) ListUserTokens(ctx context.Context, username string) ([]TokenInfo, error) {
+	var raw []struct {
+		Name      string    `json:"name"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	if err := g.do(ctx, http.MethodGet, "/users/"+url.PathEscape(username)+"/tokens", nil, &raw, true); err != nil {
+		return nil, err
+	}
+	out := make([]TokenInfo, 0, len(raw))
+	for _, t := range raw {
+		out = append(out, TokenInfo{Name: t.Name, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt})
+	}
+	return out, nil
+}
+```
+
+- [ ] **Step 4: 路由 + handler**（http.go，git-token 行/函数后）
+
+```go
+	mux.HandleFunc("GET /api/v1/tokens", s.auth(s.gate(s.apiTokens)))
+	mux.HandleFunc("DELETE /api/v1/tokens/{name}", s.auth(s.gate(s.apiTokenDelete)))
+	mux.HandleFunc("GET /api/v1/users/{name}/tokens", s.auth(s.gate(s.admin(s.apiUserTokens))))
+	mux.HandleFunc("DELETE /api/v1/users/{name}/tokens/{token}", s.auth(s.gate(s.admin(s.apiUserTokenDelete))))
+```
+
+```go
+// tokenJSON 是 token 列表响应形状（updated_at 即最近使用；零值时前端回落 created_at）。
+func tokenJSON(t TokenInfo) map[string]any {
+	return map[string]any{"name": t.Name, "created_at": t.CreatedAt, "updated_at": t.UpdatedAt}
+}
+
+func (s *server) listTokens(w http.ResponseWriter, r *http.Request, username string) {
+	ts, err := s.backend.ListUserTokens(r.Context(), username)
+	if err != nil {
+		backendErr(w, err)
+		return
+	}
+	out := []map[string]any{}
+	for _, t := range ts {
+		out = append(out, tokenJSON(t))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": out})
+}
+
+func (s *server) deleteToken(w http.ResponseWriter, r *http.Request, actor, username, tokenName string) {
+	if err := s.backend.DeleteUserToken(r.Context(), username, tokenName); err != nil {
+		backendErr(w, err)
+		return
+	}
+	s.st.Audit(actor, "delete-git-token", username, tokenName)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// apiTokens / apiTokenDelete：自助凭证管理（自己的 token）。
+func (s *server) apiTokens(w http.ResponseWriter, r *http.Request, u *User) {
+	s.listTokens(w, r, u.Username)
+}
+
+func (s *server) apiTokenDelete(w http.ResponseWriter, r *http.Request, u *User) {
+	s.deleteToken(w, r, u.Username, u.Username, r.PathValue("name"))
+}
+
+// apiUserTokens / apiUserTokenDelete：管理员查看/清理任意用户 token。
+func (s *server) apiUserTokens(w http.ResponseWriter, r *http.Request, u *User) {
+	s.listTokens(w, r, r.PathValue("name"))
+}
+
+func (s *server) apiUserTokenDelete(w http.ResponseWriter, r *http.Request, u *User) {
+	s.deleteToken(w, r, u.Username, r.PathValue("name"), r.PathValue("token"))
+}
+```
+
+apiUserDelete 里 backend.DeleteUser 调用处补注释：`// Gitea 删用户级联清掉其全部 token（凭证管理语义随事实成立，无需逐条删）`。
+
+- [ ] **Step 5: 跑测试确认通过**
+
+Run: `go test ./internal/oksrv/ -v`
+Expected: 全部 PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/oksrv/
+git commit -m "feat(oksrv): 凭证管理端点——自助列/删 git token + 管理员列/删任意用户（删用户级联注释钉住）"
+```
+
+---
+
+### Task 11: serverx + gui 凭证管理转发
+
+**Files:**
+- Modify: `internal/serverx/serverx.go`
+- Modify: `internal/gui/api_server.go`（4 条转发）
+- Test: `internal/gui/api_server_test.go`
+
+**Interfaces:**
+- Produces: `serverx.Client.ListTokens(ctx) ([]TokenInfo, error)` / `DeleteToken(ctx, name) error` / `ListUserTokens(ctx, name) ([]TokenInfo, error)` / `DeleteUserToken(ctx, user, token) error`；`serverx.TokenInfo{Name, CreatedAt, UpdatedAt string}`。gui 端点：`GET /api/server/tokens`、`DELETE /api/server/tokens/{name}`、`GET /api/server/users/{name}/tokens`、`DELETE /api/server/users/{name}/tokens/{token}`。Task 12 前端消费。
+
+- [ ] **Step 1: serverx 方法**（GitToken 后追加）
+
+```go
+// TokenInfo 与 oksrv 契约同形状（updated_at 即最近使用，可能为零值时间串）。
+type TokenInfo struct {
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func (c *Client) ListTokens(ctx context.Context) ([]TokenInfo, error) {
+	var out struct {
+		Tokens []TokenInfo `json:"tokens"`
+	}
+	if err := c.call(ctx, "GET", "/tokens", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Tokens, nil
+}
+
+func (c *Client) DeleteToken(ctx context.Context, name string) error {
+	return c.call(ctx, "DELETE", "/tokens/"+url.PathEscape(name), nil, nil)
+}
+
+func (c *Client) ListUserTokens(ctx context.Context, name string) ([]TokenInfo, error) {
+	var out struct {
+		Tokens []TokenInfo `json:"tokens"`
+	}
+	if err := c.call(ctx, "GET", "/users/"+url.PathEscape(name)+"/tokens", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Tokens, nil
+}
+
+func (c *Client) DeleteUserToken(ctx context.Context, user, token string) error {
+	return c.call(ctx, "DELETE", "/users/"+url.PathEscape(user)+"/tokens/"+url.PathEscape(token), nil, nil)
+}
+```
+
+（`net/url` 导入如缺则补。）
+
+- [ ] **Step 2: gui 转发**（registerServerAPI 加 4 条；fwdAudit 后追加 4 个转发函数，照 fwdUsers/fwdUserDelete 既有形状：serverClient → 调 serverx → writeServerErr / writeJSON / 204）
+
+```go
+	api("GET /api/server/tokens", h.fwdTokens)
+	api("DELETE /api/server/tokens/{name}", h.fwdTokenDelete)
+	api("GET /api/server/users/{name}/tokens", h.fwdUserTokens)
+	api("DELETE /api/server/users/{name}/tokens/{token}", h.fwdUserTokenDelete)
+```
+
+- [ ] **Step 3: 测试**（api_server_test.go）
+
+给 fakeOKServer 主体默认加两条路由（不加变参）：`GET /api/v1/tokens` 返回固定两条（`{"tokens":[{"name":"ok-sync","created_at":"...","updated_at":"..."},{"name":"ok-sync-r-NB1",...}]}`）；`DELETE /api/v1/tokens/{name}` 返回 204。既有用例不调这两路径，安全。
+
+新增转发测试：登录后 `GET /api/server/tokens` → 200 含两条；`DELETE /api/server/tokens/ok-sync-r-NB1` → 204。
+
+- [ ] **Step 4: 跑测试 + Commit**
+
+Run: `go test ./internal/serverx/ ./internal/gui/ -v`
+Expected: 全部 PASS
+
+```bash
+git add internal/serverx/ internal/gui/
+git commit -m "feat(serverx,gui): 凭证管理转发端点（tokens 列/删 + users/{name}/tokens 管理）"
+```
+
+---
+
+### Task 12: 前端凭证管理界面
+
+**Files:**
+- Modify: `web/app.js`（成员视图加「我的凭证」卡；管理视图加「凭证管理」卡；字典）
+
+**Interfaces:**
+- Consumes: Task 11 的 4 个 gui 端点；既有 `SRV.users`（管理视图用户列表）、`loadServerRoleData`（成员视图惰性加载，web/app.js:5431 附近）、`uiConfirm`、`toast`、`esc`、`t`、app.js 既有时间格式化 helper（先 grep 确认实际名字，如 fmtTime/formatTime/fmtTS——以实际为准，没有则用一个小的本地格式化函数）。
+- Produces: 成员卡 `tokensCard()`；管理卡 `tokenAdminCard()`；字典 key（zh/en 成对）：`srvMyTokens`、`srvMyTokensDesc`、`srvTokenMgmt`、`srvTokenMgmtDesc`、`srvTokenTime`、`srvTokenDelConfirm`、`srvTokenDeleted`、`srvNoToken`（表头/删除按钮复用既有 key，先 grep `srvProject`/`srvActions`/`srvDelete` 确认）。
+
+- [ ] **Step 1: 字典**（zh/en 成对）
+
+zh：
+```js
+    srvMyTokens:"我的凭证", srvMyTokensDesc:"本账号在服务器上的 git 访问凭证（每台拉取过的机器一份）。不再使用的可删除；删除后使用该凭证的机器下次推送会失败，需重新拉取。时间列为最近使用（未用过则显示创建时间）。",
+    srvTokenMgmt:"凭证管理", srvTokenMgmtDesc:"查看/清理任意用户的 git 凭证。删除用户时其凭证由服务端级联清理。",
+    srvTokenTime:"最近使用 / 创建", srvTokenDelConfirm:"确定删除凭证 {n}？使用该凭证的机器下次推送会失败，需要重新拉取。",
+    srvTokenDeleted:"凭证已删除", srvNoToken:"暂无凭证。",
+```
+en：语义对等的英文翻译。
+
+- [ ] **Step 2: 成员视图「我的凭证」卡**
+
+loadServerRoleData 的 member 分支加一项 pull：`GET /api/server/tokens` → `SRV.tokens`（fail-open 同现有模式）。成员视图渲染处（myOrgsCard 挂载点旁）挂 tokensCard：
+
+```js
+function tokensCard(){
+  const card = el("div","pcard");
+  const h = el("h3"); h.textContent = t("srvMyTokens"); card.appendChild(h);
+  const desc = el("div","pdesc"); desc.textContent = t("srvMyTokensDesc"); card.appendChild(desc);
+  const ts = (SRV.tokens || []).slice().sort((a,b)=>String(b.updated_at||b.created_at).localeCompare(String(a.updated_at||a.created_at)));
+  if(!ts.length){
+    const d = el("div","small muted"); d.textContent = t("srvNoToken"); card.appendChild(d);
+    return card;
+  }
+  const tb = el("table","list");
+  tb.innerHTML = '<tr><th>'+t("srvName")+'</th><th>'+t("srvTokenTime")+'</th><th style="text-align:right">'+t("srvActions")+'</th></tr>';
+  ts.forEach(tk=>{
+    const tr = el("tr","");
+    const td1 = el("td",""); td1.textContent = tk.name;
+    const td2 = el("td",""); td2.textContent = fmtTime(tk.updated_at || tk.created_at); // helper 名以 app.js 实际为准
+    const td3 = el("td",""); td3.style.textAlign = "right";
+    const btn = el("button","btn btn-danger"); btn.textContent = t("srvDelete");
+    btn.onclick = async ()=>{
+      if(!await uiConfirm(t("srvTokenDelConfirm").replace("{n}", tk.name))) return;
+      try{
+        await api("/api/server/tokens/"+encodeURIComponent(tk.name), { method:"DELETE", skip401Reload:true });
+        toast(t("srvTokenDeleted"));
+        SRV.tokens = null; loadServerRoleData();
+      }catch(err){ toast(err.message, true); }
+      if(state.menu === "server") render();
+    };
+    td3.appendChild(btn);
+    tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+    tb.appendChild(tr);
+  });
+  card.appendChild(tb);
+  return card;
+}
+```
+
+先 grep 确认 `srvName`/`srvDelete`/时间 helper 存在性，缺则补字典（中英成对）。
+
+- [ ] **Step 3: 管理视图「凭证管理」卡**
+
+管理视图（audit 卡挂载点旁）挂 tokenAdminCard：用户下拉（`SRV.users` 的 name）→ 选中后 `GET /api/server/users/<name>/tokens` → 同形状表格 + 删除走 `DELETE /api/server/users/<name>/tokens/<token>`。选中态缓存 `SRV.adminTokens = {user, list}`，删除后重拉。
+
+- [ ] **Step 4: 验证**
+
+`node --check web/app.js`；grep 字典新 key 中英成对。
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add web/app.js
+git commit -m "feat(web): 服务器页凭证管理——成员「我的凭证」卡 + 管理员「凭证管理」卡（列/删 git token）"
+```
+
+---
+
+### Task 13: 全量回归 + 终审（第二轮）
+
+- [ ] **Step 1: 全量测试**
+
+Run: `go test ./...`（以 exit code 0 为准）
+Expected: 全部 PASS
+
+- [ ] **Step 2: 前端语法**
+
+Run: `node --check web/app.js`
+Expected: 无输出（通过）
+
+- [ ] **Step 3: 终审**（dispatch 评审 subagent：范围 db81fd8..HEAD 全分支；重点核 Task 9-12 新改动 + 第一轮 Important 三项是否落实：token 分名多机互不吊销、404 分支有测试、pull 前置检查+错误分类）
+
+- [ ] **Step 4: 真机走查清单**（文档化逐项过）
+
+1. 新机器：删测试项目注册 → 可拉取分组 → 全部拉取 → 管理页条目齐。
+2. 登录自动弹窗（本机未注册仓）。
+3. 旧服务端 404 → 升级提示文案。
+4. 状态点：改条目 → 黄 → 同步黄闪 → 绿；冲突红点可点。
+5. 强制改密账号新机器：先改密 → 再拉取。
+6. 多端 token：机器 A 拉取后机器 B 拉取 → A 的推送仍正常（互不吊销）。
+7. 凭证管理：成员删自己的凭证、管理员删他人的；删用户后其凭证 Gitea 侧级联清。
