@@ -1644,7 +1644,7 @@ function entryLeaf(p, e){
     +(e.mandatory?'<span class="badge-mand">★</span>':"")
     +(e.draft?'<span class="badge-draft">'+t("draft")+'</span>':"")+'</span>'
     +'<span class="t2">'+esc(e.title)+'</span>';
-  leaf.onclick = ()=>{ if(!exitEditGuarded()) return; state.catSel=null; state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
+  leaf.onclick = async ()=>{ if(!await exitEditGuarded()) return; state.catSel=null; state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail(); render(); };
   return leaf;
 }
 // 类目内懒加载（懒加载下沉到类目内，需求 5）：treeShown 键 = 项目/类目[/子目录]
@@ -1721,8 +1721,8 @@ function renderDualLeaf(sub, p, ck, e, icon, kids){
   const toggleTree = ev=>{ ev.stopPropagation(); state.catOpen[ck]=!cOpen; redrawTree(); };   // 箭头/图标：纯树状态只重画树
   leaf.querySelector(".caret").onclick = toggleTree;
   leaf.querySelector(".folder").onclick = toggleTree;
-  leaf.onclick = ()=>{
-    if(!exitEditGuarded()) return;
+  leaf.onclick = async ()=>{
+    if(!await exitEditGuarded()) return;
     state.catSel=null; state.sel={ project:p.name, file:e.file }; state.mgmtFb=null; loadDetail();
     if(dblClick(catClick, ck)){ toggle(); return; }   // 双击 = 展开/收起
     render();
@@ -1787,9 +1787,9 @@ function fillTree(scroll){
     pj.title = p.err ? t("mgTreeErr")+p.err : (p.paths||[]).join("\n");
     const tg = el("span","pj-toggle");
     tg.innerHTML = '<span class="caret">▶</span><span class="folder">'+ICON.folder+'</span>';
-    const toggleOpen = ()=>{                          // 展开/收起：箭头区单击、项目名双击共用
+    const toggleOpen = async ()=>{                    // 展开/收起：箭头区单击、项目名双击共用
       const wasEditing = edBusy();
-      if(!exitEditGuarded()) return;
+      if(!await exitEditGuarded()) return;
       state.openTouched = true;
       if(open){ state.open[p.name] = false; }              // 再点收起 → 全收起
       else { state.open = {}; state.open[p.name] = true; } // 展开即互斥收起其他
@@ -1798,11 +1798,11 @@ function fillTree(scroll){
     tg.onclick = ev=>{ ev.stopPropagation(); toggleOpen(); };
     const nm = el("span","pj-name");
     nm.innerHTML = '<span class="nm">'+esc(p.name)+'</span><span class="cnt">'+(p.err?"!":list.length)+'</span>';
-    nm.onclick = ()=>{
-      if(!exitEditGuarded()) return;
+    nm.onclick = async ()=>{
+      if(!await exitEditGuarded()) return;
       state.sel = null; DETAIL = null; state.catSel = null;
       state.projSel = p.name; loadReadme(p.name);          // 点项目名 → 右侧显示项目 README（反馈3）
-      if(dblClick(nmClick, p.name)){ toggleOpen(); render(); return; }   // 双击项目名 = 展开/收起（projSel 已变，须整页）
+      if(dblClick(nmClick, p.name)){ await toggleOpen(); render(); return; }   // 双击项目名 = 展开/收起（projSel 已变，须整页）
       render();
     };
     pj.appendChild(tg); pj.appendChild(nm);
@@ -1849,6 +1849,45 @@ function syncDotKey(sy){
   return "syncDotSynced";
 }
 
+/* ---- 通用弹窗（Promise 化，替代原生 confirm/prompt）----
+   复用 .mask/.modal/.mfoot 样式；点遮罩/Esc = 取消，Enter = 确定（中文输入法组词中不误触）。
+   挂在 document.body，整页 render() 重建内容区不受影响。 */
+function uiDlg(o){   // o: {msg, ok, danger, input:{ph}}
+  return new Promise(resolve=>{
+    const mask = el("div","mask");
+    const m = el("div","modal"); m.style.width = "440px";
+    const msg = el("div","pdesc"); msg.style.whiteSpace = "pre-line"; msg.textContent = o.msg;
+    m.appendChild(msg);
+    let inp = null;
+    if(o.input){
+      inp = el("input","pinput");
+      inp.placeholder = o.input.ph || "";
+      inp.style.width = "100%"; inp.style.marginTop = "10px"; inp.style.boxSizing = "border-box";
+      m.appendChild(inp);
+    }
+    const foot = el("div","mfoot"); foot.style.marginTop = "14px";
+    const done = v=>{ document.removeEventListener("keydown", onKey, true); mask.remove(); resolve(v); };
+    const cancelVal = ()=>inp ? null : false;
+    const ok = el("button","btn "+(o.danger?"btn-danger":"btn-primary")); ok.textContent = o.ok || t("fOk");
+    ok.onclick = ()=>done(inp ? inp.value.trim() : true);
+    const no = el("button","btn"); no.textContent = t("fCancel");
+    no.onclick = ()=>done(cancelVal());
+    foot.appendChild(ok); foot.appendChild(no);
+    m.appendChild(foot);
+    mask.appendChild(m);
+    mask.onclick = ev=>{ if(ev.target===mask) done(cancelVal()); };
+    const onKey = ev=>{
+      if(ev.key === "Escape"){ ev.stopPropagation(); done(cancelVal()); }
+      else if(ev.key === "Enter" && !ev.isComposing){ ev.preventDefault(); ev.stopPropagation(); done(inp ? inp.value.trim() : true); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(mask);
+    (inp || ok).focus();
+  });
+}
+const uiConfirm = (msg, danger)=>uiDlg({ msg: msg, danger: !!danger });
+const uiPrompt = (msg, ph)=>uiDlg({ msg: msg, input: { ph: ph || "" } });
+
 /* 项目行同步按钮：即点即执行 + 转圈 + toast（动作类纪律）
    防连点：模块级 inflight 集合——spinning class 在轮询重渲后随按钮节点替换丢失，仅作视觉 */
 const syncInflight = {};
@@ -1873,7 +1912,7 @@ async function doProjectSync(project, btn){
         sc = await api("/api/server/config", { skip401Reload:true });
       }catch(_){ /* 未配置服务器，落纯指引 */ }
       if(sc && sc.logged_in){
-        if(confirm(t("syncServerBindConfirm"))){
+        if(await uiConfirm(t("syncServerBindConfirm"))){
           btn.classList.add("spinning");
           try{
             const r2 = await api("/api/server/repos", { method:"POST", body:{ project: project }, skip401Reload:true });
@@ -1946,7 +1985,7 @@ async function renderSyncConflict(main){
   const abo = el("button","btn cf-abort");
   abo.textContent = t("cfAbort");
   abo.onclick = async ()=>{
-    if(!confirm(t("cfAbortConfirm"))) return;
+    if(!await uiConfirm(t("cfAbortConfirm"), true)) return;
     abo.disabled = true;   // await 期间置灰防重复 POST（对齐 AI 合并按钮先例）
     try{
       await api("/api/project/sync/abort", { method:"POST", body:{ project: project } });
@@ -2143,7 +2182,7 @@ async function renderMerge(main){
       if(aligned) finalText = applyMergeBlocks(MG.working, MG.blocks, MG.choices);
     }
     // 残留 marker 保护：退化路径（块行号漂移以 textarea 全文为准）或手编可能留下 <<<<<<< ——确认才落盘
-    if(finalText.indexOf("<<<<<<<") >= 0 && !confirm(t("mgMarkerWarn"))) return;
+    if(finalText.indexOf("<<<<<<<") >= 0 && !(await uiConfirm(t("mgMarkerWarn")))) return;
     apply.disabled = true;   // await 期间置灰防重复 POST（对齐 AI 合并按钮先例）
     try{
       await api("/api/project/sync/resolve", { method:"POST", body:{ project: m.project, file: m.file, action:"merged", content: finalText } });
@@ -2452,7 +2491,7 @@ function catKeyOf(e){
    找到后清过滤（过滤态会藏目标）、展开项目（手风琴互斥）与所在类目/子目录、
    懒加载计数覆盖目标序号，选中并拉详情，整页重渲后把选中行滚入视口。
    条目缓存缺失（外部刚增删）时经 pendingJump 全量重拉后重试一次（isRetry），仍缺则静默放弃 */
-function jumpToEntry(file, project, isRetry){
+async function jumpToEntry(file, project, isRetry){
   const proj = project || (state.sel && state.sel.project) || state.projSel
     || (MGMT && MGMT.list && (MGMT.list.find(p=>state.open[p.name]===true)||{}).name) || "";
   if(!proj || !MGMT || !MGMT.list) return;
@@ -2462,7 +2501,7 @@ function jumpToEntry(file, project, isRetry){
     if(!isRetry){ state.pendingJump = { project:proj, file:file }; refreshManage(); }
     return;
   }
-  if(!exitEditGuarded()) return;
+  if(!await exitEditGuarded()) return;
   const e = hit.entry;
   state.q = ""; state.cmd = null; state.cmdRaw = "";
   state.cmdErr = ""; state.cmdHelp = false; state.scopeNote = "";
@@ -2846,14 +2885,14 @@ function approveEntry(proj, e, btn){
     .catch(err=>{ if(btn) btn.disabled = false; opFail(err); });
 }
 // 归档/取消归档（POST /api/entry/archive {undo}）；归档需确认（旧 app.js:819 文案）
-function archiveEntry(proj, e, undo){
-  if(!undo && !confirm(t("cfmArchive").replace("{t}", e.title))) return;
+async function archiveEntry(proj, e, undo){
+  if(!undo && !(await uiConfirm(t("cfmArchive").replace("{t}", e.title)))) return;
   api("/api/entry/archive", { method:"POST", body:{ project:proj, file:e.file, undo:!!undo } })
     .then(afterEntryOp).catch(opFail);
 }
 // 删除（DELETE /api/entry?project=&file=），确认后执行；删除的是当前选中项时清选择
-function delEntry(proj, e){
-  if(!confirm(t("cfmDelete").replace("{t}", e.title))) return;
+async function delEntry(proj, e){
+  if(!(await uiConfirm(t("cfmDelete").replace("{t}", e.title), true))) return;
   api("/api/entry?project="+encodeURIComponent(proj)+"&file="+encodeURIComponent(e.file),
       { method:"DELETE" })
     .then(()=>{ state.sel=null; DETAIL=null; afterEntryOp(); })
@@ -2880,10 +2919,10 @@ function edDirty(){
     || edDraft.summary!==edBase.summary || edDraft.body!==edBase.body
     || edDraft.project!==edBase.project);
 }
-/* 侧栏/树误触守卫：编辑态有未保存修改时先确认再弃稿（原生 confirm，同归档/删除确认范式）；
+/* 侧栏/树误触守卫：编辑态有未保存修改时先弹通用确认再弃稿（同归档/删除确认范式）；
    返回 false 表示用户取消，调用方中止本次跳转 */
-function exitEditGuarded(){
-  if(edBusy() && edDirty() && !confirm(t("cfmDiscard"))) return false;
+async function exitEditGuarded(){
+  if(edBusy() && edDirty() && !(await uiConfirm(t("cfmDiscard")))) return false;
   exitEdit();
   return true;
 }
@@ -3707,9 +3746,9 @@ function gSelectNode(n){
    2) MGMT 未载先 loadManage()——MGMT 为 null 时 jumpToEntry 静默返回；
    3) 缓存缺条目时 jumpToEntry 自己挂 pendingJump 重试（jumpToEntry 头部），
       该重试只在 state.menu==="manage" 时不被守卫清掉（refreshManage 尾部）。 */
-function gJumpToManage(file){
+async function gJumpToManage(file){
   // 管理页有未保存编辑草稿时先确认（jumpToEntry 内部那次 exitEditGuarded 幂等通过）；取消则不跳页
-  if(!exitEditGuarded()) return;
+  if(!await exitEditGuarded()) return;
   state.menu = "manage"; location.hash = "manage";
   loadManage();
   jumpToEntry(file, graphProj);
@@ -5602,13 +5641,13 @@ function usersCard(){
     const td2 = el("td",""); td2.textContent = u.role;
     const td3 = el("td",""); td3.style.textAlign = "right";
     const tog = el("button","btn"); tog.textContent = u.disabled ? t("srvEnable") : t("srvDisable");
-    tog.onclick = ()=>{ if(confirm(t("srvConfirmDisable"))) srvToggleUser(u.name, !u.disabled); };
+    tog.onclick = async ()=>{ if(await uiConfirm(t("srvConfirmDisable"))) srvToggleUser(u.name, !u.disabled); };
     if(u.role === "root"){ tog.disabled = true; tog.title = t("srvRootNoDisable"); }
     const rst = el("button","btn"); rst.textContent = t("srvReset");
     rst.onclick = ()=>srvResetPwd(u.name);
     if(u.role === "root" && SRV.user.role !== "root"){ rst.disabled = true; rst.title = t("srvRootNoDisable"); }
     const del = el("button","btn"); del.textContent = t("srvDelete");
-    del.onclick = ()=>{ if(confirm(t("srvConfirmDelete"))) srvDeleteUser(u.name); };
+    del.onclick = async ()=>{ if(await uiConfirm(t("srvConfirmDelete"), true)) srvDeleteUser(u.name); };
     // root 恒不可删；admin 目标仅 root 可删（服务端另有门控，此处 UI 收窄）
     if(u.role === "root" || (u.role === "admin" && SRV.user.role !== "root")){ del.disabled = true; del.title = t("srvRootNoDisable"); }
     td3.appendChild(tog); td3.appendChild(rst); td3.appendChild(del);
@@ -5744,9 +5783,9 @@ async function srvToggleMember(org, user, inOrg){
   }catch(err){ toast(err.message, true); }
 }
 
-/* 团队仓创建（组织行按钮 → prompt 项目名 → provisioning → 刷新 orgs/repos） */
+/* 团队仓创建（组织行按钮 → 弹窗输入项目名 → provisioning → 刷新 orgs/repos） */
 async function srvCreateTeamRepo(org){
-  const project = (prompt(t("srvTeamRepoPrompt")) || "").trim();
+  const project = ((await uiPrompt(t("srvTeamRepoPrompt"))) || "").trim();
   if(!project) return;
   try{
     await api("/api/server/repos/team", { method:"POST", body:{ org: org, project: project }, skip401Reload:true });
