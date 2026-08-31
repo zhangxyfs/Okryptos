@@ -226,6 +226,11 @@ const I18N = {
     srvPullDone:"已拉取 {n} 个项目到本机", srvPullFail:"，失败：",
     srvAutoBindConfirm2:"服务器上有 {n} 个本机尚未拉取的项目仓：{l}\n\n是否现在拉取到本机？（注册同名项目并克隆全部知识条目）",
     srvMyOrgs:"我的组织", srvMyOrgsDesc:"只读（本期）；成员与团队仓由管理员维护。", srvNoOrg:"未加入任何组织。",
+    srvName:"名称",
+    srvMyTokens:"我的凭证", srvMyTokensDesc:"本账号在服务器上的 git 访问凭证（每台拉取过的机器一份）。不再使用的可删除；删除后使用该凭证的机器下次推送会失败，需重新拉取。时间列为最近使用（未用过则显示创建时间）。",
+    srvTokenMgmt:"凭证管理", srvTokenMgmtDesc:"查看/清理任意用户的 git 凭证。删除用户时其凭证由服务端级联清理。",
+    srvTokenTime:"最近使用 / 创建", srvTokenDelConfirm:"确定删除凭证 {n}？使用该凭证的机器下次推送会失败，需要重新拉取。",
+    srvTokenDeleted:"凭证已删除", srvNoToken:"暂无凭证。",
     srvDeploy:"部署指引（还没有服务器？展开）", srvUserCreated:"用户已创建", srvCopyHint:"初始密码与 git token 仅本次显示，请立即复制发给用户。",
     srvPwd:"初始密码", srvNewPwd:"新密码", srvGitTok:"git token", srvCopied:"我已复制", srvCopiedOk:"已复制到剪贴板",
     srvResetDone:"已重置密码", srvConfirmDisable:"确认禁用/启用该用户？",
@@ -426,6 +431,11 @@ const I18N = {
     srvPullDone:"Pulled {n} projects to this machine", srvPullFail:", failed: ",
     srvAutoBindConfirm2:"The server has {n} project repos not on this machine: {l}\n\nPull them now? (registers same-named projects and clones all entries)",
     srvMyOrgs:"My organizations", srvMyOrgsDesc:"Read-only (this release); membership and team repos are admin-managed.", srvNoOrg:"No organization.",
+    srvName:"Name",
+    srvMyTokens:"My credentials", srvMyTokensDesc:"Git access credentials of this account on the server (one per machine that has pulled). Delete ones no longer in use; a machine using a deleted credential will fail its next push and must pull again. The time column shows last use (creation time if never used).",
+    srvTokenMgmt:"Credential management", srvTokenMgmtDesc:"View/clean up git credentials of any user. Deleting a user cascades to their credentials on the server.",
+    srvTokenTime:"Last used / created", srvTokenDelConfirm:"Delete credential {n}? The machine using it will fail its next push and must pull again.",
+    srvTokenDeleted:"Credential deleted", srvNoToken:"No credentials yet.",
     srvDeploy:"Deployment guide (no server yet? expand)", srvUserCreated:"User created", srvCopyHint:"The initial password and git token are shown only once — copy them now.",
     srvPwd:"Initial password", srvNewPwd:"New password", srvGitTok:"git token", srvCopied:"Done", srvCopiedOk:"Copied",
     srvResetDone:"Password reset", srvConfirmDisable:"Confirm disable/enable this user?",
@@ -5412,7 +5422,7 @@ function renderBody(app){
 }
 
 /* ================= 服务器页（P1-C2，§10，定稿原型变体 B：stepper 三步向导） ================= */
-const SRV = { loaded:false, url:"", username:"", loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, projects:null, wizardStep:null, bindBusy:{}, pwdModalOpen:false };
+const SRV = { loaded:false, url:"", username:"", loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, projects:null, tokens:null, adminTokens:null, wizardStep:null, bindBusy:{}, pwdModalOpen:false };
 
 /* 数据装载：进页面拉配置；已登录则拉 me；按角色惰性拉管理/成员数据 */
 function loadServer(){
@@ -5438,7 +5448,7 @@ function loadServer(){
   });
 }
 
-/* 角色数据惰性加载（root/admin：users+orgs+repos-all+audit；member：projects） */
+/* 角色数据惰性加载（root/admin：users+orgs+repos-all+audit；member：projects+tokens） */
 function loadServerRoleData(){
   if(!SRV.user) return;
   const isAdmin = SRV.user.role === "root" || SRV.user.role === "admin";
@@ -5448,8 +5458,9 @@ function loadServerRoleData(){
     if(SRV.orgs === null) pulls.push(api("/api/server/orgs", { skip401Reload:true }).then(r=>{ SRV.orgs = r.orgs || []; }));
     if(SRV.repos === null) pulls.push(api("/api/server/repos-all", { skip401Reload:true }).then(r=>{ SRV.repos = r.repos || []; }));
     if(SRV.audit === null) pulls.push(api("/api/server/audit?limit=50", { skip401Reload:true }).then(r=>{ SRV.audit = r.entries || []; }));
-  } else if(SRV.projects === null){
-    pulls.push(api("/api/projects").then(ps=>{ SRV.projects = ps || []; }));
+  } else {
+    if(SRV.projects === null) pulls.push(api("/api/projects").then(ps=>{ SRV.projects = ps || []; }));
+    if(SRV.tokens === null) pulls.push(api("/api/server/tokens", { skip401Reload:true }).then(r=>{ SRV.tokens = r.tokens || []; }));
   }
   if(pulls.length) Promise.all(pulls)
     .then(()=>{ if(state.menu==="server") render(); })
@@ -5506,9 +5517,9 @@ function renderServer(){
   else if(cur === 2){ wrap.appendChild(loginCard()); }
   else if(isAdmin){
     wrap.appendChild(statusCard()); wrap.appendChild(usersCard()); wrap.appendChild(orgsCard());
-    wrap.appendChild(reposAllCard()); wrap.appendChild(auditCard());
+    wrap.appendChild(reposAllCard()); wrap.appendChild(auditCard()); wrap.appendChild(tokenAdminCard());
   } else {
-    wrap.appendChild(bindCard()); wrap.appendChild(myOrgsCard());
+    wrap.appendChild(bindCard()); wrap.appendChild(myOrgsCard()); wrap.appendChild(tokensCard());
   }
   return wrap;
 }
@@ -5633,7 +5644,7 @@ async function srvLogin(username, password){
 
 async function srvLogout(){
   try{ await api("/api/server/logout", { method:"POST", skip401Reload:true }); }catch(_){}
-  Object.assign(SRV, { loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, wizardStep:2 });
+  Object.assign(SRV, { loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, tokens:null, adminTokens:null, wizardStep:2 });
   toast(t("srvLoggedOut"));
   render();
 }
@@ -5750,7 +5761,7 @@ function usersCard(){
 
 /* 管理 mutation 后统一失效重拉：users/orgs/repos/audit 都刷新（此前 audit 不落空导致要 F5） */
 function srvRefresh(){
-  SRV.users = null; SRV.orgs = null; SRV.repos = null; SRV.audit = null;
+  SRV.users = null; SRV.orgs = null; SRV.repos = null; SRV.audit = null; SRV.adminTokens = null;
   loadServerRoleData();
 }
 
@@ -5967,6 +5978,67 @@ function auditCard(){
   return card;
 }
 
+/* RFC3339（服务端 created_at/updated_at）→ "YYYY-MM-DD HH:mm"，与 audit/repos 表格同款截断 */
+function fmtTs(s){ return (s||"").slice(0,16).replace("T"," "); }
+
+/* 凭证表格（成员「我的凭证」与管理「凭证管理」同形状）：按 最近使用||创建 倒序 */
+function tokenTable(list, onDel){
+  const tb = el("table","list");
+  tb.innerHTML = '<tr><th>'+t("srvName")+'</th><th>'+t("srvTokenTime")+'</th><th style="text-align:right">'+t("srvActions")+'</th></tr>';
+  list.slice().sort((a,b)=>String(b.updated_at||b.created_at).localeCompare(String(a.updated_at||a.created_at))).forEach(tk=>{
+    const tr = el("tr","");
+    const td1 = el("td",""); td1.textContent = tk.name;
+    const td2 = el("td","muted"); td2.textContent = fmtTs(tk.updated_at || tk.created_at);
+    const td3 = el("td",""); td3.style.textAlign = "right";
+    const btn = el("button","btn"); btn.textContent = t("srvDelete");
+    btn.onclick = ()=>onDel(tk);
+    td3.appendChild(btn);
+    tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+    tb.appendChild(tr);
+  });
+  return tb;
+}
+
+/* 管理视图「凭证管理」：用户下拉 → GET users/<name>/tokens → 列/删（users 路径 DELETE） */
+function tokenAdminCard(){
+  const card = el("div","pcard");
+  const h = el("h3"); h.textContent = t("srvTokenMgmt"); card.appendChild(h);
+  const desc = el("div","pdesc"); desc.textContent = t("srvTokenMgmtDesc"); card.appendChild(desc);
+  // 选中用户已被删（srvRefresh 已清 adminTokens；此处再兜底一次）
+  if(SRV.adminTokens && !(SRV.users || []).some(u=>u.name === SRV.adminTokens.user)) SRV.adminTokens = null;
+  const sel = el("select","pselect");
+  const opt0 = el("option"); opt0.value = ""; opt0.textContent = "—"; sel.appendChild(opt0);
+  (SRV.users || []).forEach(u=>{
+    const op = el("option"); op.value = u.name; op.textContent = u.name; sel.appendChild(op);
+  });
+  if(SRV.adminTokens) sel.value = SRV.adminTokens.user;
+  sel.onchange = ()=>{
+    if(!sel.value){ SRV.adminTokens = null; if(state.menu==="server") render(); return; }
+    api("/api/server/users/"+encodeURIComponent(sel.value)+"/tokens", { skip401Reload:true })
+      .then(r=>{ SRV.adminTokens = { user: sel.value, list: r.tokens || [] }; if(state.menu==="server") render(); })
+      .catch(err=>toast(err.message, true));
+  };
+  card.appendChild(sel);
+  const at = SRV.adminTokens;
+  if(at){
+    if(!at.list.length){
+      const d = el("div","small muted"); d.style.marginTop = "8px"; d.textContent = t("srvNoToken"); card.appendChild(d);
+    } else {
+      card.appendChild(tokenTable(at.list, async tk=>{
+        if(!await uiConfirm(t("srvTokenDelConfirm").replace("{n}", tk.name), true)) return;
+        try{
+          await api("/api/server/users/"+encodeURIComponent(at.user)+"/tokens/"+encodeURIComponent(tk.name), { method:"DELETE", skip401Reload:true });
+          toast(t("srvTokenDeleted"));
+          const r = await api("/api/server/users/"+encodeURIComponent(at.user)+"/tokens", { skip401Reload:true });
+          SRV.adminTokens = { user: at.user, list: r.tokens || [] };
+        }catch(err){ toast(err.message, true); }
+        if(state.menu === "server") render();
+      }));
+    }
+  }
+  return card;
+}
+
 /* ---- 步骤 3 · 成员视图（member） ---- */
 function bindCard(){
   const card = el("div","pcard");
@@ -6085,6 +6157,28 @@ function myOrgsCard(){
       card.appendChild(row);
     });
   }
+  return card;
+}
+
+/* 成员视图「我的凭证」：GET /api/server/tokens → 列/删本账号 git 凭证（tokenTable 与管理卡同形状） */
+function tokensCard(){
+  const card = el("div","pcard");
+  const h = el("h3"); h.textContent = t("srvMyTokens"); card.appendChild(h);
+  const desc = el("div","pdesc"); desc.textContent = t("srvMyTokensDesc"); card.appendChild(desc);
+  const ts = SRV.tokens || [];
+  if(!ts.length){
+    const d = el("div","small muted"); d.textContent = t("srvNoToken"); card.appendChild(d);
+    return card;
+  }
+  card.appendChild(tokenTable(ts, async tk=>{
+    if(!await uiConfirm(t("srvTokenDelConfirm").replace("{n}", tk.name), true)) return;
+    try{
+      await api("/api/server/tokens/"+encodeURIComponent(tk.name), { method:"DELETE", skip401Reload:true });
+      toast(t("srvTokenDeleted"));
+      SRV.tokens = null; loadServerRoleData();
+    }catch(err){ toast(err.message, true); }
+    if(state.menu === "server") render();
+  }));
   return card;
 }
 
