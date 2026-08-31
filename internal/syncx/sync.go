@@ -2,6 +2,7 @@ package syncx
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -113,6 +114,12 @@ func SyncOnce(dir, msg string) Outcome {
 		return o
 	}
 	defer flights.Delete(dir)
+	// 同步进行中标记（GUI 状态点"黄闪"数据源）；非仓目录不打（Sync 会原样返回 NotRepo）。
+	unmark := func() {}
+	if Open(dir).IsRepo() {
+		unmark = MarkSyncing(filepath.Join(dir, "state"))
+	}
+	defer unmark()
 	f.o = Open(dir).Sync(msg)
 	close(f.done)
 	return f.o

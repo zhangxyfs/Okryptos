@@ -104,6 +104,33 @@ func ClearConflictFiles(stateDir string) error {
 	return nil
 }
 
+// SyncingStale 是 syncing 标记的新鲜阈值：超过视为进程死亡残留，忽略。
+const SyncingStale = 5 * time.Minute
+
+func syncingPath(stateDir string) string { return filepath.Join(stateDir, "syncing") }
+
+// MarkSyncing 写"同步进行中"标记（state/syncing），返回清除函数（defer 调用）。
+// fail-open：写失败返回 no-op——标记缺失只影响状态点闪烁，不影响同步本体。
+func MarkSyncing(stateDir string) func() {
+	noop := func() {}
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return noop
+	}
+	if err := fsx.WriteFile(syncingPath(stateDir), []byte(time.Now().Format(time.RFC3339)), 0o644); err != nil {
+		return noop
+	}
+	return func() { _ = os.Remove(syncingPath(stateDir)) }
+}
+
+// IsSyncing 读标记；缺失/超阈（stale，进程死亡残留）均视为未在同步。
+func IsSyncing(stateDir string) bool {
+	fi, err := os.Stat(syncingPath(stateDir))
+	if err != nil {
+		return false
+	}
+	return time.Since(fi.ModTime()) < SyncingStale
+}
+
 // RecordOutcome 是 CLI/daemon 共用的状态回写收敛：按 Outcome 更新
 // sync-status.json 的 personal 层与 sync-conflict.json。失败仅尽力而为（fail-open）。
 func RecordOutcome(dir, stateDir string, o Outcome) {

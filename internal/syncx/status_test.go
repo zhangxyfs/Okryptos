@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestStatusRoundtrip(t *testing.T) {
@@ -118,5 +119,30 @@ func TestRecordOutcomeNotRepo(t *testing.T) {
 	if !after.Layer("personal").LastSync.Equal(before.Layer("personal").LastSync) {
 		t.Fatalf("last_sync changed by NotRepo: %v → %v",
 			before.Layer("personal").LastSync, after.Layer("personal").LastSync)
+	}
+}
+
+// TestSyncingMarker 标记写入→IsSyncing true→清除→false；stale（mtime 超阈）→ false。
+func TestSyncingMarker(t *testing.T) {
+	dir := t.TempDir()
+	if IsSyncing(dir) {
+		t.Fatal("no marker should be false")
+	}
+	unmark := MarkSyncing(dir)
+	if !IsSyncing(dir) {
+		t.Fatal("fresh marker should be true")
+	}
+	unmark()
+	if IsSyncing(dir) {
+		t.Fatal("removed marker should be false")
+	}
+	// stale：手工把标记 mtime 拨到 10 分钟前
+	MarkSyncing(dir)
+	stale := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(filepath.Join(dir, "syncing"), stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	if IsSyncing(dir) {
+		t.Fatal("stale marker should be false")
 	}
 }
