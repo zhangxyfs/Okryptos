@@ -28,6 +28,10 @@ func newTestServer(t *testing.T) (*httptest.Server, *Store, *FakeBackend) {
 	t.Cleanup(func() { s.Close() })
 	testEnv["OK_TEST_ROOT_PW"] = pw // 测试内取用（包级 map，非真 env）
 	b := NewFakeBackend()
+	// root 同步进 fake 后端（镜像"git 侧已有该用户"的前提；CreateUserToken 对未知用户拒绝）。
+	if err := b.CreateUser(context.Background(), "root", pw); err != nil {
+		t.Fatalf("fake root: %v", err)
+	}
 	return httptest.NewServer(NewMux(s, b, "test-version")), s, b
 }
 
@@ -507,5 +511,46 @@ func TestChangePasswordKeepsCurrentKicksOthers(t *testing.T) {
 	}
 	if code, _ := call(t, srv, "GET", "/api/v1/me", tok1, nil); code != 200 {
 		t.Fatalf("current session must be kept: %d", code)
+	}
+}
+
+// TestApiGitToken 自助重发：未认证 401；认证后返回非空 token 且审计落库；
+// 重复调用成功（删旧建新不撞名）；带强制改密标记的账号被 gate 拦 403。
+func TestApiGitToken(t *testing.T) {
+	srv, st, _ := newTestServer(t)
+	// 未认证
+	code, _ := call(t, srv, "POST", "/api/v1/git-token", "", nil)
+	if code != 401 {
+		t.Fatalf("unauth: %d", code)
+	}
+	// 认证（root 已在 newTestServer 里清掉强制改密标记；初始密码经包级 testEnv 取用）
+	tok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
+	code, body := call(t, srv, "POST", "/api/v1/git-token", tok, nil)
+	if code != 200 || body["git_token"] == "" {
+		t.Fatalf("reissue: %d %v", code, body)
+	}
+	first := body["git_token"].(string)
+	// 重复调用不撞名
+	code, body = call(t, srv, "POST", "/api/v1/git-token", tok, nil)
+	if code != 200 || body["git_token"] == "" || body["git_token"] == first {
+		t.Fatalf("re-reissue: %d %v", code, body)
+	}
+	// 审计落库
+	found := false
+	for _, a := range st.ListAudit(10, 0) {
+		if a.Action == "reissue-git-token" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("audit missing reissue-git-token")
+	}
+	// gate：带标记账号 403 must_change_password
+	if err := st.SetMustChangePassword("root", true); err != nil {
+		t.Fatal(err)
+	}
+	code, body = call(t, srv, "POST", "/api/v1/git-token", tok, nil)
+	if code != 403 || body["error"] != "must_change_password" {
+		t.Fatalf("gate: %d %v", code, body)
 	}
 }

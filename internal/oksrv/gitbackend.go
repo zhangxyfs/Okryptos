@@ -17,6 +17,9 @@ type GitBackend interface {
 	Ping(ctx context.Context) (version string, err error)
 	CreateUser(ctx context.Context, username, password string) error
 	CreateUserToken(ctx context.Context, username, tokenName string) (string, error)
+	// DeleteUserToken 删除同名 token（自助重发前的撞名清理；不存在时返回 nil 或
+	// 可忽略错误——调用方尽力而为语义，成败以随后的 CreateUserToken 为准）。
+	DeleteUserToken(ctx context.Context, username, tokenName string) error
 	// DeleteUser 用于建用户流程半途失败的回滚（尽力而为，错误只记审计不阻断）。
 	DeleteUser(ctx context.Context, username string) error
 	SetUserActive(ctx context.Context, username string, active bool) error

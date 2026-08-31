@@ -28,6 +28,7 @@ func NewMux(st *Store, backend GitBackend, version string) http.Handler {
 	mux.HandleFunc("GET /api/v1/me", s.auth(s.apiMe))
 	mux.HandleFunc("POST /api/v1/change-password", s.auth(s.apiChangePassword))
 	mux.HandleFunc("POST /api/v1/repos/personal", s.auth(s.gate(s.apiPersonalRepo)))
+	mux.HandleFunc("POST /api/v1/git-token", s.auth(s.gate(s.apiGitToken)))
 	mux.HandleFunc("GET /api/v1/users", s.auth(s.gate(s.admin(s.apiUsers))))
 	mux.HandleFunc("POST /api/v1/users", s.auth(s.gate(s.admin(s.apiUserCreate))))
 	mux.HandleFunc("POST /api/v1/users/{name}/reset-password", s.auth(s.gate(s.admin(s.apiUserResetPassword))))
@@ -262,6 +263,20 @@ func (s *server) apiPersonalRepo(w http.ResponseWriter, r *http.Request, u *User
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"repo": gitRepoJSON(repo), "git_token": token})
+}
+
+// apiGitToken 自助重发 git token：删旧建新（规避同名撞名），明文返回一次。
+// 解决新机器拉取已有仓时拿不到凭据的断链（token 原本只在建仓首发）。
+func (s *server) apiGitToken(w http.ResponseWriter, r *http.Request, u *User) {
+	const tokenName = "ok-sync-reissue"
+	_ = s.backend.DeleteUserToken(r.Context(), u.Username, tokenName) // 尽力而为，以建为准
+	token, err := s.backend.CreateUserToken(r.Context(), u.Username, tokenName)
+	if err != nil {
+		backendErr(w, err)
+		return
+	}
+	s.st.Audit(u.Username, "reissue-git-token", u.Username, "")
+	writeJSON(w, http.StatusOK, map[string]string{"git_token": token})
 }
 
 // ---------- 用户管理 ----------

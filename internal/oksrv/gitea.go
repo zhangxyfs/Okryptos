@@ -117,6 +117,17 @@ func (g *GiteaBackend) CreateUserToken(ctx context.Context, username, tokenName 
 	return out.SHA1, nil
 }
 
+// DeleteUserToken 核实：DELETE /users/{username}/tokens/{tokenname}（与 CreateUserToken
+// 同走 Basic 头——路由同样强制 reqBasicOrRevProxyAuth）；404（无此 token）视为成功。
+func (g *GiteaBackend) DeleteUserToken(ctx context.Context, username, tokenName string) error {
+	err := g.do(ctx, http.MethodDelete, "/users/"+url.PathEscape(username)+"/tokens/"+url.PathEscape(tokenName), nil, nil, true)
+	var ge *giteaError
+	if errors.As(err, &ge) && ge.Code == http.StatusNotFound {
+		return nil
+	}
+	return err
+}
+
 // DeleteUser 核实：DELETE /admin/users/{username}（204）。用于建用户流程半途失败的回滚。
 func (g *GiteaBackend) DeleteUser(ctx context.Context, username string) error {
 	return g.call(ctx, http.MethodDelete, "/admin/users/"+url.PathEscape(username), nil, nil)

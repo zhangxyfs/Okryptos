@@ -78,6 +78,9 @@ func (f *FakeBackend) CreateUserToken(ctx context.Context, username, tokenName s
 	return fmt.Sprintf("fake-token-%s-%s-%d", username, tokenName, f.tokens[username]), nil
 }
 
+// DeleteUserToken _fake 语义：记数即可（撞名场景由 tokens 计数自然区分）。
+func (f *FakeBackend) DeleteUserToken(_ context.Context, _, _ string) error { return nil }
+
 // DeleteUser 从 users 删除（建用户回滚用）；不存在时报错（尽力而为场景被忽略）。
 func (f *FakeBackend) DeleteUser(ctx context.Context, username string) error {
 	f.mu.Lock()
