@@ -424,8 +424,10 @@ func TestUpdateDownloadError(t *testing.T) {
 
 // ---------- POST /api/update/apply ----------
 
-// withApplyStubs 把升级序列的副作用全部替换为记录调用的假实现（测试不真跑安装器、
-// 不真退出进程）。stopDaemon/runInstaller 期间熔断标记必须存在，spawnOkd 时须已删除
+// withApplyStubs 把升级序列的副作用替换为记录调用的假实现（测试不真拉起安装器、
+// 不真退出进程）。新序列：handler 内同步写熔断（200 之前，不在 stub 范围）→
+// goroutine runInstaller(detached，不等待退出) → stopDaemon → exitProcess。
+// 熔断由 handler 写、本进程绝不删：runInstaller/stopDaemon 调用时它必须存在
 // ——顺序错误直接在 goroutine 内报错（测试等待 done，报错发生在结束前，安全）。
 // 返回事件记录（按发生顺序）与 exitProcess 被调用的信号 channel。
 func withApplyStubs(t *testing.T) (*[]string, chan struct{}) {
@@ -435,7 +437,7 @@ func withApplyStubs(t *testing.T) (*[]string, chan struct{}) {
 	add := func(s string) { mu.Lock(); *events = append(*events, s); mu.Unlock() }
 	mark := upgradeMarkPath()
 
-	oldStop, oldRun, oldSpawn, oldExit := stopDaemon, runInstaller, spawnOkd, exitProcess
+	oldStop, oldRun, oldExit := stopDaemon, runInstaller, exitProcess
 	stopDaemon = func() {
 		if _, err := os.Stat(mark); err != nil {
 			t.Errorf("stopDaemon 调用时熔断标记不存在（顺序错误）")
@@ -449,20 +451,14 @@ func withApplyStubs(t *testing.T) (*[]string, chan struct{}) {
 		add("runInstaller:" + filepath.Base(path))
 		return nil
 	}
-	spawnOkd = func() error {
-		if _, err := os.Stat(mark); !os.IsNotExist(err) {
-			t.Errorf("spawnOkd 调用时熔断标记未删除（顺序错误）")
-		}
-		add("spawnOkd")
-		return nil
-	}
 	done := make(chan struct{})
 	exitProcess = func(code int) {
 		add(fmt.Sprintf("exit:%d", code))
 		close(done)
 	}
 	t.Cleanup(func() {
-		stopDaemon, runInstaller, spawnOkd, exitProcess = oldStop, oldRun, oldSpawn, oldExit
+		stopDaemon, runInstaller, exitProcess = oldStop, oldRun, oldExit
+		applyInFlight.Store(false)
 	})
 	return events, done
 }
@@ -475,7 +471,18 @@ func setUpdateJobDone(t *testing.T, installer string) {
 	updMu.Unlock()
 }
 
-// 升级序列：写熔断 → StopDaemon → 跑安装器 → 删熔断 → 拉起新 okd → 退出进程。
+// postApply 发 POST /api/update/apply，返回原始 recorder（不断言状态码）。
+func postApply(t *testing.T, h *Handler) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/api/update/apply", nil)
+	req.Header.Set("X-Ok-Token", testToken)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// 升级序列：写熔断（handler 内，200 之前）→ detached 拉起安装器 → stopDaemon → 退出进程。
+// 本进程不删熔断：装完由安装器 [Run] 段拉起的新 okd 启动时自愈删除（daemon.Run）。
 func TestUpdateApplySequence(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("apply 仅 Windows")
@@ -498,17 +505,107 @@ func TestUpdateApplySequence(t *testing.T) {
 		t.Fatalf("resp = %v, want {ok:true}", body)
 	}
 
+	// 熔断在 200 响应之前已写好：先于安装器启动，挡住安装期间任何 daemon 拉起
+	if _, err := os.Stat(upgradeMarkPath()); err != nil {
+		t.Fatalf("apply 后熔断标记应存在: %v", err)
+	}
+
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("apply goroutine 未走到 exitProcess")
 	}
-	want := []string{"stopDaemon", "runInstaller:OpenKnowledge-Setup-99.0.0.exe", "spawnOkd", "exit:0"}
+	want := []string{"runInstaller:OpenKnowledge-Setup-99.0.0.exe", "stopDaemon", "exit:0"}
 	if fmt.Sprint(*events) != fmt.Sprint(want) {
 		t.Fatalf("events = %v, want %v", *events, want)
 	}
-	if _, err := os.Stat(upgradeMarkPath()); !os.IsNotExist(err) {
-		t.Fatalf("熔断标记应已删除, stat err = %v", err)
+	// 本进程不删熔断：收尾交给安装器 [Run] 段拉起的新 okd（启动自愈删除）
+	if _, err := os.Stat(upgradeMarkPath()); err != nil {
+		t.Fatalf("本进程不应删熔断标记: %v", err)
+	}
+}
+
+// 并发防护：升级序列进行中（终点是进程退出，标志成功不回收）重复 POST 一律 409，
+// 不重复写熔断/拉起安装器。
+func TestUpdateApplyConcurrentGuard(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("apply 仅 Windows")
+	}
+	h, _ := changelogEnv(t)
+	resetUpdateDownloadJob(t)
+	events, done := withApplyStubs(t)
+
+	installer := filepath.Join(os.Getenv("OK_HOME"), "update", "OpenKnowledge-Setup-99.0.0.exe")
+	if err := os.MkdirAll(filepath.Dir(installer), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installer, []byte("fake installer"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	setUpdateJobDone(t, installer)
+
+	if rec := postApply(t, h); rec.Code != http.StatusOK {
+		t.Fatalf("首次 apply -> %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := postApply(t, h); rec.Code != http.StatusConflict {
+		t.Fatalf("重复 apply -> %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("apply goroutine 未走到 exitProcess")
+	}
+	if len(*events) != 3 {
+		t.Fatalf("events = %v, want 仅跑了一次升级序列（3 步）", *events)
+	}
+}
+
+// 熔断写失败 → 500 中止，不无熔断裸奔安装（也不进入升级序列）；
+// 失败后 guard 复位：清掉障碍可正常重试，不永久锁死。
+func TestUpdateApplyMarkWriteFailure(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("apply 仅 Windows")
+	}
+	h, _ := changelogEnv(t)
+	resetUpdateDownloadJob(t)
+	events, done := withApplyStubs(t)
+
+	// OK_HOME/update 占位为普通文件：MkdirAll/WriteFile 熔断标记必然失败
+	blocker := filepath.Join(os.Getenv("OK_HOME"), "update")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installer := filepath.Join(os.Getenv("OK_HOME"), "installer.exe")
+	if err := os.WriteFile(installer, []byte("fake installer"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	setUpdateJobDone(t, installer)
+
+	if rec := postApply(t, h); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("熔断写失败 -> %d, want 500: %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case <-done:
+		t.Fatal("熔断写失败不应进入升级序列")
+	default:
+	}
+	if len(*events) != 0 {
+		t.Fatalf("events = %v, want 空（升级序列不应启动）", *events)
+	}
+
+	// guard 已复位：清掉障碍后重试成功
+	if err := os.Remove(blocker); err != nil {
+		t.Fatal(err)
+	}
+	body := doJSON(t, h, "POST", "/api/update/apply")
+	if body["ok"] != true {
+		t.Fatalf("重试 resp = %v, want {ok:true}", body)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("重试后 apply goroutine 未走到 exitProcess")
 	}
 }
 
@@ -521,28 +618,20 @@ func TestUpdateApplyNotReady(t *testing.T) {
 	resetUpdateDownloadJob(t)
 	events, done := withApplyStubs(t)
 
-	post := func() *httptest.ResponseRecorder {
-		req := httptest.NewRequest("POST", "/api/update/apply", nil)
-		req.Header.Set("X-Ok-Token", testToken)
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		return rec
-	}
-
 	// idle → 409
-	if rec := post(); rec.Code != http.StatusConflict {
+	if rec := postApply(t, h); rec.Code != http.StatusConflict {
 		t.Fatalf("idle -> %d, want 409: %s", rec.Code, rec.Body.String())
 	}
 	// running → 409
 	updMu.Lock()
 	updCur = &updJob{State: "running"}
 	updMu.Unlock()
-	if rec := post(); rec.Code != http.StatusConflict {
+	if rec := postApply(t, h); rec.Code != http.StatusConflict {
 		t.Fatalf("running -> %d, want 409: %s", rec.Code, rec.Body.String())
 	}
 	// done 但安装器文件不存在 → 400
 	setUpdateJobDone(t, filepath.Join(os.Getenv("OK_HOME"), "update", "missing.exe"))
-	if rec := post(); rec.Code != http.StatusBadRequest {
+	if rec := postApply(t, h); rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing file -> %d, want 400: %s", rec.Code, rec.Body.String())
 	}
 

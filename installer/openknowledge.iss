@@ -50,6 +50,8 @@ Name: "{autodesktop}\OpenKnowledge 知识库"; Filename: "{app}\OkManager.exe"; 
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OpenKnowledge"; ValueData: """{app}\okd.exe"""; Flags: uninsdeletevalue
 
 [Run]
+; 升级收尾：静默覆盖安装后也拉起新 okd（不带 skipifsilent）；okd 启动时自愈删除 .upgrading 熔断
+Filename: "{app}\okd.exe"; Flags: nowait runhidden
 Filename: "{app}\OkManager.exe"; Description: "打开 OpenKnowledge 配置中心（引导页可一键完成 hooks / 技能 / embedding 配置）"; Flags: postinstall skipifsilent
 
 [Code]

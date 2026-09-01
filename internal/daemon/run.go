@@ -36,6 +36,7 @@ var trayEnabled = true
 // 默认端口被非 daemon 占用时回退随机端口。/api/shutdown 或进程信号结束运行。
 func Run(webDir string, stdout, stderr io.Writer) int {
 	logx.CleanArchives(filepath.Join(registry.Home(), "logs")) // 过期归档日志清理（保留 7 天）
+	clearUpgradeMark(stderr)                                    // 升级熔断残留自愈（升级收尾/异常中断）
 	fp, err := daemonx.ExeFingerprint()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -151,6 +152,21 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// clearUpgradeMark 启动自愈：升级熔断标记（~/.openknowledge/update/.upgrading）
+// 残留则删除并记日志。正常升级收尾：安装器 [Run] 段拉起的新 okd 走到这里删标记；
+// 异常残留（安装中断/断电）同样在此清理——否则 Ensure/EnsureCurrent 会永久拒拉 daemon。
+func clearUpgradeMark(stderr io.Writer) {
+	mark := filepath.Join(registry.Home(), "update", ".upgrading")
+	if _, err := os.Stat(mark); err != nil {
+		return
+	}
+	if err := os.Remove(mark); err != nil {
+		fmt.Fprintf(stderr, "升级熔断标记清理失败 %s: %v\n", mark, err)
+		return
+	}
+	fmt.Fprintln(stderr, "检测到升级熔断标记残留，已清理（升级收尾/异常中断）")
 }
 
 // Stop 停止当前 daemon（ok daemon stop）；未运行也返回 0。

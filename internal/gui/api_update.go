@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"openknowledge/internal/daemonx"
@@ -319,50 +321,41 @@ func downloadFile(ctx context.Context, hc *http.Client, url, dest string, progre
 
 // ---------- /api/update/apply（Windows 静默安装） ----------
 
-// 升级序列的副作用全部抽成包级 var：测试不真跑安装器、不真退出进程，
-// 替换为记录调用的假实现后断言顺序（写熔断 → stopDaemon → runInstaller →
-// 删熔断 → spawnOkd → exitProcess）。
+// 升级序列的副作用抽成包级 var：测试不真拉起安装器、不真退出进程，
+// 替换为记录调用的假实现后断言顺序（runInstaller → stopDaemon → exitProcess）。
 var (
 	// stopDaemon 尽力而为地停止当前 daemon 并删除凭证。
 	stopDaemon = daemonx.StopDaemon
-	// runInstaller 静默执行 Inno Setup 安装器并等待退出。
+	// runInstaller detached 拉起 Inno Setup 安装器（Start+Release，不等待退出）：
+	// 本进程随后即自退，等安装器退出没有意义；安装收尾（ssInstall 停旧 okd、
+	// 覆盖文件、[Run] 段拉起新 okd）全由安装器完成。
 	runInstaller = func(path string) error {
-		return exec.Command(path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART").Run()
+		cmd := exec.Command(path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		return cmd.Process.Release()
 	}
-	// spawnOkd 拉起新安装的 okd.exe（与当前 exe 同目录），父进程退出后继续存活。
-	spawnOkd = spawnOkdDetached
-	// exitProcess 退出当前进程（旧 okd 已被安装器覆盖）。
+	// exitProcess 退出当前进程（旧 okd 将被安装器覆盖）。
 	exitProcess = os.Exit
 )
 
+// applyInFlight 防并发 apply：升级序列终点是进程退出，成功后不回收；
+// 校验/熔断写失败时复位，避免一次失败永久锁死。
+var applyInFlight atomic.Bool
+
 // upgradeMarkPath 升级熔断标记：存在期间 daemon.Ensure/EnsureCurrent 不拉起 daemon。
+// apply 时写、本进程绝不删——装完由安装器 [Run] 段拉起新 okd，启动时自愈删除
+// （daemon.Run → clearUpgradeMark，兼覆盖安装中断/断电的异常残留）。
 func upgradeMarkPath() string {
 	return filepath.Join(registry.Home(), "update", ".upgrading")
 }
 
-// spawnOkdDetached 以 Start+Release 拉起同目录 okd.exe（父退出后子进程存活）。
-// daemon.SpawnDetached 的 DETACHED_PROCESS 更理想，但 daemon 包反向 import gui
-// （run.go），gui 引 daemon 会成环；且本文件须跨平台编译，不能写 Windows 专属
-// syscall。部署形态下当前 okd 本身无控制台（上一次也是 detached 拉起），普通
-// Start 足够。
-func spawnOkdDetached() error {
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	exe := filepath.Join(filepath.Dir(self), "okd.exe")
-	if _, err := os.Stat(exe); err != nil {
-		return err
-	}
-	cmd := exec.Command(exe)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	return cmd.Process.Release()
-}
-
-// apiUpdateApply：Windows 静默安装已下载完成的安装器。先回 200 + flush（保证前端
-// 收得到响应），再异步执行升级序列——序列终点是 exitProcess(0)，同步处理会发不出响应。
+// apiUpdateApply：Windows 静默安装已下载完成的安装器。okd 进程内只做三步：
+// 写熔断（200 之前，写失败 500 中止——不无熔断裸奔安装）→ 回 200 + flush →
+// goroutine detached 拉起安装器后自退。等安装器退出/删熔断/拉起新 okd 都不在
+// 本进程做：GUI 跑在 okd 自身进程里，安装器停 okd 会毫秒级杀掉自己，那些步骤
+// 在真实部署下永远跑不到。
 func (h *Handler) apiUpdateApply(w http.ResponseWriter, _ *http.Request) {
 	if runtime.GOOS != "windows" {
 		writeErr(w, http.StatusBadRequest, "unsupported")
@@ -377,6 +370,22 @@ func (h *Handler) apiUpdateApply(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusBadRequest, "安装器文件不存在："+snap.Path)
 		return
 	}
+	if !applyInFlight.CompareAndSwap(false, true) {
+		writeErr(w, http.StatusConflict, "升级已在进行中")
+		return
+	}
+	// 熔断必须先于 200 响应写好：安装期间 hook/托盘的任何 Ensure 拉起都被它挡住。
+	mark := upgradeMarkPath()
+	if err := os.MkdirAll(filepath.Dir(mark), 0o755); err != nil {
+		applyInFlight.Store(false)
+		writeErr(w, http.StatusInternalServerError, "写升级熔断标记失败: "+err.Error())
+		return
+	}
+	if err := os.WriteFile(mark, []byte("1"), 0o644); err != nil {
+		applyInFlight.Store(false)
+		writeErr(w, http.StatusInternalServerError, "写升级熔断标记失败: "+err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
@@ -384,15 +393,19 @@ func (h *Handler) apiUpdateApply(w http.ResponseWriter, _ *http.Request) {
 	go applyUpdate(snap.Path)
 }
 
-// applyUpdate 升级序列：写熔断（挡 daemon 拉起）→ 停 daemon → 跑安装器（覆盖 exe）
-// → 删熔断 → detached 拉起新 okd → 退出当前旧进程。
+// applyUpdate 升级序列：detached 拉起安装器 → 停 daemon → 退出进程。
+// 全程错误写日志（daemon.log 即本进程 stderr），不静默丢弃。
 func applyUpdate(path string) {
-	mark := upgradeMarkPath()
-	_ = os.MkdirAll(filepath.Dir(mark), 0o755)
-	_ = os.WriteFile(mark, []byte("1"), 0o644)
+	if err := runInstaller(path); err != nil {
+		log.Printf("升级安装器拉起失败 %s: %v", path, err)
+		// 安装器没起来而熔断已写：不回滚会永久挡住 daemon 拉起（okd 退出后
+		// 再无进程能清标记）。回滚熔断 + 复位 guard，进程继续服务，用户可重试。
+		if rerr := os.Remove(upgradeMarkPath()); rerr != nil {
+			log.Printf("升级熔断标记回滚失败: %v", rerr)
+		}
+		applyInFlight.Store(false)
+		return
+	}
 	stopDaemon()
-	_ = runInstaller(path)
-	_ = os.Remove(mark)
-	_ = spawnOkd()
 	exitProcess(0)
 }

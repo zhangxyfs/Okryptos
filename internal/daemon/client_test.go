@@ -185,3 +185,30 @@ func TestEnsureUpgradeCircuitBreaker(t *testing.T) {
 		t.Fatalf("熔断解除后 Ensure 应拉起 1 次, calls = %d", *calls)
 	}
 }
+
+// daemon.Run 启动自愈（clearUpgradeMark）：.upgrading 残留（升级收尾或安装中断）
+// 在启动路径开头删除并记日志——否则 Ensure/EnsureCurrent 会永久拒拉 daemon。
+func TestClearUpgradeMarkSelfHeal(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	mark := filepath.Join(os.Getenv("OK_HOME"), "update", ".upgrading")
+	if err := os.MkdirAll(filepath.Dir(mark), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mark, []byte("1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	clearUpgradeMark(&buf)
+	if _, err := os.Stat(mark); !os.IsNotExist(err) {
+		t.Fatalf("残留熔断应被自愈删除, stat err = %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Fatal("自愈应记日志")
+	}
+	// 无残留时静默不动
+	buf.Reset()
+	clearUpgradeMark(&buf)
+	if buf.Len() != 0 {
+		t.Fatalf("无残留时不应输出: %q", buf.String())
+	}
+}
