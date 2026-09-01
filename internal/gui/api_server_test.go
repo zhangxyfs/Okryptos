@@ -487,3 +487,14 @@ func TestApiServerCredEnsure(t *testing.T) {
 		t.Fatalf("ensure: %d %s", res, body)
 	}
 }
+
+// TestApiServerCredEnsureNotConfigured 未配置服务器：409 not_configured。
+func TestApiServerCredEnsureNotConfigured(t *testing.T) {
+	h, _, _ := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	res, body := do(t, "POST", srv.URL+"/api/server/credential/ensure", testToken, nil)
+	if res != 409 || !strings.Contains(string(body), "not_configured") {
+		t.Fatalf("ensure not configured: %d %s", res, body)
+	}
+}
