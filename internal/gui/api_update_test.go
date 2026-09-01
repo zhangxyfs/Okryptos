@@ -177,6 +177,72 @@ func TestUpdateCheckNoMatchingAssets(t *testing.T) {
 	}
 }
 
+// ---------- POST /api/update/skip ----------
+
+// postUpdateSkip 发 POST /api/update/skip，返回原始 recorder（不断言状态码）。
+func postUpdateSkip(t *testing.T, h *Handler, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/api/update/skip", strings.NewReader(body))
+	req.Header.Set("X-Ok-Token", testToken)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// 记录跳过版本：写 gui.json SkippedVersion，其他字段原样保留。
+func TestUpdateSkip(t *testing.T) {
+	h, _ := changelogEnv(t)
+
+	// 预置已有状态：skip 不得覆盖其他字段
+	if err := writeGuiState(guiState{
+		LastSeenVersion: "1.0.0",
+		UpdateCheck:     &UpdateCheck{CheckedAt: 123, Latest: "99.0.0"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if rec := postUpdateSkip(t, h, `{"version":"99.0.0"}`); rec.Code != http.StatusOK {
+		t.Fatalf("skip -> %d: %s", rec.Code, rec.Body.String())
+	}
+	st, err := readGuiState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.SkippedVersion != "99.0.0" {
+		t.Fatalf("SkippedVersion = %q, want 99.0.0", st.SkippedVersion)
+	}
+	if st.LastSeenVersion != "1.0.0" || st.UpdateCheck == nil || st.UpdateCheck.Latest != "99.0.0" {
+		t.Fatalf("其他字段被覆盖: %+v", st)
+	}
+
+	// 覆盖写入：新版本号替换旧跳过记录
+	if rec := postUpdateSkip(t, h, `{"version":"100.0.0"}`); rec.Code != http.StatusOK {
+		t.Fatalf("skip 覆盖 -> %d: %s", rec.Code, rec.Body.String())
+	}
+	st, err = readGuiState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.SkippedVersion != "100.0.0" {
+		t.Fatalf("覆盖后 SkippedVersion = %q, want 100.0.0", st.SkippedVersion)
+	}
+}
+
+// 空版本号 400 且不落盘。
+func TestUpdateSkipEmptyVersion(t *testing.T) {
+	h, _ := changelogEnv(t)
+	if rec := postUpdateSkip(t, h, `{"version":""}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("空版本 -> %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	st, err := readGuiState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.SkippedVersion != "" {
+		t.Fatalf("空版本不应落盘: %+v", st)
+	}
+}
+
 // withUpdateURLPrefix 临时替换包级 updateURLPrefix 并注册恢复。
 func withUpdateURLPrefix(t *testing.T, prefix string) {
 	t.Helper()

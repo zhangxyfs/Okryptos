@@ -43,9 +43,36 @@ type updateCheckResp struct {
 
 func (h *Handler) registerUpdateAPI(api func(string, http.HandlerFunc)) {
 	api("GET /api/update/check", h.apiUpdateCheck)
+	api("POST /api/update/skip", h.apiUpdateSkip)
 	api("POST /api/update/download", h.apiUpdateDownloadStart)
 	api("GET /api/update/download", h.apiUpdateDownloadStatus)
 	api("POST /api/update/apply", h.apiUpdateApply)
+}
+
+// apiUpdateSkip：记录用户跳过的版本（gui.json SkippedVersion）。跳过后该版本不再
+// 触发启动弹窗与侧栏红点；检查缓存、last_seen 等其他字段原样保留。
+func (h *Handler) apiUpdateSkip(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Version string `json:"version"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Version == "" {
+		writeErr(w, http.StatusBadRequest, "version 不能为空")
+		return
+	}
+	st, err := readGuiState()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	st.SkippedVersion = req.Version
+	if err := writeGuiState(st); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // githubRelease 是 GitHub releases/latest 响应中我们关心的字段。
