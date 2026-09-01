@@ -109,7 +109,7 @@ func TestOkserverDeploy(t *testing.T) {
 		t.Fatalf("root change password: %d %v", code, out)
 	}
 	code, out = call("POST", "/api/v1/users", rootTok, map[string]string{"username": "alice"})
-	if code != 200 || out["password"] == nil || out["git_token"] == nil {
+	if code != 200 || out["password"] == nil {
 		t.Fatalf("create alice: %d %v", code, out)
 	}
 	alicePW := out["password"].(string)

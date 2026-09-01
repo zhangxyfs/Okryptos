@@ -109,14 +109,17 @@ func TestFullManagementFlow(t *testing.T) {
 	defer srv.Close()
 	rootTok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
 
-	// 建用户（一次性返回明文密码 + git token）
+	// 建用户（一次性返回明文密码；凭证统一后不再附带 git token）
 	code, out := call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "alice"})
 	if code != 200 {
 		t.Fatalf("create user: %d %v", code, out)
 	}
 	pw := out["password"].(string)
-	if pw == "" || out["git_token"].(string) == "" {
+	if pw == "" {
 		t.Fatalf("create user resp: %v", out)
+	}
+	if _, has := out["git_token"]; has {
+		t.Fatalf("create user must not issue git_token anymore: %v", out)
 	}
 	// alice 视为已自助改密（初始密码标记会让 gate 拦截后续建仓端点）
 	if err := st.SetMustChangePassword("alice", false); err != nil {
@@ -340,34 +343,24 @@ func TestAdminWriteEndpoints(t *testing.T) {
 	}
 }
 
-// TestCreateUserTokenFailureRollback 钉住 2026-08-30 真机 bug：Gitea 发 token 失败
-// （1.22 缺 scope 400）时建用户流程必须回滚 Gitea 侧用户、不留本地半截状态，重试可收敛。
-func TestCreateUserTokenFailureRollback(t *testing.T) {
+// TestCreateUserNoTokenIssued 钉住凭证统一（2026-09-01）：建用户全程不调
+// CreateUserToken（failTokens 注入下也必须 200），响应不含 git_token。
+// 原"token 失败回滚"场景随建用户/建仓停发 token 一并消失。
+func TestCreateUserNoTokenIssued(t *testing.T) {
 	srv, st, backend := newTestServer(t)
 	defer srv.Close()
 	rootTok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
 
-	backend.SetFailTokens(true)
+	backend.SetFailTokens(true) // 若建用户仍调 CreateUserToken 会 502——红即回归
 	code, out := call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "carol"})
-	if code != http.StatusBadGateway {
-		t.Fatalf("token failure must be 502: %d %v", code, out)
+	if code != 200 {
+		t.Fatalf("create user must not touch tokens: %d %v", code, out)
 	}
-	// 本地不留半截（否则重试被"用户已存在"闸门挡住——真机第二次报错）
-	if st.GetUser("carol") != nil {
-		t.Fatal("local user must not exist after rollback")
+	if _, has := out["git_token"]; has {
+		t.Fatalf("resp must not contain git_token: %v", out)
 	}
-	// Gitea 侧用户已回滚删除：直接再调 CreateUser 应成功（没回滚会报已存在）
-	if err := backend.CreateUser(context.Background(), "carol", "pw"); err != nil {
-		t.Fatalf("backend user must be rolled back: %v", err)
-	}
-	if err := backend.DeleteUser(context.Background(), "carol"); err != nil {
-		t.Fatalf("cleanup: %v", err)
-	}
-	// 修复后重试全链路成功
-	backend.SetFailTokens(false)
-	code, out = call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "carol"})
-	if code != 200 || out["git_token"].(string) == "" {
-		t.Fatalf("retry after fix must succeed: %d %v", code, out)
+	if st.GetUser("carol") == nil {
+		t.Fatal("local user must exist")
 	}
 }
 
@@ -587,7 +580,7 @@ func TestApiTokens(t *testing.T) {
 		return names
 	}
 
-	// 建 bob（member，建用户时已发 ok-sync token），清强制改密标记后登录
+	// 建 bob（member；凭证统一后建用户不再发 token），清强制改密标记后登录
 	code, out := call(t, srv, "POST", "/api/v1/users", rootTok, map[string]string{"username": "bob"})
 	if code != 200 {
 		t.Fatalf("create bob: %d %v", code, out)
@@ -604,14 +597,14 @@ func TestApiTokens(t *testing.T) {
 		t.Fatalf("git-token: %d", code)
 	}
 
-	// 2. bob 列自己的 token：含 ok-sync-r-NB1 与建用户时的 ok-sync
+	// 2. bob 列自己的 token：只有刚重发的 ok-sync-r-NB1
 	code, out = call(t, srv, "GET", "/api/v1/tokens", bobTok, nil)
 	if code != 200 {
 		t.Fatalf("list tokens: %d %v", code, out)
 	}
 	names := tokenNames(out)
-	if !names["ok-sync-r-NB1"] || !names["ok-sync"] || len(names) != 2 {
-		t.Fatalf("tokens must contain ok-sync-r-NB1 and ok-sync: %v", names)
+	if !names["ok-sync-r-NB1"] || len(names) != 1 {
+		t.Fatalf("tokens must contain only ok-sync-r-NB1: %v", names)
 	}
 
 	// 3. bob 删 ok-sync-r-NB1 → 204；再列已消失
@@ -630,12 +623,16 @@ func TestApiTokens(t *testing.T) {
 		t.Fatalf("member on admin endpoint must be 403: %d", code)
 	}
 
-	// 5. root 列 bob 剩余 token（ok-sync）→ 200；root 删 bob 的 ok-sync → 204
+	// 5. bob 再自助重发一枚（ok-sync-r-NB2）；root 列 bob 的 token → 200 含该枚；root 删 → 204
+	code, _ = call(t, srv, "POST", "/api/v1/git-token", bobTok, map[string]string{"name_hint": "NB2"})
+	if code != 200 {
+		t.Fatalf("git-token NB2: %d", code)
+	}
 	code, out = call(t, srv, "GET", "/api/v1/users/bob/tokens", rootTok, nil)
-	if code != 200 || !tokenNames(out)["ok-sync"] {
+	if code != 200 || !tokenNames(out)["ok-sync-r-NB2"] {
 		t.Fatalf("admin list bob tokens: %d %v", code, out)
 	}
-	code, _ = call(t, srv, "DELETE", "/api/v1/users/bob/tokens/ok-sync", rootTok, nil)
+	code, _ = call(t, srv, "DELETE", "/api/v1/users/bob/tokens/ok-sync-r-NB2", rootTok, nil)
 	if code != 204 {
 		t.Fatalf("admin delete bob token: %d", code)
 	}

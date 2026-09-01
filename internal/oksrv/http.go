@@ -415,17 +415,9 @@ func (s *server) apiUserCreate(w http.ResponseWriter, r *http.Request, u *User) 
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// 顺序：Gitea 用户 → Gitea token → 本地用户（最后）。任一步失败回滚 Gitea 侧，
-	// 本地用户最后建——保证"用户已存在"闸门（本地库）前的失败不留半截状态，重试可收敛。
+	// 顺序：Gitea 用户 → 本地用户（最后）。凭证统一（2026-09-01）：不再随建用户发
+	// git token——用户首次绑定项目时其机器走 apiGitToken 自助获取（按机器分名）。
 	if err := s.backend.CreateUser(r.Context(), in.Username, pw); err != nil {
-		backendErr(w, err)
-		return
-	}
-	token, err := s.backend.CreateUserToken(r.Context(), in.Username, "ok-sync")
-	if err != nil {
-		if rbErr := s.backend.DeleteUser(r.Context(), in.Username); rbErr != nil {
-			s.st.Audit(u.Username, "create-user-rollback-failed", in.Username, rbErr.Error())
-		}
 		backendErr(w, err)
 		return
 	}
@@ -443,7 +435,7 @@ func (s *server) apiUserCreate(w http.ResponseWriter, r *http.Request, u *User) 
 	}
 	s.st.Audit(u.Username, "create-user", in.Username, "role="+role)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"username": in.Username, "password": pw, "git_token": token,
+		"username": in.Username, "password": pw,
 	})
 }
 
