@@ -699,6 +699,9 @@ func (h *Handler) apiProjectAttach(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "目录不存在或不是目录: "+req.Path)
 		return
 	}
+	// paths 在 Update 闭包内（锁内）AddPath 成功后顺手取出，锁外重新 Load 有
+	// 窄窗口：项目恰被删除时会返回 200 + paths:null
+	var paths []string
 	if err := registry.Update(func(reg *registry.Registry) error {
 		// 先判项目存在再补挂：AddPath 两阶段扫描先报路径冲突，
 		// 未注册项目会被误报 409——契约要求未知项目一律 404
@@ -712,7 +715,16 @@ func (h *Handler) apiProjectAttach(w http.ResponseWriter, r *http.Request) {
 		if !found {
 			return fmt.Errorf("%w: %q", registry.ErrProjectNotFound, req.Project)
 		}
-		return reg.AddPath(req.Project, req.Path)
+		if err := reg.AddPath(req.Project, req.Path); err != nil {
+			return err
+		}
+		for _, p := range reg.Projects {
+			if p.Name == req.Project {
+				paths = append([]string(nil), p.Paths...)
+				break
+			}
+		}
+		return nil
 	}); err != nil {
 		switch {
 		case errors.Is(err, registry.ErrProjectNotFound):
@@ -722,11 +734,6 @@ func (h *Handler) apiProjectAttach(w http.ResponseWriter, r *http.Request) {
 		default:
 			writeErr(w, http.StatusInternalServerError, err.Error())
 		}
-		return
-	}
-	_, paths, _, err := findProject(req.Project)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"name": req.Project, "paths": paths})

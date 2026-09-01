@@ -1392,3 +1392,55 @@ func TestInitAttachesWorkdirToShellProject(t *testing.T) {
 		t.Fatalf("FindByCwd should hit after init attach: %+v", loaded.Projects)
 	}
 }
+
+// 同名补挂仅限空壳/幂等重入：非壳项目被同名 init 时必须报「已存在」，
+// 否则敲错项目名会把当前目录静默挂进别人的知识库（hooks/ok add 无告警）。
+func TestInitRejectsSameNameNonShellProject(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi"))
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
+	t.Setenv("OK_DSH_HOME", filepath.Join(t.TempDir(), "nonexistent-dsh"))
+	t.Setenv("OK_OPENCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-opencode"))
+	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
+	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
+	t.Setenv("OK_CODEX_HOME", filepath.Join(t.TempDir(), "nonexistent-codex"))
+	t.Setenv("OK_QODER_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder"))
+	t.Setenv("OK_QODER_IDE_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder-ide"))
+	if err := os.MkdirAll(filepath.Join(home, "kimi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENAI_API_KEY", "")
+	// 预置非壳项目：同名且已有其他 path
+	other := filepath.Join(home, "other-dir")
+	reg := &registry.Registry{Projects: []registry.Project{{Name: "demo", Paths: []string{other}}}}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	proj := filepath.Join(home, "demo-src")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, proj)
+	var out, errBuf bytes.Buffer
+
+	if code := Init([]string{"demo"}, &out, &errBuf); code != 1 {
+		t.Fatalf("init on non-shell same-name project should fail, code=%d out=%q", code, out.String())
+	}
+	if !strings.Contains(errBuf.String(), "已存在") {
+		t.Fatalf("stderr should contain 已存在, got %q", errBuf.String())
+	}
+	loaded, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range loaded.Projects {
+		if p.Name == "demo" {
+			if len(p.Paths) != 1 || registry.NormalizePath(p.Paths[0]) != registry.NormalizePath(other) {
+				t.Fatalf("Paths must not be appended: %+v", p.Paths)
+			}
+		}
+	}
+}

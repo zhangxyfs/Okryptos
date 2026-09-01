@@ -83,13 +83,28 @@ func Init(args []string, stdout, stderr io.Writer) int {
 	// 锁内读-改-写：并发 ok init / GUI 删除 / 备份恢复各自 Load→Save 会互相
 	// 覆盖，项目注册静默丢失（hooks 对该项目全部失效）。
 	// 同名项目已存在（服务器拉取/备份恢复的空壳）→ 补挂当前目录而非报错。
+	// 但补挂仅限空壳（Paths 为空）或幂等重入（cwd 已在 Paths）：敲错项目名时
+	// 若对 Paths 非空的项目放行 AddPath，当前目录会静默挂进别人的知识库，
+	// hooks/ok add 全程无告警（串库），故沿用 AddProject 的「项目已存在」报错。
 	attached := false
+	ncwd := registry.NormalizePath(cwd)
 	if err := registry.Update(func(reg *registry.Registry) error {
 		for _, p := range reg.Projects {
-			if p.Name == name {
-				attached = true
-				return reg.AddPath(name, cwd)
+			if p.Name != name {
+				continue
 			}
+			reentry := false
+			for _, ep := range p.Paths {
+				if registry.NormalizePath(ep) == ncwd {
+					reentry = true
+					break
+				}
+			}
+			if len(p.Paths) > 0 && !reentry {
+				return fmt.Errorf("项目 %q 已存在", name)
+			}
+			attached = true
+			return reg.AddPath(name, cwd)
 		}
 		return reg.AddProject(name, cwd)
 	}); err != nil {
