@@ -106,6 +106,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	// 同步端点（api_sync.go；设计文档 §11.4）
 	h.registerSyncAPI(api)
 	h.registerServerAPI(api)
+	h.registerUpdateAPI(api)
 	// README 相对路径图片直链：<img src> 无法带 X-Ok-Token 头，改一次性短时票据——
 	// 前端先 POST 申领 ticket（走 withAuth）再拼 ?ticket= src，长期 token 不进
 	// URL（浏览器历史/书签会留 query，L-07）
