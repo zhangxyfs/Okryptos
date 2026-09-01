@@ -1,4 +1,4 @@
-// Package tray 提供 daemon 内嵌的系统托盘：图标、单击菜单（版本+退出）、
+// Package tray 提供 daemon 内嵌的系统托盘：图标、单击菜单（版本+检查更新+退出）、
 // 双击打开/聚焦唯一 GUI 窗口。仅 Windows 有实现，其余平台空转。
 package tray
 

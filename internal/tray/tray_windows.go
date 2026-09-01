@@ -34,6 +34,7 @@ const (
 	lrShared         = 0x8000
 	idiApplication   = 32512
 	idMenuQuit       = 1001
+	idMenuCheckUpdate = 1002
 	hwndMessage      = ^uintptr(2) // (HWND)-3
 )
 
@@ -112,11 +113,12 @@ type notifyIconDataW struct {
 
 // Tray 持托盘运行时状态；全局唯一（daemon 单实例）。
 type Tray struct {
-	version  string
-	openGUI  func() uintptr
-	onQuit   func()
-	hwnd     uintptr // 消息窗口
-	threadID uint32
+	version       string
+	openGUI       func() uintptr
+	onCheckUpdate func()
+	onQuit        func()
+	hwnd          uintptr // 消息窗口
+	threadID      uint32
 
 	mu      sync.Mutex
 	guiHwnd uintptr // 最近打开的 GUI 窗口（openGUI 异步回写，见 openOrFocus）
@@ -126,10 +128,11 @@ type Tray struct {
 var current *Tray
 
 // Run 创建托盘图标并跑消息循环，阻塞至 ctx 取消（daemon 退出链路）。
-// openGUI 打开浏览器 GUI 并返回新窗口 hwnd；onQuit 由菜单"退出"触发。
-func Run(ctx context.Context, version string, openGUI func() uintptr, onQuit func()) {
+// openGUI 打开浏览器 GUI 并返回新窗口 hwnd；onCheckUpdate 由菜单"检查更新"触发
+// （开浏览器直达 misc 页版本卡）；onQuit 由菜单"退出"触发。
+func Run(ctx context.Context, version string, openGUI func() uintptr, onCheckUpdate func(), onQuit func()) {
 	runtime.LockOSThread() // 消息队列绑定线程：锁定防 goroutine 迁移，不解锁（线程专职消息循环）
-	t := &Tray{version: version, openGUI: openGUI, onQuit: onQuit}
+	t := &Tray{version: version, openGUI: openGUI, onCheckUpdate: onCheckUpdate, onQuit: onQuit}
 	current = t
 	defer func() { current = nil }()
 	if err := t.init(); err != nil {
@@ -236,7 +239,7 @@ func trayWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	return r
 }
 
-// showMenu 右键弹菜单：灰化版本项 + 分隔线 + 退出。
+// showMenu 右键弹菜单：灰化版本项 + 分隔线 + 检查更新 + 退出。
 // 弹出前 SetForegroundWindow 自身窗口，保证点击他处菜单正常消失（Win32 惯例）。
 func (t *Tray) showMenu() {
 	menu, _, _ := procCreatePopupMenu.Call()
@@ -247,6 +250,8 @@ func (t *Tray) showMenu() {
 	ver, _ := windows.UTF16PtrFromString("OpenKnowledge v" + t.version)
 	procAppendMenuW.Call(menu, mfString|mfGrayed, 0, uintptr(unsafe.Pointer(ver)))
 	procAppendMenuW.Call(menu, mfSeparator, 0, 0)
+	checkUpd, _ := windows.UTF16PtrFromString("检查更新")
+	procAppendMenuW.Call(menu, mfString, idMenuCheckUpdate, uintptr(unsafe.Pointer(checkUpd)))
 	quit, _ := windows.UTF16PtrFromString("退出")
 	procAppendMenuW.Call(menu, mfString, idMenuQuit, uintptr(unsafe.Pointer(quit)))
 
@@ -256,6 +261,11 @@ func (t *Tray) showMenu() {
 	cmd, _, _ := procTrackPopupMenu.Call(menu, tpmReturnCmd|tpmNoNotify,
 		uintptr(pt.X), uintptr(pt.Y), 0, t.hwnd, 0)
 	procPostMessageW.Call(t.hwnd, 0, 0, 0) // WM_NULL：保证点击他处菜单可靠收起（KB Q135788）
+	// onCheckUpdate 内含 OpenBrowser 的窗口长轮询，异步派发避免卡死消息线程
+	// （同 openOrFocus 注释的 M-05 理由）；结果窗口不需聚焦管理，fire-and-forget。
+	if cmd == idMenuCheckUpdate && t.onCheckUpdate != nil {
+		go t.onCheckUpdate()
+	}
 	if cmd == idMenuQuit && t.onQuit != nil {
 		t.onQuit()
 	}

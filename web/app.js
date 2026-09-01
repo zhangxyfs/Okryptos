@@ -6664,6 +6664,11 @@ function deployCard(){
     return;
   }
   if(MENUS.some(m=>m.key===name)) state.menu = name;
+  /* 托盘「检查更新」直达：okd 打开 /?go=misc#token=..。go 参数走 query 而非 hash——
+     index.html 抹 token 时 replaceState 只保留 pathname+search，hash 参数活不到这里。
+     只落 misc 页；版本卡数据由 refreshMisc 自查 /api/update/check，启动弹窗检查由下方
+     checkClientUpdate() 统一触发一次——此处不重复调，以免弹窗入队两次。 */
+  if(new URLSearchParams(location.search).get("go") === "misc") state.menu = "misc";
 })();
 
 render();

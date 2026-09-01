@@ -107,7 +107,7 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 			}
 		}
 	}()
-	// 系统托盘（仅 windows 有效）：单击菜单（版本+退出）、双击打开/聚焦 GUI。
+	// 系统托盘（仅 windows 有效）：单击菜单（版本+检查更新+退出）、双击打开/聚焦 GUI。
 	// 托盘崩溃/失败不影响主服务；daemon 退出时先 cancel 再等待清理（NIM_DELETE），
 	// 避免 main 抢先 os.Exit 留下幽灵图标。
 	if trayEnabled {
@@ -131,6 +131,10 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 				// token 走 fragment（#token=）而不是 ?token=：fragment 不随请求发出、
 				// 不进 Referer/访问日志，由 index.html 的 inline script 读入
 				func() uintptr { return OpenBrowserFunc(info.URL() + "/#token=" + info.Token) },
+				// 检查更新：开浏览器直达 misc 页版本卡。go=misc 放 query 而非 hash——
+				// index.html 抹 token 时 replaceState 只保留 pathname+search，
+				// hash 里的参数活不到 app.js
+				func() { OpenBrowserFunc(info.URL() + "/?go=misc#token=" + info.Token) },
 				func() { go func() { _ = srv.Shutdown(context.Background()) }() })
 		}()
 	}
