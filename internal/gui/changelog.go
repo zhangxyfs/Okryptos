@@ -93,21 +93,54 @@ func versionLess(a, b [3]int) bool {
 	return false
 }
 
+// UpdateCheck 是一次更新检查结果的缓存。
+type UpdateCheck struct {
+	CheckedAt    int64  `json:"checked_at"`
+	Latest       string `json:"latest"`
+	Body         string `json:"body,omitempty"`
+	InstallerURL string `json:"installer_url,omitempty"`
+	DebURL       string `json:"deb_url,omitempty"`
+	TarURL       string `json:"tar_url,omitempty"`
+}
+
 // guiState 是 ~/.openknowledge/gui.json 的内容（GUI 侧持久化小状态）。
 type guiState struct {
-	LastSeenVersion string `json:"last_seen_version"`
+	LastSeenVersion string       `json:"last_seen_version,omitempty"`
+	SkippedVersion  string       `json:"skipped_version,omitempty"`
+	UpdateCheck     *UpdateCheck `json:"update_check,omitempty"`
 }
 
 func guiStatePath() string { return filepath.Join(registry.Home(), "gui.json") }
 
-// loadLastSeen 读取已看版本；文件缺失/损坏返回 ""。
-func loadLastSeen() string {
+// readGuiState 读取 gui.json；文件缺失返回零值状态且无错误，损坏则报错。
+func readGuiState() (guiState, error) {
+	var s guiState
 	data, err := os.ReadFile(guiStatePath())
 	if err != nil {
-		return ""
+		if os.IsNotExist(err) {
+			return s, nil
+		}
+		return s, err
 	}
-	var s guiState
 	if err := json.Unmarshal(data, &s); err != nil {
+		return guiState{}, err
+	}
+	return s, nil
+}
+
+// writeGuiState 写 gui.json（0600）。
+func writeGuiState(s guiState) error {
+	data, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(guiStatePath(), data, 0o600)
+}
+
+// loadLastSeen 读取已看版本；文件缺失/损坏返回 ""。
+func loadLastSeen() string {
+	s, err := readGuiState()
+	if err != nil {
 		return ""
 	}
 	return s.LastSeenVersion
@@ -143,12 +176,13 @@ func (h *Handler) apiChangelogSeen(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
-	data, err := json.Marshal(guiState{LastSeenVersion: version.Version})
+	st, err := readGuiState()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := os.WriteFile(guiStatePath(), data, 0o600); err != nil {
+	st.LastSeenVersion = version.Version
+	if err := writeGuiState(st); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

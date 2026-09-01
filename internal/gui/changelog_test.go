@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"openknowledge/internal/version"
 )
@@ -177,5 +178,32 @@ func TestChangelogMissingDir(t *testing.T) {
 	body := doJSON(t, h, "GET", "/api/changelog")
 	if len(body["all"].([]any)) != 0 || len(body["pending"].([]any)) != 0 {
 		t.Fatalf("missing dir should be empty: %v", body)
+	}
+}
+
+func TestGuiStateUpdateFieldsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OK_HOME", dir)
+	st := guiState{
+		LastSeenVersion: "2.24.2",
+		SkippedVersion:  "2.25.0",
+		UpdateCheck: &UpdateCheck{
+			CheckedAt:    time.Now().Unix(),
+			Latest:       "2.25.0",
+			Body:         "release notes",
+			InstallerURL: "https://github.com/.../OpenKnowledge-Setup-2.25.0.exe",
+			DebURL:       "https://github.com/.../openknowledge_2.25.0_amd64.deb",
+			TarURL:       "https://github.com/.../openknowledge_2.25.0_linux_amd64.tar.gz",
+		},
+	}
+	if err := writeGuiState(st); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readGuiState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SkippedVersion != "2.25.0" || got.UpdateCheck == nil || got.UpdateCheck.Latest != "2.25.0" {
+		t.Fatalf("round trip failed: %+v", got)
 	}
 }
