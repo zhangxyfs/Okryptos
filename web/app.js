@@ -235,12 +235,15 @@ const I18N = {
     srvAutoBindConfirm2:"服务器上有 {n} 个本机尚未拉取的项目仓：{l}\n\n是否现在拉取到本机？（注册同名项目并克隆全部知识条目）",
     srvMyOrgs:"我的组织", srvMyOrgsDesc:"只读（本期）；成员与团队仓由管理员维护。", srvNoOrg:"未加入任何组织。",
     srvName:"名称",
-    srvMyTokens:"我的凭证", srvMyTokensDesc:"本账号在服务器上的 git 访问凭证（每台拉取过的机器一份）。不再使用的可删除；删除后使用该凭证的机器下次推送会失败，需重新拉取。时间列为最近使用（未用过则显示创建时间）。",
+    srvMyTokens:"我的凭证", srvMyTokensDesc:"本账号在服务器上的 git 访问凭证：每台拉取过的机器一条（ok-sync-r-<主机名>）。不再使用的机器可删除其凭证，删除后该机器下次推送会失败，重新绑定即自愈。时间列为最近使用（未用过则显示创建时间）。",
     srvTokenMgmt:"凭证管理", srvTokenMgmtDesc:"查看/清理任意用户的 git 凭证。删除用户时其凭证由服务端级联清理。",
     srvTokenTime:"最近使用 / 创建", srvTokenDelConfirm:"确定删除凭证 {n}？使用该凭证的机器下次推送会失败，需要重新拉取。",
+    srvCredClean:"清理旧版凭证", srvCredCleanConfirm:"将删除以下旧版凭证：{n}。仍使用这些凭证的其他机器下次推送会失败（升级新版客户端后重新绑定即自愈）。确定删除？",
+    srvCredCleanDone:"已删除 {n} 条旧凭证", srvCredCleanFail:"失败：", srvCredCleanNone:"没有需要清理的旧凭证。",
+    srvUserCredNote:"git 凭证不再随账号下发：用户首次绑定项目时，其机器会自动获取。",
     srvTokenDeleted:"凭证已删除", srvNoToken:"暂无凭证。",
     srvDeploy:"部署指引（还没有服务器？展开）", srvUserCreated:"用户已创建", srvCopyHint:"初始密码与 git token 仅本次显示，请立即复制发给用户。",
-    srvPwd:"初始密码", srvNewPwd:"新密码", srvGitTok:"git token", srvCopied:"我已复制", srvCopiedOk:"已复制到剪贴板",
+    srvPwd:"初始密码", srvNewPwd:"新密码", srvCopied:"我已复制", srvCopiedOk:"已复制到剪贴板",
     srvResetDone:"已重置密码", srvConfirmDisable:"确认禁用/启用该用户？",
     srvDelete:"删除", srvConfirmDelete:"确认删除该用户？okserver 与 Gitea 账号一并删除，不可恢复。", srvPwdOpt:"初始密码（可选，留空自动生成）", srvPwdTooShort:"密码至少 8 位",
     srvChangePwd:"修改我的密码", srvOldPwd:"旧密码", srvConfirmPwd:"确认新密码",
@@ -448,12 +451,15 @@ const I18N = {
     srvAutoBindConfirm2:"The server has {n} project repos not on this machine: {l}\n\nPull them now? (registers same-named projects and clones all entries)",
     srvMyOrgs:"My organizations", srvMyOrgsDesc:"Read-only (this release); membership and team repos are admin-managed.", srvNoOrg:"No organization.",
     srvName:"Name",
-    srvMyTokens:"My credentials", srvMyTokensDesc:"Git access credentials of this account on the server (one per machine that has pulled). Delete ones no longer in use; a machine using a deleted credential will fail its next push and must pull again. The time column shows last use (creation time if never used).",
+    srvMyTokens:"My credentials", srvMyTokensDesc:"Git access credentials of this account on the server: one per machine that has pulled (ok-sync-r-<hostname>). Delete credentials of machines no longer in use; affected machines fail their next push and self-heal by rebinding. The time column shows last use (creation time if never used).",
     srvTokenMgmt:"Credential management", srvTokenMgmtDesc:"View/clean up git credentials of any user. Deleting a user cascades to their credentials on the server.",
     srvTokenTime:"Last used / created", srvTokenDelConfirm:"Delete credential {n}? The machine using it will fail its next push and must pull again.",
+    srvCredClean:"Clean up legacy credentials", srvCredCleanConfirm:"These legacy credentials will be deleted: {n}. Other machines still using them will fail their next push (self-heal by rebinding after upgrading the client). Delete?",
+    srvCredCleanDone:"Deleted {n} legacy credential(s)", srvCredCleanFail:"Failed: ", srvCredCleanNone:"No legacy credentials to clean.",
+    srvUserCredNote:"Git credentials are no longer issued with the account: the user's machine obtains one automatically on first project binding.",
     srvTokenDeleted:"Credential deleted", srvNoToken:"No credentials yet.",
     srvDeploy:"Deployment guide (no server yet? expand)", srvUserCreated:"User created", srvCopyHint:"The initial password and git token are shown only once — copy them now.",
-    srvPwd:"Initial password", srvNewPwd:"New password", srvGitTok:"git token", srvCopied:"Done", srvCopiedOk:"Copied",
+    srvPwd:"Initial password", srvNewPwd:"New password", srvCopied:"Done", srvCopiedOk:"Copied",
     srvResetDone:"Password reset", srvConfirmDisable:"Confirm disable/enable this user?",
     srvDelete:"Delete", srvConfirmDelete:"Delete this user? The okserver and Gitea accounts are removed together — this cannot be undone.", srvPwdOpt:"Initial password (optional, auto-generated if empty)", srvPwdTooShort:"Password must be at least 8 characters",
     srvChangePwd:"Change my password", srvOldPwd:"Current password", srvConfirmPwd:"Confirm new password",
@@ -5788,8 +5794,8 @@ async function srvCreateUser(name, role, password, btn){
   try{
     const r = await api("/api/server/users", { method:"POST", body:{ username: name, role: role || "member", password: password || "" }, skip401Reload:true });
     srvRefresh();
-    srvShowSecret(t("srvUserCreated")+" — "+name, t("srvCopyHint"), [
-      [t("srvPwd"), r.password], [t("srvGitTok"), r.git_token],
+    srvShowSecret(t("srvUserCreated")+" — "+name, t("srvCopyHint")+" "+t("srvUserCredNote"), [
+      [t("srvPwd"), r.password],
     ]);
   }catch(err){ toast(err.message, true); }
   btn.disabled = false;
@@ -6305,12 +6311,47 @@ function myOrgsCard(){
   return card;
 }
 
-/* 成员视图「我的凭证」：GET /api/server/tokens → 列/删本账号 git 凭证（tokenTable 与管理卡同形状） */
+/* 成员视图「我的凭证」：GET /api/server/tokens → 列/删本账号 git 凭证（tokenTable 与管理卡同形状）。
+   凭证统一（2026-09-01）：旧命名（非 ok-sync-r-*）凭证可一键清理——先保本机再逐条删。 */
 function tokensCard(){
   const card = el("div","pcard");
   const h = el("h3"); h.textContent = t("srvMyTokens"); card.appendChild(h);
   const desc = el("div","pdesc"); desc.textContent = t("srvMyTokensDesc"); card.appendChild(desc);
   const ts = SRV.tokens || [];
+  const legacy = ts.filter(tk=>!/^ok-sync-r-/.test(tk.name));
+  if(legacy.length){
+    const bar = el("div",""); bar.style.margin = "6px 0";
+    const clean = el("button","btn"); clean.textContent = t("srvCredClean")+" ("+legacy.length+")";
+    clean.onclick = async ()=>{
+      clean.disabled = true;
+      try{
+        // 保本机：确保本机新凭证存在（没有则服务端重发+本机落 helper），再清理
+        await api("/api/server/credential/ensure", { method:"POST", skip401Reload:true });
+        const r = await api("/api/server/tokens", { skip401Reload:true });
+        const olds = (r.tokens||[]).filter(tk=>!/^ok-sync-r-/.test(tk.name));
+        if(!olds.length){
+          toast(t("srvCredCleanNone"));
+          SRV.tokens = r.tokens||[];
+          if(state.menu==="server") render();
+          return;
+        }
+        const names = olds.map(tk=>tk.name).join("、");
+        if(!await uiConfirm(t("srvCredCleanConfirm").replace("{n}", names), true)){ clean.disabled = false; return; }
+        let ok = 0; const fail = [];
+        for(const tk of olds){
+          try{
+            await api("/api/server/tokens/"+encodeURIComponent(tk.name), { method:"DELETE", skip401Reload:true });
+            ok++;
+          }catch(e){ fail.push(tk.name); }
+        }
+        toast(t("srvCredCleanDone").replace("{n}", ok)+(fail.length?"；"+t("srvCredCleanFail")+fail.join("、"):""), fail.length>0);
+        SRV.tokens = null; loadServerRoleData();
+      }catch(err){ toast(err.message, true); }
+      clean.disabled = false;
+      if(state.menu === "server") render();
+    };
+    bar.appendChild(clean); card.appendChild(bar);
+  }
   if(!ts.length){
     const d = el("div","small muted"); d.textContent = t("srvNoToken"); card.appendChild(d);
     return card;
