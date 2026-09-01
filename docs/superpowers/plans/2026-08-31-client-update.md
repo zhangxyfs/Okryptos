@@ -205,31 +205,52 @@ func TestUpdateDownloadJob(t *testing.T) {
 
 ### Task 4: POST /api/update/apply + daemon 熔断
 
+> **修订（评审 C1，用户裁决「安装器收尾+okd自愈」）**：原序列「goroutine 等安装器退出→删熔断→拉起 okd→自退」在真实部署下不可达——GUI 跑在 okd 自身进程里，StopDaemon/安装器停 okd 会毫秒级杀掉自己。改为：okd 进程内只做「写熔断→detached 拉起安装器→自退」，收尾交给安装器 `[Run]` 段 + okd 启动自愈。
+
 **Files:**
 - Modify: `internal/gui/api_update.go`
 - Modify: `internal/daemon/client.go`（`Ensure()` :34 / `EnsureCurrent()` :62 开头）
-- Test: `internal/gui/api_update_test.go`、`internal/daemon/client_test.go`（若有）
+- Modify: `internal/daemon/run.go`（启动自愈删熔断）
+- Modify: `installer/openknowledge.iss`（[Run] 段装完拉起 okd）
+- Test: `internal/gui/api_update_test.go`、`internal/daemon/client_test.go`
 
 - [ ] **Step 1: 写失败测试**
 
 ```go
 func TestApplyCircuitBreaker(t *testing.T) {
-    dir := t.Setenv OK_HOME 隔离
-    // 写 ~/.openknowledge/update/.upgrading → Ensure() 应直接返回不拉起
-    // 删掉 → 恢复正常路径（只断言熔断分支，不真起进程）
+    // OK_HOME 隔离；写 .upgrading → Ensure() 应直接返回不拉起；删掉 → 恢复
+}
+
+func TestApplySequence(t *testing.T) {
+    // 包级 var 替换 runInstaller/stopDaemon/exitProcess，断言顺序：写熔断 → runInstaller(detached) → 自退
+    // 断言 runInstaller 期间熔断存在（不等待安装器退出、不在本进程删熔断）
+}
+
+func TestDaemonRunUpgradingSelfHeal(t *testing.T) {
+    // OK_HOME 隔离预置 .upgrading → daemon.Run 启动路径开头删除它（可抽 helper 单测，不必真跑 Run）
 }
 ```
-
-apply 本身不真跑安装器：把"执行安装器"抽成包级 `var runInstaller = func(path string) error {...}`，测试替换为记录调用的假实现，断言顺序：写熔断 → StopDaemon → runInstaller → 删熔断。
 
 - [ ] **Step 2: 跑测试确认红**
 - [ ] **Step 3: 实现**
 
-`POST /api/update/apply`（仅 Windows，其他平台 400 `{err:"unsupported"}`）：
+`POST /api/update/apply`（仅 Windows，其他平台 400 `{err:"unsupported"}`；响应错误键沿用 writeErr 的 `error`）：
 
-1. 校验下载任务 state=done 且 path 存在。
-2. 先 `writeJSON(200, {ok:true})` 并 flush——之后再异步动手，保证前端能收到响应。
-3. goroutine：写 `~/.openknowledge/update/.upgrading` → `daemonx.StopDaemon()`（:126，尽力）→ `exec.Command(path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART").Run()` 等待退出 → 删熔断标记 → `SpawnDetached` 拉起新 okd.exe → `os.Exit(0)`（当前旧 okd 退出，安装器已把它覆盖）。
+1. 校验下载任务 state=done 且 path 存在；atomic guard 防并发 apply（重复 POST 返回 409 或当前状态）。
+2. 先写熔断 `~/.openknowledge/update/.upgrading`——**写失败则不继续**（返回 500，不无熔断裸奔安装）。
+3. `writeJSON(200, {ok:true})` + flush。
+4. goroutine：`runInstaller(path)` = detached 启动安装器（`Start()+Release()`，**不 Wait**），参数 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART` → 然后 `stopDaemon()`/`exitProcess(0)` 自退。安装器 `PrepareToInstall` 自己会 `okd.exe stop`（iss :134-137），文件覆盖后由 `[Run]` 段收尾。
+5. 全程错误写 daemon.log，不静默 `_ =`。
+
+`installer/openknowledge.iss` `[Run]` 段加一条（不带 skipifsilent，静默安装也执行）：
+
+```
+Filename: "{app}\okd.exe"; Flags: nowait runhidden; ...
+```
+
+（参照既有 OkManager 条目的写法，去掉 skipifsilent，确保静默覆盖装后新 okd 被拉起。）
+
+`internal/daemon/run.go` 启动路径开头自愈：检测到 `.upgrading` 存在则删除并记日志（升级收尾或异常残留统一在此清理）。
 
 `internal/daemon/client.go` 的 `Ensure()`/`EnsureCurrent()` 开头：
 
