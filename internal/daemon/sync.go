@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"openknowledge/internal/config"
+	"openknowledge/internal/credmig"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/store"
 	"openknowledge/internal/syncx"
@@ -45,6 +46,16 @@ func runSyncCycle(out io.Writer, force bool) {
 		return
 	}
 	globalCfg := filepath.Join(registry.Home(), "config.toml")
+	// 凭证统一迁移（2026-09-01）：已配置服务器且本机未迁移时，先把本机凭证换成
+	// ok-sync-r-<hostname> 再同步。失败仅记日志（旧凭证仍可用），下轮重试。
+	if gcfg, gerr := config.Load(globalCfg); gerr == nil && gcfg.Server.URL != "" &&
+		!credmig.Done(registry.Home(), gcfg.Server.Username) {
+		if name, merr := credmig.Ensure(gcfg.Server); merr != nil {
+			fmt.Fprintf(out, "sync: 凭证迁移失败（下轮重试）: %v\n", merr)
+		} else {
+			fmt.Fprintf(out, "sync: 凭证已迁移为 %s\n", name)
+		}
+	}
 	for _, p := range reg.Projects {
 		st := store.New(filepath.Join(registry.Home(), "projects", p.Name))
 		cfg, err := config.LoadMerged(st.ConfigPath(), globalCfg)

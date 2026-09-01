@@ -1,7 +1,10 @@
 package daemon
 
 import (
+	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"openknowledge/internal/config"
+	"openknowledge/internal/credmig"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/store"
 	"openknowledge/internal/syncx"
@@ -80,6 +85,45 @@ func TestRunSyncCycle(t *testing.T) {
 	out := gitExec(t, bare, "log", "--oneline", "main")
 	if out == "" {
 		t.Fatal("bare should have commits")
+	}
+}
+
+// TestRunSyncCycleMigratesCredential 凭证统一（2026-09-01）：已配置服务器且本机无
+// 迁移标记时，runSyncCycle 先做机器级凭证迁移（git-token 重发一次）并写标记；
+// 第二轮标记已在，不再重发。
+func TestRunSyncCycleMigratesCredential(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "gitconfig-sys"))
+	calls := 0
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/git-token" {
+			w.WriteHeader(404)
+			return
+		}
+		calls++
+		_ = json.NewEncoder(w).Encode(map[string]string{"git_token": "tok-new", "token_name": "ok-sync-r-H"})
+	}))
+	defer fake.Close()
+	if err := config.SetServer(filepath.Join(home, "config.toml"), config.Server{URL: fake.URL, Username: "alice", Token: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	reg := &registry.Registry{}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	runSyncCycle(io.Discard, true)
+	if calls != 1 {
+		t.Fatalf("reissue calls = %d, want 1", calls)
+	}
+	if !credmig.Done(home, "alice") {
+		t.Fatal("marker must be written")
+	}
+	runSyncCycle(io.Discard, true)
+	if calls != 1 {
+		t.Fatalf("second cycle must not reissue, calls = %d", calls)
 	}
 }
 
