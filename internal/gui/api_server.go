@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"openknowledge/internal/config"
+	"openknowledge/internal/credmig"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/serverx"
 	"openknowledge/internal/store"
@@ -44,6 +45,7 @@ func (h *Handler) registerServerAPI(api func(string, http.HandlerFunc)) {
 	api("GET /api/server/repos-all", h.fwdReposAll)
 	api("GET /api/server/audit", h.fwdAudit)
 	api("GET /api/server/tokens", h.fwdTokens)
+	api("POST /api/server/credential/ensure", h.apiServerCredEnsure)
 	api("DELETE /api/server/tokens/{name}", h.fwdTokenDelete)
 	api("GET /api/server/users/{name}/tokens", h.fwdUserTokens)
 	api("DELETE /api/server/users/{name}/tokens/{token}", h.fwdUserTokenDelete)
@@ -265,19 +267,20 @@ func (h *Handler) serveBindRepo(w http.ResponseWriter, r *http.Request, st *stor
 		writeServerErr(w, err)
 		return
 	}
-	// 凭据：优先系统 credential helper；仓已存在（token 仅建仓首发）且本机未存凭据时
-	// 自助重发（v2.25 服务端起）；无 helper 回退 URL 内嵌（credNote 警告）。
+	// 凭据：建仓不再下发 token（凭证统一 2026-09-01，provision 恒返空串）。
+	// 本机已存凭据直接用；没有则按 hostname 自助重发（v2.25 服务端起）。
+	// file:// remote 无认证语义，跳过凭据环节。无 helper 回退 URL 内嵌（credNote 警告）。
 	remote := pr.Repo.CloneURL
 	credNote := ""
-	gitToken := pr.GitToken
-	if gitToken == "" && !syncx.HasStoredCredential(st.Root, pr.Repo.CloneURL, cfgServer.Username) {
+	gitToken := ""
+	if !strings.HasPrefix(remote, "file://") && !syncx.HasStoredCredential(st.Root, remote, cfgServer.Username) {
 		host, _ := os.Hostname()
 		tok, _, terr := c.GitToken(r.Context(), host)
 		if terr != nil {
 			var se *serverx.Error
 			if errors.As(terr, &se) && se.Code == http.StatusNotFound {
 				writeJSON(w, http.StatusOK, map[string]any{"status": "error", "clone_url": pr.Repo.CloneURL,
-					"message": "仓已存在但本机无 git 凭据，且服务端版本过旧（不支持自助重发 token）：请升级 okserver，或联系管理员重置密码重发 token"})
+					"message": "仓已存在但本机无 git 凭据，且服务端版本过旧或客户端版本过旧（不支持自助重发 token）：请升级 okserver 与客户端后重试"})
 				return
 			}
 			writeServerErr(w, terr)
@@ -295,10 +298,6 @@ func (h *Handler) serveBindRepo(w http.ResponseWriter, r *http.Request, st *stor
 				return
 			}
 		}
-	} else if !syncx.HasCredentialHelper(st.Root) {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "error", "clone_url": pr.Repo.CloneURL,
-			"message": "仓已存在但本机无 git 凭据（token 仅建仓首发、本机无 credential helper）：请在终端手工绑定或联系管理员重置密码重发 token"})
-		return
 	}
 	repo := syncx.Open(st.Root)
 	if !repo.IsRepo() {
@@ -583,6 +582,26 @@ func (h *Handler) fwdTokenDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// apiServerCredEnsure 清理旧凭证前的"保本机"步骤（凭证统一 2026-09-01）：
+// 确保本机持有 ok-sync-r-<hostname> 新凭证（重发幂等），覆盖写入所有已绑定项目。
+func (h *Handler) apiServerCredEnsure(w http.ResponseWriter, r *http.Request) {
+	_, cfgServer, err := h.serverClient()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if cfgServer.URL == "" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "not_configured"})
+		return
+	}
+	name, err := credmig.Ensure(cfgServer)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"token_name": name})
 }
 
 // fwdUserTokens 管理员列指定用户凭证。

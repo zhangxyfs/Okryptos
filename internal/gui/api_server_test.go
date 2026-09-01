@@ -15,7 +15,7 @@ import (
 )
 
 // fakeOKServer 起假 okserver（meta/login/me/repos/personal，校验 Bearer）。
-// gitToken 传空串模拟"仓已存在"语义（token 仅建仓首发）。
+// gitToken 传空串模拟"凭证统一后建仓不再下发 token"语义（provision 恒返空串）。
 func fakeOKServer(t *testing.T, cloneURL, gitToken string, extra ...func(*http.ServeMux)) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -463,5 +463,27 @@ func TestApiServerTokens(t *testing.T) {
 	res, body = do(t, "DELETE", srv.URL+"/api/server/tokens/ok-sync-r-NB1", testToken, nil)
 	if res != 204 {
 		t.Fatalf("delete token: %d %s", res, body)
+	}
+}
+
+// TestApiServerCredEnsure 清理旧凭证前的保本机端点：调 git-token 重发并回显
+// token_name；未配置服务器 409。
+func TestApiServerCredEnsure(t *testing.T) {
+	h, _, _ := newEnv(t)
+	fake := fakeOKServer(t, "http://gitea/alice/ok-x.git", "", func(mux *http.ServeMux) {
+		mux.HandleFunc("POST /api/v1/git-token", func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]string{"git_token": "tok-new", "token_name": "ok-sync-r-H"})
+		})
+	})
+	defer fake.Close()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	res, body := do(t, "POST", srv.URL+"/api/server/login", testToken, map[string]any{"url": fake.URL, "username": "alice", "password": "pw"})
+	if res != 200 {
+		t.Fatalf("login: %d %s", res, body)
+	}
+	res, body = do(t, "POST", srv.URL+"/api/server/credential/ensure", testToken, nil)
+	if res != 200 || !strings.Contains(string(body), "ok-sync-r-H") {
+		t.Fatalf("ensure: %d %s", res, body)
 	}
 }
