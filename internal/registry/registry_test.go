@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -208,5 +209,34 @@ func TestUpdateConcurrentWritersKeepAll(t *testing.T) {
 	}
 	if len(reg.Projects) != writers {
 		t.Fatalf("lost updates: %d projects, want %d", len(reg.Projects), writers)
+	}
+}
+
+func TestAddPath(t *testing.T) {
+	r := &Registry{Projects: []Project{
+		{Name: "shell"}, // 拉取/恢复的空壳
+		{Name: "other", Paths: []string{`D:\develop\other`}},
+	}}
+	// 补挂成功
+	if err := r.AddPath("shell", `D:\develop\shell-src`); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Projects[0].Paths) != 1 || r.Projects[0].Paths[0] != `D:\develop\shell-src` {
+		t.Fatalf("unexpected paths %+v", r.Projects[0].Paths)
+	}
+	// 幂等：规范化后同路径（尾分隔符差异）不重复追加
+	if err := r.AddPath("shell", `D:\develop\shell-src\`); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Projects[0].Paths) != 1 {
+		t.Fatalf("idempotent attach should not duplicate: %+v", r.Projects[0].Paths)
+	}
+	// 冲突：路径已挂别的项目
+	if err := r.AddPath("shell", `D:\develop\other`); !errors.Is(err, ErrPathConflict) {
+		t.Fatalf("expected ErrPathConflict, got %v", err)
+	}
+	// 未知项目
+	if err := r.AddPath("nope", `D:\x`); !errors.Is(err, ErrProjectNotFound) {
+		t.Fatalf("expected ErrProjectNotFound, got %v", err)
 	}
 }

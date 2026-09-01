@@ -141,6 +141,45 @@ func (r *Registry) AddProject(name, path string) error {
 	return nil
 }
 
+// ErrProjectNotFound / ErrPathConflict 是 AddPath 的分类哨兵（GUI 映射 404/409）。
+var (
+	ErrProjectNotFound = errors.New("项目未注册")
+	ErrPathConflict    = errors.New("路径已注册给其他项目")
+)
+
+// AddPath 把 path 补挂到已存在项目的 Paths（服务器拉取/备份恢复的空壳项目
+// 关联工作目录——hooks 的 FindByCwd 只按 Paths 前缀匹配，空壳永不命中）。
+// 锁由调用方（Update）持有；规范化后同路径幂等，冲突口径与 AddProject 一致
+// （相等判断）。持久化由 Update/Save 负责。
+func (r *Registry) AddPath(name, path string) error {
+	npath := NormalizePath(path)
+	idx := -1
+	for i := range r.Projects {
+		p := &r.Projects[i]
+		if p.Name == name {
+			idx = i
+			continue
+		}
+		// 冲突扫描不随名匹配短路：目标项目排在冲突项目之前时同样要拒绝
+		for _, ep := range p.Paths {
+			if NormalizePath(ep) == npath {
+				return fmt.Errorf("%w: %q 属于项目 %q", ErrPathConflict, path, p.Name)
+			}
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("%w: %q", ErrProjectNotFound, name)
+	}
+	p := &r.Projects[idx]
+	for _, ep := range p.Paths {
+		if NormalizePath(ep) == npath {
+			return nil
+		}
+	}
+	p.Paths = append(p.Paths, path)
+	return nil
+}
+
 // ValidProjectName 校验项目名形状：必须是不含路径分隔符与盘符的基本名，
 // 且不是 Windows 保留设备名/尾部带点或空格的名字。项目名会被拼进
 // projects/<name>/ 目录路径，穿越段（../、绝对路径、C: 盘符）与 NTFS 上
