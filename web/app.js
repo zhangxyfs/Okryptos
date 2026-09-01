@@ -139,6 +139,11 @@ const I18N = {
     xDelPartial:"项目已注销，但{w}，请手动清理 {d}",
     xAbout:"关于", xVer:"版本", xHome:"数据目录", xProjCount:"已注册项目", xProjUnit:" 个",
     xLoadFail:"数据加载失败：",
+    uVerCard:"版本升级", uVerCur:"当前版本", uVerLatest:"最新版本", uVerCheck:"检查更新",
+    uVerNone:"已是最新", uVerNew:"发现新版本", uVerUpgrade:"立即升级", uVerSkip:"跳过此版本",
+    uVerLater:"知道了", uVerDl:"下载中", uVerInstalling:"正在安装，程序将自动重启…",
+    uVerLinuxHint:"请下载对应包手动升级",
+    uSrvNewer:"服务端版本 {v} 高于客户端，建议升级客户端",
     mgNew:"+ 新建", mgLoading:"加载中…", mgTreeErr:"条目加载失败：",
     readmeEmpty:"该项目没有 README，也没有 wiki 概述条目。可在项目根目录添加 README.md，或用 ok wiki / openknowledge-wiki 技能生成项目概述。",
     readmeSrcReadme:"项目 README · {p}", readmeSrcWiki:"项目 wiki 概述 · {p}",
@@ -355,6 +360,11 @@ const I18N = {
     xDelPartial:"Project unregistered, but {w}; please remove {d} manually",
     xAbout:"About", xVer:"Version", xHome:"Data dir", xProjCount:"Registered projects", xProjUnit:"",
     xLoadFail:"Failed to load data: ",
+    uVerCard:"Version Update", uVerCur:"Current", uVerLatest:"Latest", uVerCheck:"Check for Updates",
+    uVerNone:"Up to date", uVerNew:"New version available", uVerUpgrade:"Upgrade Now", uVerSkip:"Skip This Version",
+    uVerLater:"Got It", uVerDl:"Downloading", uVerInstalling:"Installing, app will restart…",
+    uVerLinuxHint:"Download the package to upgrade manually",
+    uSrvNewer:"Server version {v} is newer, consider upgrading the client",
     mgNew:"+ New", mgLoading:"Loading…", mgTreeErr:"Failed to load entries: ",
     readmeEmpty:"This project has no README and no wiki overview entry. Add a README.md to the project root, or generate an overview with ok wiki / the openknowledge-wiki skill.",
     readmeSrcReadme:"Project README · {p}", readmeSrcWiki:"Project wiki overview · {p}",
@@ -4954,27 +4964,35 @@ setInterval(()=>{
 }, 2000);
 
 /* ================= 其他页 ================= */
-/* 六卡照抄原型 renderMisc（prototype-manager-v2.html:1592-1688），mock 换真：
+/* 七卡照抄原型 renderMisc（prototype-manager-v2.html:1592-1688），mock 换真：
    导出 = GET /api/export?project=（带 token 裸 fetch → blob → a[download]，文件名取
    Content-Disposition，回退旧命名）；导入 = POST /api/import multipart——FormData file
    字段、只带 X-Ok-Token 头由浏览器自动补 boundary（旧 app.js:1487-1510 同款；api() helper
    强制 JSON Content-Type 不能用）；更新日志 = /api/changelog 的 all 降序 + <hr> 分隔
    （旧 openChangelogModal 语义，seen 只在升级首弹关闭时 POST——本页为常驻入口不标记，
-   首弹由 Task 8 实现）；使用帮助 = /help.md 静态拉取；删除卡 = 三齐备解锁确认弹窗 →
+   首弹由 Task 8 实现）；使用帮助 = /help.md 静态拉取；版本升级 = /api/update/check
+   （服务端 6h 缓存，fail-open）+ download/apply（Windows 一键，Linux 给手动包链接）；
+   删除卡 = 三齐备解锁确认弹窗 →
    DELETE /api/project?project=（后端只认 query 参数，api.go:588 核实）；关于 = /api/status
    的 app_version/home/projects 计数。 */
-let MISC = null;        // {projects, status} 缓存；loadMisc 惰性加载，refreshMisc 原位刷新
+let MISC = null;        // {projects, status, update} 缓存；loadMisc 惰性加载，refreshMisc 原位刷新
 let miscDoc = null;     // 文档弹窗：{title, entries:[{log}]}（更新日志）或 {title, md}（帮助）
 let delTarget = null;   // 删除确认弹窗目标项目名
 
+// JS semver 比较（仿 Go 端 parseVersion/versionLess，api_update.go:88-90）：客户端侧复核
+// update_available，后端标记与本地版本比较双重成立才放行一键升级
+function verParse(s){const m=String(s||"").replace(/^v/,"").match(/^(\d+)\.(\d+)\.(\d+)/);return m?[ +m[1],+m[2],+m[3] ]:null;}
+function verLess(a,b){for(let i=0;i<3;i++){if(a[i]!==b[i])return a[i]<b[i];}return false;}
+
 function loadMisc(){
-  MISC = lazyPage(MISC, { projects:[], status:null }, refreshMisc);
+  MISC = lazyPage(MISC, { projects:[], status:null, update:null }, refreshMisc);
 }
 function refreshMisc(){
-  Promise.all([api("/api/projects"), api("/api/status")]).then(([ps, st])=>{
-    MISC = { projects: ps || [], status: st || null };
+  // update/check 失败静默（fail-open 端点本身也几乎不报错）：不影响主数据展示
+  Promise.all([api("/api/projects"), api("/api/status"), api("/api/update/check").catch(()=>null)]).then(([ps, st, uc])=>{
+    MISC = { projects: ps || [], status: st || null, update: uc || null };
   }).catch(err=>{
-    MISC = { projects: [], status: null, loadErr: err.message };
+    MISC = { projects: [], status: null, update: null, loadErr: err.message };
   }).then(()=>menuRender("misc", ()=>!miscDoc && !delTarget));
 }
 
@@ -5131,7 +5149,66 @@ function renderMisc(){
       d.appendChild(c);
     });
   }
-  // 5. 删除项目知识库（危险卡）：项目下拉 + 删除… → 确认弹窗
+  // 5. 版本升级：当前/最新 + 检查更新；update_available 按平台分流（Windows 一键升级，Linux 手动包链接）
+  {
+    const c = el("div","pcard");
+    c.appendChild(Object.assign(el("h3"),{textContent:t("uVerCard")}));
+    const u = MISC.update;   // /api/update/check 结果（null=未返回/拉取失败）
+    const cur = st ? st.app_version : "";
+    const r = el("div","prow"); r.style.margin = "0";
+    r.appendChild(Object.assign(el("span","k"),{textContent:t("uVerCur")}));
+    r.appendChild(Object.assign(el("span","mono"),{textContent:"v"+(cur||"…")}));
+    r.appendChild(Object.assign(el("span","k"),{textContent:t("uVerLatest")}));
+    r.appendChild(Object.assign(el("span","mono"),{textContent:u && u.latest ? "v"+u.latest : "…"}));
+    const right = rightWrap();
+    if(fb && fb.key==="upd") right.appendChild(miscFbSpan(fb));
+    // 平台判定：/api/status 无平台字段（api.go:514 核实）——release 带安装器资产（installer_url
+    // 非空）且本机 UA 含 Windows 才放行一键升级（GUI 由本机 okd 伺服，UA 平台即 okd 所在平台）
+    const isWin = !!(u && u.installer_url) && /Windows/i.test(navigator.userAgent);
+    const curV = verParse(cur), latV = u && verParse(u.latest);
+    const avail = !!(u && u.update_available && curV && latV && verLess(curV, latV));
+    if(avail){
+      right.appendChild(Object.assign(el("span","fb2"),{textContent:t("uVerNew")}));
+      if(isWin){
+        const up = el("button","btn btn-primary"); up.textContent = t("uVerUpgrade");
+        up.onclick = ()=>openUpdModal(u);
+        right.appendChild(up);
+      }
+    } else if(u){
+      right.appendChild(Object.assign(el("span","fb2"),{textContent:t("uVerNone")}));
+    }
+    const chk = el("button","btn"); chk.textContent = t("uVerCheck");
+    chk.onclick = ()=>{
+      api("/api/update/check").then(d=>{
+        MISC.update = d || null;
+        if(d && d.update_available) render();   // 出现升级入口/新内容，直接重渲
+        else flashMiscFb("upd", t("uVerNone"));
+      }).catch(err=>{
+        flashMiscFb("upd", t("xLoadFail")+err.message, { err:true, sticky:true });
+      });
+    };
+    right.appendChild(chk); r.appendChild(right); c.appendChild(r);
+    if(avail && u.body){
+      const bd = el("div","md");
+      bd.innerHTML = renderMd(u.body);
+      c.appendChild(bd);
+    }
+    if(avail && !isWin){
+      const lr = el("div","prow"); lr.style.margin = "8px 0 0";
+      lr.appendChild(Object.assign(el("span","pdesc"),{textContent:t("uVerLinuxHint")}));
+      const links = rightWrap();
+      [["deb",u.deb_url],["tar.gz",u.tar_url]].forEach(pair=>{
+        if(!pair[1]) return;
+        const a = el("a","btn"); a.textContent = pair[0];
+        a.href = pair[1]; a.target = "_blank"; a.rel = "noopener";
+        a.style.cssText = "text-decoration:none;color:inherit";
+        links.appendChild(a);
+      });
+      lr.appendChild(links); c.appendChild(lr);
+    }
+    d.appendChild(c);
+  }
+  // 6. 删除项目知识库（危险卡）：项目下拉 + 删除… → 确认弹窗
   {
     const c = el("div","pcard danger");
     c.appendChild(Object.assign(el("h3"),{textContent:t("xDel")}));
@@ -5151,7 +5228,7 @@ function renderMisc(){
     right.appendChild(btn); r.appendChild(right); c.appendChild(r);
     d.appendChild(c);
   }
-  // 6. 关于（/api/status：版本 / 数据目录 / 已注册项目计数）
+  // 7. 关于（/api/status：版本 / 数据目录 / 已注册项目计数）
   {
     const c = el("div","pcard");
     c.appendChild(Object.assign(el("h3"),{textContent:t("xAbout")}));
@@ -5196,6 +5273,103 @@ function renderDocModal(){
   mask.appendChild(m);
   mask.onclick = e=>{ if(e.target===mask){ miscDoc = null; render(); } };
   return mask;
+}
+
+/* ================= 客户端版本升级流程（其他页「立即升级」入口） =================
+   确认（release body 用 renderMd 渲染）→ POST /api/update/download → 1s 轮询快照画进度条
+   （照 embPoll/paintEmbDl）→ done 后 POST /api/update/apply → okd 自退跑安装器，界面定格
+   「正在安装…」。弹窗照 openUpgradeModal 挂 document.body 不进 render 周期——下载/安装
+   跨页面导航不被整页重渲打断。单实例 updFlow 防重入；下载/安装中不可关（无取消端点）。 */
+let updFlow = null;   // {ver, url, mask, prog, foot, pollT, phase, pollErrs}
+function openUpdModal(u){
+  if(updFlow) return;
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:t("uVerNew")+"：v"+u.latest}));
+  const body = el("div","md");
+  body.innerHTML = renderMd(u.body || "");
+  m.appendChild(body);
+  const prog = el("div"); prog.style.display = "none";
+  m.appendChild(prog);
+  const foot = el("div","mfoot");
+  const cancel = el("button","btn"); cancel.textContent = t("fCancel");
+  const ok = el("button","btn btn-primary"); ok.textContent = t("uVerUpgrade");
+  foot.appendChild(cancel); foot.appendChild(ok);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  const flow = updFlow = { ver:u.latest, url:u.installer_url, mask:mask, prog:prog, foot:foot,
+    pollT:null, phase:"confirm", pollErrs:0 };
+  const close = ()=>{
+    if(updFlow!==flow || flow.phase!=="confirm") return;
+    updFlow = null; mask.remove();
+  };
+  cancel.onclick = close;
+  mask.onclick = e=>{ if(e.target===mask) close(); };
+  ok.onclick = ()=>{
+    flow.phase = "downloading";
+    body.style.display = "none"; prog.style.display = ""; foot.style.display = "none";
+    api("/api/update/download", { method:"POST", body:{ url:flow.url, version:flow.ver } })
+      .then(snap=>updHandle(flow, snap))
+      .catch(err=>updFail(flow, err.message));
+  };
+  document.body.appendChild(mask);
+}
+// 下载快照绘制（照 paintEmbDl）：running=进度条；error=错误行；done=安装提示
+function updPaint(flow, snap){
+  const prog = flow.prog; prog.innerHTML = "";
+  if(snap.state==="running"){
+    const pct = snap.total>0 ? Math.floor(snap.done*100/snap.total) : 0;
+    prog.appendChild(document.createTextNode(t("uVerDl")+" — "
+      + fmtMB(snap.done||0)+" / "+(snap.total>0 ? fmtMB(snap.total) : "…")));
+    const bar = el("div","emb-prog");
+    const fill = el("i"); fill.style.width = pct+"%";
+    bar.appendChild(fill); prog.appendChild(bar);
+    prog.appendChild(Object.assign(el("span"),{textContent:pct+"%"}));
+    return;
+  }
+  if(snap.state==="done"){
+    prog.appendChild(Object.assign(el("span","fb2"),{textContent:t("uVerInstalling")}));
+    return;
+  }
+  prog.appendChild(Object.assign(el("span","fb2 err"),{textContent:snap.err||"error"}));
+}
+// 快照分流：running 续轮；done → apply（200 后 okd 自退跑安装器）；error → 错误定格
+function updHandle(flow, snap){
+  if(updFlow!==flow) return;
+  updPaint(flow, snap);
+  if(snap.state==="running"){
+    flow.pollT = setTimeout(()=>updPoll(flow), 1000);
+  } else if(snap.state==="done"){
+    flow.phase = "installing";
+    api("/api/update/apply", { method:"POST" })
+      .catch(err=>updFail(flow, err.message));   // 成功无需再画：okd 随即自退，安装提示已定格
+  } else if(snap.state==="error"){
+    updFail(flow, snap.err || "download error");
+  }
+}
+// 1s 轮询下载快照（照 embPoll：只重画状态条不整页重渲）；连续 5 次拉取失败定格错误
+function updPoll(flow){
+  if(flow.pollT){ clearTimeout(flow.pollT); flow.pollT = null; }
+  api("/api/update/download").then(snap=>{
+    flow.pollErrs = 0;
+    updHandle(flow, snap);
+  }).catch(()=>{
+    if(updFlow!==flow) return;
+    if(++flow.pollErrs >= 5){ updFail(flow, t("xLoadFail")+"update/download"); return; }
+    flow.pollT = setTimeout(()=>updPoll(flow), 1000);
+  });
+}
+// 失败定格：错误行 + 「知道了」关窗（此时允许关闭——任务在后端已停或从未起来）
+function updFail(flow, msg){
+  if(updFlow!==flow) return;
+  flow.phase = "error";
+  if(flow.pollT){ clearTimeout(flow.pollT); flow.pollT = null; }
+  flow.prog.style.display = ""; flow.prog.innerHTML = "";
+  flow.prog.appendChild(Object.assign(el("span","fb2 err"),{textContent:msg}));
+  flow.foot.style.display = ""; flow.foot.innerHTML = "";
+  const ok = el("button","btn btn-primary"); ok.textContent = t("uVerLater");
+  ok.onclick = ()=>{ if(updFlow===flow){ updFlow = null; flow.mask.remove(); } };
+  flow.foot.appendChild(ok);
 }
 
 /* ================= 升级首弹（旧 GUI checkChangelog 语义保留，Task 8 核对清单 1） =================
