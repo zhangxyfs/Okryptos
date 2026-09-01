@@ -53,7 +53,8 @@ type Embedding struct {
 	Active     string             `toml:"active,omitempty"` // 使用中 profile 名；空=未配置
 	TimeoutSec int                `toml:"timeout_sec"`
 	Profiles   []EmbeddingProfile `toml:"profiles,omitempty"`
-	// ModelsDir 内置模型下载目录；空=默认 <ok.exe 所在目录>/models（安装版即安装目录下）
+	// ModelsDir 内置模型下载目录；空=默认 <ok.exe 所在目录>/models，该目录不可写时
+	// 回退 <OK_HOME>/models（.deb 安装目录为 root 所有，见 embedsidecar.DefaultModelsDir）
 	ModelsDir string `toml:"models_dir,omitempty"`
 	// 旧版平铺字段（≤v2.13），仅迁移读取；omitempty 保证新写盘不再出现
 	BaseURL   string `toml:"base_url,omitempty"`

@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"openknowledge/internal/config"
 	"openknowledge/internal/embed"
 	"openknowledge/internal/logx"
+	"openknowledge/internal/registry"
 )
 
 // ServerCommand 是 spawn 接缝：测试替换为 helper 进程。生产即 exec.Command。
@@ -44,7 +46,10 @@ func DefaultRuntimeDir() string {
 	return filepath.Join(filepath.Dir(exe), "runtime")
 }
 
-// DefaultModelsDir 返回 <exe 所在目录>/models（安装版即安装目录下）。
+// DefaultModelsDir 返回默认模型目录：<exe 所在目录>/models 可用（可写或已装有模型）
+// 时用之（绿色/安装版随安装目录的惯例）；不可写时回退 <OK_HOME>/models——.deb 装到
+// /usr/lib/openknowledge/ 为 root 所有，普通用户下载模型必 permission denied
+// （2026-09-01 Linux 实证）。
 func DefaultModelsDir() string {
 	exe, err := os.Executable()
 	if err != nil {
@@ -53,7 +58,38 @@ func DefaultModelsDir() string {
 	if r, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = r
 	}
-	return filepath.Join(filepath.Dir(exe), "models")
+	return defaultModelsDirFrom(filepath.Dir(exe))
+}
+
+// defaultModelsDirFrom 默认模型目录决策（exeDir = exe 所在目录）。
+func defaultModelsDirFrom(exeDir string) string {
+	dir := filepath.Join(exeDir, "models")
+	if modelsDirUsable(dir) {
+		return dir
+	}
+	return filepath.Join(registry.Home(), "models")
+}
+
+// modelsDirUsable：目录已装有模型（.gguf——只读也用，防遮蔽已装模型导致重复下载）
+// 或可写（探测写临时文件）。
+func modelsDirUsable(dir string) bool {
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".gguf") {
+				return true
+			}
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return false
+	}
+	f, err := os.CreateTemp(dir, ".ok-wprobe")
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	_ = os.Remove(f.Name())
+	return true
 }
 
 // ModelsDir 解析生效的模型目录：配置优先，空则默认。
