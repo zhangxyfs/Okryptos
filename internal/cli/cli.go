@@ -81,8 +81,16 @@ func Init(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	// 锁内读-改-写：并发 ok init / GUI 删除 / 备份恢复各自 Load→Save 会互相
-	// 覆盖，项目注册静默丢失（hooks 对该项目全部失效）
+	// 覆盖，项目注册静默丢失（hooks 对该项目全部失效）。
+	// 同名项目已存在（服务器拉取/备份恢复的空壳）→ 补挂当前目录而非报错。
+	attached := false
 	if err := registry.Update(func(reg *registry.Registry) error {
+		for _, p := range reg.Projects {
+			if p.Name == name {
+				attached = true
+				return reg.AddPath(name, cwd)
+			}
+		}
 		return reg.AddProject(name, cwd)
 	}); err != nil {
 		fmt.Fprintln(stderr, err)
@@ -99,7 +107,11 @@ func Init(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	fmt.Fprintf(stdout, "已注册项目 %q → %s\n知识库目录: %s\n", name, cwd, st.Root)
+	if attached {
+		fmt.Fprintf(stdout, "项目 %q 已注册，已关联目录 %s\n知识库目录: %s\n", name, cwd, st.Root)
+	} else {
+		fmt.Fprintf(stdout, "已注册项目 %q → %s\n知识库目录: %s\n", name, cwd, st.Root)
+	}
 	// 幂等写入 hooks 配置（已存在则覆盖 exe 路径并去重）；失败不阻断注册结果
 	if exe, err := resolveExe(); err != nil {
 		fmt.Fprintf(stderr, "hooks 配置写入失败（可运行 ok setup 重试）: %v\n", err)

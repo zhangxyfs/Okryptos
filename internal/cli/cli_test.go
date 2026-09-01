@@ -1346,3 +1346,49 @@ func TestUsageErrorsReturnExitCode1(t *testing.T) {
 		}
 	}
 }
+
+func TestInitAttachesWorkdirToShellProject(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	t.Setenv("KIMI_CODE_HOME", filepath.Join(home, "kimi"))
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_REASONIX_HOME", filepath.Join(t.TempDir(), "nonexistent-reasonix"))
+	t.Setenv("OK_DSH_HOME", filepath.Join(t.TempDir(), "nonexistent-dsh"))
+	t.Setenv("OK_OPENCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-opencode"))
+	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
+	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
+	t.Setenv("OK_CODEX_HOME", filepath.Join(t.TempDir(), "nonexistent-codex"))
+	t.Setenv("OK_QODER_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder"))
+	t.Setenv("OK_QODER_IDE_HOME", filepath.Join(t.TempDir(), "nonexistent-qoder-ide"))
+	if err := os.MkdirAll(filepath.Join(home, "kimi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENAI_API_KEY", "")
+	// 预置空壳项目（模拟服务器拉取）：同名无 paths
+	reg := &registry.Registry{Projects: []registry.Project{{Name: "demo"}}}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	// 工作目录名与项目名不同（显式登记路径，不靠名字匹配）
+	proj := filepath.Join(home, "demo-src")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, proj)
+	var out, errBuf bytes.Buffer
+
+	if code := Init([]string{"demo"}, &out, &errBuf); code != 0 {
+		t.Fatalf("init attach code=%d err=%q", code, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "已关联目录") {
+		t.Fatalf("expected attach message, got %q", out.String())
+	}
+	loaded, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := loaded.FindByCwd(proj); p == nil || p.Name != "demo" {
+		t.Fatalf("FindByCwd should hit after init attach: %+v", loaded.Projects)
+	}
+}
