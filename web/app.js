@@ -6085,6 +6085,13 @@ function bindCard(){
     tb.appendChild(tr);
   });
   card.appendChild(tb);
+  // 已建库但未关联工作目录的壳项目 ≥2 个：一键批量关联
+  const unlinked = (SRV.projects || []).filter(p=>p.sync && p.sync.is_repo && !(p.paths || []).length).map(p=>p.name);
+  if(unlinked.length > 1){
+    const all = el("button","btn"); all.style.marginTop = "8px"; all.textContent = t("srvAttachAll");
+    all.onclick = ()=>srvAttachAll(unlinked);
+    card.appendChild(all);
+  }
   // 服务器有仓、本机未拉取分组（一键拉取 / 全部拉取）
   const pullable = srvPullable();
   if(pullable.length){
@@ -6151,6 +6158,58 @@ async function srvAttachOne(project){
     SRV.projects = null; loadServerRoleData(); refreshManage();
   }catch(err){ toast(err.message, true); }
   SRV.bindBusy[project] = false;
+  if(state.menu === "server") render();
+}
+
+/* 一键关联：一个 modal 列出全部壳项目，每行一个路径输入框，留空跳过 */
+function srvAttachAllDlg(projects){
+  return new Promise(resolve=>{
+    const mask = el("div","mask");
+    const m = el("div","modal"); m.style.width = "520px";
+    const msg = el("div","pdesc"); msg.textContent = t("srvAttachAllPrompt"); m.appendChild(msg);
+    const inputs = {};
+    projects.forEach(name=>{
+      const row = el("div","prow"); row.style.marginTop = "8px";
+      const k = el("span","k"); k.textContent = name; row.appendChild(k);
+      const inp = el("input","pinput"); inp.placeholder = t("srvAttachPh");
+      inp.style.flex = "1"; inp.style.marginLeft = "10px";
+      inputs[name] = inp; row.appendChild(inp);
+      m.appendChild(row);
+    });
+    const foot = el("div","mfoot"); foot.style.marginTop = "14px";
+    const finish = v=>{ document.removeEventListener("keydown", onKey, true); mask.remove(); resolve(v); };
+    const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+    ok.onclick = ()=>{
+      const out = {}; let any = false;
+      projects.forEach(n=>{ const v = inputs[n].value.trim(); if(v){ out[n] = v; any = true; } });
+      finish(any ? out : null);
+    };
+    const no = el("button","btn"); no.textContent = t("fCancel"); no.onclick = ()=>finish(null);
+    foot.appendChild(ok); foot.appendChild(no); m.appendChild(foot);
+    mask.appendChild(m);
+    mask.onclick = ev=>{ if(ev.target===mask) finish(null); };
+    const onKey = ev=>{ if(ev.key === "Escape"){ ev.stopPropagation(); finish(null); } };
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(mask);
+  });
+}
+
+/* 批量关联：逐个串行调 attach，单个失败不阻断，结束汇总 toast（与「全部拉取」同款语义） */
+async function srvAttachAll(names){
+  const map = await srvAttachAllDlg(names);
+  if(!map) return;
+  let okCount = 0; const failed = [];
+  for(const name of Object.keys(map)){
+    SRV.bindBusy[name] = true;
+    if(state.menu === "server") render();
+    try{
+      await api("/api/project/attach", { method:"POST", body:{ project: name, path: map[name] }, skip401Reload:true });
+      okCount++;
+    }catch(_){ failed.push(name); }
+    SRV.bindBusy[name] = false;
+  }
+  toast(t("srvAttachDone").replace("{n}", okCount) + (failed.length ? t("srvAttachFail")+failed.join("、") : ""), failed.length > 0);
+  SRV.projects = null; loadServerRoleData(); refreshManage();
   if(state.menu === "server") render();
 }
 
