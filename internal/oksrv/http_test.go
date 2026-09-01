@@ -105,7 +105,7 @@ func TestMetaAndLogin(t *testing.T) {
 }
 
 func TestFullManagementFlow(t *testing.T) {
-	srv, st, _ := newTestServer(t)
+	srv, st, backend := newTestServer(t)
 	defer srv.Close()
 	rootTok := login(t, srv, "root", getenv(t, "OK_TEST_ROOT_PW"))
 
@@ -124,19 +124,28 @@ func TestFullManagementFlow(t *testing.T) {
 	}
 	// 成员登录
 	aliceTok := login(t, srv, "alice", pw)
-	// 成员建仓（幂等）
+	// 成员建仓（幂等）；凭证统一（2026-09-01）：建仓不再下发 token，git_token 恒空
+	toksBefore, err := backend.ListUserTokens(context.Background(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
 	code, out = call(t, srv, "POST", "/api/v1/repos/personal", aliceTok, map[string]string{"project": "demo"})
 	if code != 200 {
 		t.Fatalf("personal repo: %d %v", code, out)
 	}
 	repo := out["repo"].(map[string]any)
-	if repo["owner"] != "alice" || repo["name"] != "ok-demo" || out["git_token"] == "" {
+	if repo["owner"] != "alice" || repo["name"] != "ok-demo" || out["git_token"] != "" {
 		t.Fatalf("repo: %v token=%v", repo, out["git_token"])
 	}
-	// 幂等：再来一次，git_token 为空串（不重复下发）
+	// 幂等：再来一次，git_token 仍为空串
 	code, out = call(t, srv, "POST", "/api/v1/repos/personal", aliceTok, map[string]string{"project": "demo"})
 	if code != 200 || out["git_token"] != "" {
 		t.Fatalf("idempotent: %d %v", code, out)
+	}
+	// 两次建仓全程不得发放任何 token（唯一通道 = apiGitToken）；建用户随附的
+	// ok-sync 属 Task 2 停发范围，故此处断言"建仓前后 token 数不变"而非恒零。
+	if toks, err := backend.ListUserTokens(context.Background(), "alice"); err != nil || len(toks) != len(toksBefore) {
+		t.Fatalf("no token may be issued by provisioning: %v %v", toks, err)
 	}
 	// me
 	code, out = call(t, srv, "GET", "/api/v1/me", aliceTok, nil)

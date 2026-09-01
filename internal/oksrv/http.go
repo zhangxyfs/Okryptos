@@ -228,8 +228,9 @@ func (s *server) apiChangePassword(w http.ResponseWriter, r *http.Request, u *Us
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// apiPersonalRepo 建个人仓 ok-<project>（幂等：已存在返回现有记录且 git_token 空串，
-// token 只在首次建仓下发；丢失走 reset-password 联动重发——v1.1）。
+// apiPersonalRepo 建个人仓 ok-<project>（幂等：已存在返回现有记录）。凭证统一
+// （2026-09-01）：建仓不再下发 token，git_token 恒空串——客户端拿到空串走自助
+// 重发（apiGitToken，按机器分名 ok-sync-r-<hostname>）。
 func (s *server) apiPersonalRepo(w http.ResponseWriter, r *http.Request, u *User) {
 	var in struct {
 		Project string `json:"project"`
@@ -260,15 +261,9 @@ func (s *server) apiPersonalRepo(w http.ResponseWriter, r *http.Request, u *User
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// 审计随事实落库：仓已建成，与下文 token 下发成败无关。
+	// 审计随事实落库：仓已建成。
 	s.st.Audit(u.Username, "create-personal-repo", u.Username+"/"+in.Project, repo.CloneURL)
-	// token 失败不阻断建仓结果（仓已登记，幂等重试不再补发——同上 v1.1 语义）。
-	token, err := s.backend.CreateUserToken(r.Context(), u.Username, "ok-sync-"+in.Project)
-	if err != nil {
-		backendErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"repo": gitRepoJSON(repo), "git_token": token})
+	writeJSON(w, http.StatusOK, map[string]any{"repo": gitRepoJSON(repo), "git_token": ""})
 }
 
 // apiGitToken 自助重发 git token：按机器分名（ok-sync-r-<hostname>），删本机同名旧 token
