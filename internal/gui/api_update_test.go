@@ -70,6 +70,9 @@ func TestUpdateCheckNewVersion(t *testing.T) {
 	if body["skipped_version"] != "98.0.0" {
 		t.Fatalf("skipped_version = %v, want 98.0.0", body["skipped_version"])
 	}
+	if _, ok := body["error"]; ok {
+		t.Fatalf("成功响应不应带 error 字段: %v", body)
+	}
 
 	// 缓存写回 gui.json（skipped_version 保留）
 	st, err := readGuiState()
@@ -123,14 +126,46 @@ func TestUpdateCheckFailOpen(t *testing.T) {
 	if body["current"] != "1.0.0" {
 		t.Fatalf("current = %v", body["current"])
 	}
+	// 失败如实上报 error 字段（200 + fail-open 纪律不变），前端手动检查据此显示失败文案
+	if body["error"] != "fetch_failed" {
+		t.Fatalf("error = %v, want fetch_failed", body["error"])
+	}
 
-	// 失败也写缓存 CheckedAt（Latest 留空）防雪崩
+	// 失败也写缓存 CheckedAt（Latest 留空）防雪崩，失败态一并缓存
 	st, err := readGuiState()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if st.UpdateCheck == nil || st.UpdateCheck.CheckedAt == 0 || st.UpdateCheck.Latest != "" {
 		t.Fatalf("fail-open cache = %+v", st.UpdateCheck)
+	}
+	if st.UpdateCheck.Error != "fetch_failed" {
+		t.Fatalf("cached error = %q, want fetch_failed", st.UpdateCheck.Error)
+	}
+
+	// 缓存命中失败态时也透传 error（TTL 内手动重查仍如实报失败）
+	body = doJSON(t, h, "GET", "/api/update/check")
+	if body["error"] != "fetch_failed" || body["update_available"] != false {
+		t.Fatalf("cached failure resp = %v", body)
+	}
+}
+
+// GitHub 可达但响应非 JSON（解析失败）→ error=bad_response；成功响应不带 error 字段。
+func TestUpdateCheckBadResponse(t *testing.T) {
+	h, _ := changelogEnv(t)
+	withVersion(t, "1.0.0")
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("<html>not json</html>"))
+	}))
+	defer fake.Close()
+	withGithubAPI(t, fake.URL)
+
+	body := doJSON(t, h, "GET", "/api/update/check")
+	if body["update_available"] != false {
+		t.Fatalf("bad response: update_available = %v", body["update_available"])
+	}
+	if body["error"] != "bad_response" {
+		t.Fatalf("error = %v, want bad_response", body["error"])
 	}
 }
 

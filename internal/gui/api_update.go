@@ -39,6 +39,9 @@ type updateCheckResp struct {
 	DebURL          string `json:"deb_url,omitempty"`
 	TarURL          string `json:"tar_url,omitempty"`
 	SkippedVersion  string `json:"skipped_version,omitempty"`
+	// Error 是检查失败的机器可读标记（fetch_failed/bad_response）；成功时省略。
+	// 仍 200 + update_available:false（fail-open 纪律），仅让手动「检查更新」能如实报失败。
+	Error string `json:"error,omitempty"`
 }
 
 func (h *Handler) registerUpdateAPI(api func(string, http.HandlerFunc)) {
@@ -86,8 +89,9 @@ type githubRelease struct {
 }
 
 // apiUpdateCheck 检查 GitHub 最新发布版本。结果缓存 6h（gui.json UpdateCheck）；
-// GitHub 请求失败/超时/解析失败一律 fail-open 返回 200 + update_available:false，
-// 仍写缓存 CheckedAt（Latest 留空）防雪崩。
+// GitHub 请求失败/超时/解析失败一律 fail-open 返回 200 + update_available:false 并带
+// error 标记（前端手动「检查更新」据此如实报失败），失败态仍写缓存（CheckedAt + Error，
+// Latest 留空）防雪崩，TTL 内缓存命中同样透传 error。
 func (h *Handler) apiUpdateCheck(w http.ResponseWriter, _ *http.Request) {
 	st, err := readGuiState()
 	if err != nil {
@@ -111,6 +115,7 @@ func (h *Handler) apiUpdateCheck(w http.ResponseWriter, _ *http.Request) {
 		DebURL:         uc.DebURL,
 		TarURL:         uc.TarURL,
 		SkippedVersion: st.SkippedVersion,
+		Error:          uc.Error,
 	}
 	cur, curOK := parseVersion(version.Version)
 	latest, latestOK := parseVersion(uc.Latest)
@@ -119,9 +124,10 @@ func (h *Handler) apiUpdateCheck(w http.ResponseWriter, _ *http.Request) {
 }
 
 // fetchLatestRelease 请求 GitHub 最新 release 并转成缓存结构；任何失败返回
-// 仅带 CheckedAt 的空结果（fail-open，Latest 留空）。
+// 仅带 CheckedAt + Error 的空结果（fail-open，Latest 留空）：请求/超时/非 200
+// 记 fetch_failed，响应解析失败记 bad_response。
 func fetchLatestRelease() *UpdateCheck {
-	uc := &UpdateCheck{CheckedAt: time.Now().Unix()}
+	uc := &UpdateCheck{CheckedAt: time.Now().Unix(), Error: "fetch_failed"}
 	req, err := http.NewRequest(http.MethodGet, githubAPI, nil)
 	if err != nil {
 		return uc
@@ -137,8 +143,10 @@ func fetchLatestRelease() *UpdateCheck {
 	}
 	var rel githubRelease
 	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		uc.Error = "bad_response"
 		return uc
 	}
+	uc.Error = ""
 	uc.Latest = strings.TrimPrefix(rel.TagName, "v")
 	uc.Body = rel.Body
 	// 宽松后缀匹配资产 URL（防命名微调）：Setup*.exe / *.deb / *linux_amd64.tar.gz

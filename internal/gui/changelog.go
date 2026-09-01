@@ -101,6 +101,9 @@ type UpdateCheck struct {
 	InstallerURL string `json:"installer_url,omitempty"`
 	DebURL       string `json:"deb_url,omitempty"`
 	TarURL       string `json:"tar_url,omitempty"`
+	// Error 是失败态的机器可读标记（fetch_failed/bad_response），随失败结果一起缓存，
+	// TTL 内缓存命中也如实透传给手动「检查更新」。
+	Error string `json:"error,omitempty"`
 }
 
 // guiState 是 ~/.openknowledge/gui.json 的内容（GUI 侧持久化小状态）。

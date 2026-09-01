@@ -142,6 +142,7 @@ const I18N = {
     uVerCard:"版本升级", uVerDesc:"检查新版本并一键升级", uVerCur:"当前版本", uVerLatest:"最新版本", uVerCheck:"检查更新",
     uVerNone:"已是最新", uVerNew:"发现新版本", uVerUpgrade:"立即升级", uVerSkip:"跳过此版本",
     uVerLater:"知道了", uVerDl:"下载中", uVerInstalling:"正在安装，程序将自动重启…",
+    uVerCheckFail:"检查失败，请稍后重试",
     uVerLinuxHint:"请下载对应包手动升级",
     uSrvNewer:"服务端版本 {v} 高于客户端，建议升级客户端",
     mgNew:"+ 新建", mgLoading:"加载中…", mgTreeErr:"条目加载失败：",
@@ -363,6 +364,7 @@ const I18N = {
     uVerCard:"Version Update", uVerDesc:"Check for new versions and upgrade in one click", uVerCur:"Current", uVerLatest:"Latest", uVerCheck:"Check for Updates",
     uVerNone:"Up to date", uVerNew:"New version available", uVerUpgrade:"Upgrade Now", uVerSkip:"Skip This Version",
     uVerLater:"Got It", uVerDl:"Downloading", uVerInstalling:"Installing, app will restart…",
+    uVerCheckFail:"Check failed, please retry",
     uVerLinuxHint:"Download the package to upgrade manually",
     uSrvNewer:"Server version {v} is newer, consider upgrading the client",
     mgNew:"+ New", mgLoading:"Loading…", mgTreeErr:"Failed to load entries: ",
@@ -5176,7 +5178,7 @@ function renderMisc(){
         up.onclick = ()=>openUpdModal(u);
         right.appendChild(up);
       }
-    } else if(u){
+    } else if(u && !u.error){
       right.appendChild(Object.assign(el("span","fb2"),{textContent:t("uVerNone")}));
     }
     const chk = el("button","btn"); chk.textContent = t("uVerCheck");
@@ -5184,7 +5186,9 @@ function renderMisc(){
       api("/api/update/check").then(d=>{
         MISC.update = d || null;
         if(d) UPD = d;   // 侧栏红点随手动检查刷新
-        if(d && d.update_available) render();   // 出现升级入口/新内容，直接重渲
+        // d.error（GitHub 不可达/响应异常，fail-open 200 带回）：手动检查如实报失败，不谎报「已是最新」
+        if(d && d.error){ flashMiscFb("upd", t("uVerCheckFail"), { err:true, sticky:true }); }
+        else if(d && d.update_available) render();   // 出现升级入口/新内容，直接重渲
         else flashMiscFb("upd", t("uVerNone"));
       }).catch(err=>{
         flashMiscFb("upd", t("xLoadFail")+err.message, { err:true, sticky:true });
@@ -5345,7 +5349,13 @@ function updHandle(flow, snap){
   } else if(snap.state==="done"){
     flow.phase = "installing";
     api("/api/update/apply", { method:"POST" })
-      .catch(err=>updFail(flow, err.message));   // 成功无需再画：okd 随即自退，安装提示已定格
+      .then(()=>{
+        // apply 已 200：okd 随即自退、安装器拉起新实例，5s 后 reload 自然落到新页面
+        // （token 经 sessionStorage 保留，见 index.html 启动注入；reload 失败无需处理，
+        // 用户手动刷新即可）。安装提示已由 updPaint 定格。
+        setTimeout(()=>location.reload(), 5000);
+      })
+      .catch(err=>updFail(flow, err.message));
   } else if(snap.state==="error"){
     updFail(flow, snap.err || "download error");
   } else {
