@@ -7,11 +7,14 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"openknowledge/internal/daemonx"
 	"openknowledge/internal/registry"
 	"openknowledge/internal/version"
 )
@@ -40,6 +43,7 @@ func (h *Handler) registerUpdateAPI(api func(string, http.HandlerFunc)) {
 	api("GET /api/update/check", h.apiUpdateCheck)
 	api("POST /api/update/download", h.apiUpdateDownloadStart)
 	api("GET /api/update/download", h.apiUpdateDownloadStatus)
+	api("POST /api/update/apply", h.apiUpdateApply)
 }
 
 // githubRelease 是 GitHub releases/latest 响应中我们关心的字段。
@@ -311,4 +315,84 @@ func downloadFile(ctx context.Context, hc *http.Client, url, dest string, progre
 		return fmt.Errorf("下载大小不符：%d，期望 %d（.part 已保留可续传）", written, total)
 	}
 	return os.Rename(part, dest)
+}
+
+// ---------- /api/update/apply（Windows 静默安装） ----------
+
+// 升级序列的副作用全部抽成包级 var：测试不真跑安装器、不真退出进程，
+// 替换为记录调用的假实现后断言顺序（写熔断 → stopDaemon → runInstaller →
+// 删熔断 → spawnOkd → exitProcess）。
+var (
+	// stopDaemon 尽力而为地停止当前 daemon 并删除凭证。
+	stopDaemon = daemonx.StopDaemon
+	// runInstaller 静默执行 Inno Setup 安装器并等待退出。
+	runInstaller = func(path string) error {
+		return exec.Command(path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART").Run()
+	}
+	// spawnOkd 拉起新安装的 okd.exe（与当前 exe 同目录），父进程退出后继续存活。
+	spawnOkd = spawnOkdDetached
+	// exitProcess 退出当前进程（旧 okd 已被安装器覆盖）。
+	exitProcess = os.Exit
+)
+
+// upgradeMarkPath 升级熔断标记：存在期间 daemon.Ensure/EnsureCurrent 不拉起 daemon。
+func upgradeMarkPath() string {
+	return filepath.Join(registry.Home(), "update", ".upgrading")
+}
+
+// spawnOkdDetached 以 Start+Release 拉起同目录 okd.exe（父退出后子进程存活）。
+// daemon.SpawnDetached 的 DETACHED_PROCESS 更理想，但 daemon 包反向 import gui
+// （run.go），gui 引 daemon 会成环；且本文件须跨平台编译，不能写 Windows 专属
+// syscall。部署形态下当前 okd 本身无控制台（上一次也是 detached 拉起），普通
+// Start 足够。
+func spawnOkdDetached() error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	exe := filepath.Join(filepath.Dir(self), "okd.exe")
+	if _, err := os.Stat(exe); err != nil {
+		return err
+	}
+	cmd := exec.Command(exe)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}
+
+// apiUpdateApply：Windows 静默安装已下载完成的安装器。先回 200 + flush（保证前端
+// 收得到响应），再异步执行升级序列——序列终点是 exitProcess(0)，同步处理会发不出响应。
+func (h *Handler) apiUpdateApply(w http.ResponseWriter, _ *http.Request) {
+	if runtime.GOOS != "windows" {
+		writeErr(w, http.StatusBadRequest, "unsupported")
+		return
+	}
+	snap := updSnapshot()
+	if snap.State != "done" {
+		writeErr(w, http.StatusConflict, "安装器尚未下载完成")
+		return
+	}
+	if _, err := os.Stat(snap.Path); err != nil {
+		writeErr(w, http.StatusBadRequest, "安装器文件不存在："+snap.Path)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	go applyUpdate(snap.Path)
+}
+
+// applyUpdate 升级序列：写熔断（挡 daemon 拉起）→ 停 daemon → 跑安装器（覆盖 exe）
+// → 删熔断 → detached 拉起新 okd → 退出当前旧进程。
+func applyUpdate(path string) {
+	mark := upgradeMarkPath()
+	_ = os.MkdirAll(filepath.Dir(mark), 0o755)
+	_ = os.WriteFile(mark, []byte("1"), 0o644)
+	stopDaemon()
+	_ = runInstaller(path)
+	_ = os.Remove(mark)
+	_ = spawnOkd()
+	exitProcess(0)
 }

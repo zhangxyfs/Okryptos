@@ -30,8 +30,19 @@ var SpawnDetached = spawnDetached
 
 func quickClient() *http.Client { return &http.Client{Timeout: healthTimeout} }
 
+// upgradeInProgress 报告升级安装进行中（GUI /api/update/apply 写的熔断标记存在）：
+// 此时旧 daemon 已被停掉、安装器正在覆盖 exe，拉起只会启动即将被替换的旧二进制
+// 并与安装器抢文件锁。
+func upgradeInProgress() bool {
+	_, err := os.Stat(filepath.Join(registry.Home(), "update", ".upgrading"))
+	return err == nil
+}
+
 // Ensure 在 daemon 不在时后台拉起（15s 防抖，防止多会话同时 spawn 风暴）。
 func Ensure() {
+	if upgradeInProgress() {
+		return // 升级安装进行中，不拉起
+	}
 	if info, err := daemonx.Load(); err == nil && info.Healthy(quickClient()) {
 		// 防抖标记没有别的删除路径，不清会永久滞留、误导排障（看似"拉起中"）。
 		// 健康分支先于防抖判断，不影响 15s 防抖语义。
@@ -60,6 +71,9 @@ func Ensure() {
 // EnsureCurrent 返回健康且指纹一致的 daemon 凭证；
 // 不在/不健康 → 拉起；指纹不一致（exe 已升级）→ 旧 daemon shutdown 后拉起新版。
 func EnsureCurrent() (*daemonx.Info, bool) {
+	if upgradeInProgress() {
+		return nil, false // 升级安装进行中，不拉起
+	}
 	info, err := daemonx.Load()
 	if err != nil {
 		Ensure()

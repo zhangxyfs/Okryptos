@@ -3,10 +3,11 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
-	"net"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -146,5 +147,41 @@ func TestForwardHookTimeoutHandled(t *testing.T) {
 	}
 	if time.Since(start) > time.Second {
 		t.Fatal("forward should time out promptly")
+	}
+}
+
+// 升级熔断：~/.openknowledge/update/.upgrading 存在时 Ensure/EnsureCurrent 一律不
+// 拉起——此时旧 daemon 已被 GUI /api/update/apply 停掉、安装器正在覆盖 exe，拉起
+// 只会启动即将被替换的旧二进制并与安装器抢文件锁。
+func TestEnsureUpgradeCircuitBreaker(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	calls := stubSpawn(t)
+	mark := filepath.Join(os.Getenv("OK_HOME"), "update", ".upgrading")
+	if err := os.MkdirAll(filepath.Dir(mark), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mark, []byte("1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	Ensure()
+	if *calls != 0 {
+		t.Fatalf("升级中 Ensure 不应拉起, spawn calls = %d", *calls)
+	}
+	info, ok := EnsureCurrent()
+	if ok || info != nil {
+		t.Fatalf("升级中 EnsureCurrent = (%v, %v), want (nil, false)", info, ok)
+	}
+	if *calls != 0 {
+		t.Fatalf("升级中 EnsureCurrent 不应拉起, spawn calls = %d", *calls)
+	}
+
+	// 熔断解除后恢复正常路径：无凭证 → Ensure 拉起一次（stub 不真起进程）。
+	if err := os.Remove(mark); err != nil {
+		t.Fatal(err)
+	}
+	Ensure()
+	if *calls != 1 {
+		t.Fatalf("熔断解除后 Ensure 应拉起 1 次, calls = %d", *calls)
 	}
 }

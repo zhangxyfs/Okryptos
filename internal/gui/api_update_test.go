@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -417,5 +419,139 @@ func TestUpdateDownloadError(t *testing.T) {
 	}
 	if final["err"] == "" || final["err"] == nil {
 		t.Fatalf("err should be non-empty: %v", final)
+	}
+}
+
+// ---------- POST /api/update/apply ----------
+
+// withApplyStubs 把升级序列的副作用全部替换为记录调用的假实现（测试不真跑安装器、
+// 不真退出进程）。stopDaemon/runInstaller 期间熔断标记必须存在，spawnOkd 时须已删除
+// ——顺序错误直接在 goroutine 内报错（测试等待 done，报错发生在结束前，安全）。
+// 返回事件记录（按发生顺序）与 exitProcess 被调用的信号 channel。
+func withApplyStubs(t *testing.T) (*[]string, chan struct{}) {
+	t.Helper()
+	events := &[]string{}
+	var mu sync.Mutex
+	add := func(s string) { mu.Lock(); *events = append(*events, s); mu.Unlock() }
+	mark := upgradeMarkPath()
+
+	oldStop, oldRun, oldSpawn, oldExit := stopDaemon, runInstaller, spawnOkd, exitProcess
+	stopDaemon = func() {
+		if _, err := os.Stat(mark); err != nil {
+			t.Errorf("stopDaemon 调用时熔断标记不存在（顺序错误）")
+		}
+		add("stopDaemon")
+	}
+	runInstaller = func(path string) error {
+		if _, err := os.Stat(mark); err != nil {
+			t.Errorf("runInstaller 调用时熔断标记不存在（顺序错误）")
+		}
+		add("runInstaller:" + filepath.Base(path))
+		return nil
+	}
+	spawnOkd = func() error {
+		if _, err := os.Stat(mark); !os.IsNotExist(err) {
+			t.Errorf("spawnOkd 调用时熔断标记未删除（顺序错误）")
+		}
+		add("spawnOkd")
+		return nil
+	}
+	done := make(chan struct{})
+	exitProcess = func(code int) {
+		add(fmt.Sprintf("exit:%d", code))
+		close(done)
+	}
+	t.Cleanup(func() {
+		stopDaemon, runInstaller, spawnOkd, exitProcess = oldStop, oldRun, oldSpawn, oldExit
+	})
+	return events, done
+}
+
+// setUpdateJobDone 预置一个 done 状态的下载任务，Path 指向 installer。
+func setUpdateJobDone(t *testing.T, installer string) {
+	t.Helper()
+	updMu.Lock()
+	updCur = &updJob{State: "done", Path: installer}
+	updMu.Unlock()
+}
+
+// 升级序列：写熔断 → StopDaemon → 跑安装器 → 删熔断 → 拉起新 okd → 退出进程。
+func TestUpdateApplySequence(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("apply 仅 Windows")
+	}
+	h, _ := changelogEnv(t)
+	resetUpdateDownloadJob(t)
+	events, done := withApplyStubs(t)
+
+	installer := filepath.Join(os.Getenv("OK_HOME"), "update", "OpenKnowledge-Setup-99.0.0.exe")
+	if err := os.MkdirAll(filepath.Dir(installer), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installer, []byte("fake installer"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	setUpdateJobDone(t, installer)
+
+	body := doJSON(t, h, "POST", "/api/update/apply")
+	if body["ok"] != true {
+		t.Fatalf("resp = %v, want {ok:true}", body)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("apply goroutine 未走到 exitProcess")
+	}
+	want := []string{"stopDaemon", "runInstaller:OpenKnowledge-Setup-99.0.0.exe", "spawnOkd", "exit:0"}
+	if fmt.Sprint(*events) != fmt.Sprint(want) {
+		t.Fatalf("events = %v, want %v", *events, want)
+	}
+	if _, err := os.Stat(upgradeMarkPath()); !os.IsNotExist(err) {
+		t.Fatalf("熔断标记应已删除, stat err = %v", err)
+	}
+}
+
+// 前置校验：任务未 done → 409；done 但文件丢失 → 400。均不得进入升级序列。
+func TestUpdateApplyNotReady(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("apply 仅 Windows")
+	}
+	h, _ := changelogEnv(t)
+	resetUpdateDownloadJob(t)
+	events, done := withApplyStubs(t)
+
+	post := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/api/update/apply", nil)
+		req.Header.Set("X-Ok-Token", testToken)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// idle → 409
+	if rec := post(); rec.Code != http.StatusConflict {
+		t.Fatalf("idle -> %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	// running → 409
+	updMu.Lock()
+	updCur = &updJob{State: "running"}
+	updMu.Unlock()
+	if rec := post(); rec.Code != http.StatusConflict {
+		t.Fatalf("running -> %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	// done 但安装器文件不存在 → 400
+	setUpdateJobDone(t, filepath.Join(os.Getenv("OK_HOME"), "update", "missing.exe"))
+	if rec := post(); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing file -> %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case <-done:
+		t.Fatal("校验失败不应进入升级序列")
+	default:
+	}
+	if len(*events) != 0 {
+		t.Fatalf("events = %v, want 空（升级序列不应启动）", *events)
 	}
 }
