@@ -72,6 +72,16 @@ func HasStoredCredential(dir, remoteURL, username string) bool {
 	return false
 }
 
+// StripURLAuth 去掉 remote URL 内嵌的 userinfo（无 userinfo/无法解析/file:// 原样返回）。
+func StripURLAuth(remoteURL string) string {
+	u, err := url.Parse(remoteURL)
+	if err != nil || u.Host == "" || u.User == nil {
+		return remoteURL
+	}
+	u.User = nil
+	return u.String()
+}
+
 // CredentialURLWithAuth 回退：把凭据嵌进 remote URL（无 helper 环境）。
 // token 经 url.PathEscape（UserPassword 内部处理转义）。
 // file:// 等无认证语义的 scheme 原样返回（嵌凭据会把 URL 搞坏，如 file://C:/...）。

@@ -1,7 +1,9 @@
 package gui
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -618,5 +621,178 @@ func TestProjectSyncStatusDirtySyncing(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"syncing":true`) {
 		t.Fatalf("syncing expected: %s", body)
+	}
+}
+
+// TestIsGitAuthFailure 认证失败识别（LC_ALL=C 下 git 文案稳定）：
+// "Authentication failed"=凭据无效/被吊销；"could not read Username"=无凭据且禁交互。
+func TestIsGitAuthFailure(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want bool
+	}{
+		{"git 退出码 1: remote: Verify fatal: Authentication failed for 'http://nas:3001/u/ok-x.git/'", true},
+		{"git 退出码 128: fatal: could not read Username for 'http://nas:3001/u/ok-x.git': terminal prompts disabled", true},
+		{"git 退出码 128: fatal: unable to connect to 192.168.3.16:3001: Connection refused", false},
+		{"git 退出码 1: error: failed to push some refs (non-fast-forward)", false},
+	}
+	for _, c := range cases {
+		if got := isGitAuthFailure(errors.New(c.msg)); got != c.want {
+			t.Errorf("isGitAuthFailure(%q) = %v, want %v", c.msg, got, c.want)
+		}
+	}
+	if isGitAuthFailure(nil) {
+		t.Error("nil must be false")
+	}
+}
+
+// TestApiProjectSyncCredentialHeal 同步遇 git 认证失败（服务端 token 被删/同名重发顶掉，
+// 本机仍持死凭据——HasStoredCredential 只认"有"不认"有效"）时自愈：
+// 自助重发 token、刷新凭据（无 helper 走 URL 内嵌）后重试一次。
+func TestApiProjectSyncCredentialHeal(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	// 隔离 git 全局/系统配置：无 credential helper → 愈后走 URL 内嵌回退
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "gitconfig-sys"))
+
+	// 假 Gitea：一律 401，记录 Authorization 头
+	var mu sync.Mutex
+	var auths []string
+	gitHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		auths = append(auths, r.Header.Get("Authorization"))
+		mu.Unlock()
+		// 须带 WWW-Authenticate 质询头，否则 curl 不会用 URL 内嵌凭据重试
+		w.Header().Set("WWW-Authenticate", `Basic realm="git"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer gitHTTP.Close()
+
+	// 假 okserver：git-token 重发计数
+	var tokCalls int
+	fake := fakeOKServer(t, "http://gitea/alice/ok-x.git", "", func(mux *http.ServeMux) {
+		mux.HandleFunc("POST /api/v1/git-token", func(w http.ResponseWriter, r *http.Request) {
+			tokCalls++
+			_ = json.NewEncoder(w).Encode(map[string]string{"git_token": "tok-new", "token_name": "ok-sync-r-x"})
+		})
+	})
+	defer fake.Close()
+
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	res, body := do(t, "POST", srv.URL+"/api/server/login", testToken, map[string]any{"url": fake.URL, "username": "alice", "password": "pw"})
+	if res != 200 {
+		t.Fatalf("login: %d %s", res, body)
+	}
+
+	// 项目：本地仓 + 401 远端 + sync 配置
+	name, dir := "healdemo", filepath.Join(t.TempDir(), "work")
+	mkProjectAt(t, okHome, name, dir)
+	st := stFor(t, okHome, name)
+	r := syncx.Open(st.Root)
+	if err := r.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(st.KnowledgeDir(), "k.md"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.CommitAll("init"); err != nil {
+		t.Fatal(err)
+	}
+	remoteURL := gitHTTP.URL + "/alice/ok-healdemo.git"
+	if err := r.SetRemote(remoteURL); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(st.ConfigPath(), []byte("[sync]\nenabled = true\nremote = \""+remoteURL+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, body = do(t, "POST", srv.URL+"/api/project/sync", testToken, map[string]any{"project": name})
+	if res != 200 {
+		t.Fatalf("sync: %d %s", res, body)
+	}
+	var out struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "error" {
+		t.Fatalf("假 Gitea 恒 401，最终仍应 error: %s", body)
+	}
+	if tokCalls != 1 {
+		t.Fatalf("认证失败应触发恰好一次 token 重发, got %d", tokCalls)
+	}
+	// 新 token 已内嵌 remote 并落盘
+	cfgData, _ := os.ReadFile(st.ConfigPath())
+	if !strings.Contains(string(cfgData), "alice:tok-new@") {
+		t.Fatalf("新 token 未内嵌 remote:\n%s", cfgData)
+	}
+	// 重试确实携带新凭据打了 git 远端
+	mu.Lock()
+	defer mu.Unlock()
+	want := "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:tok-new"))
+	found := false
+	for _, a := range auths {
+		if a == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("重试未携带新凭据: %v", auths)
+	}
+}
+
+// TestApiProjectSyncNoHealOnNetError 非认证类失败（网络不可达）不触发 token 重发。
+func TestApiProjectSyncNoHealOnNetError(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "gitconfig-sys"))
+
+	var tokCalls int
+	fake := fakeOKServer(t, "http://gitea/alice/ok-x.git", "", func(mux *http.ServeMux) {
+		mux.HandleFunc("POST /api/v1/git-token", func(w http.ResponseWriter, r *http.Request) {
+			tokCalls++
+			_ = json.NewEncoder(w).Encode(map[string]string{"git_token": "tok-new", "token_name": "ok-sync-r-x"})
+		})
+	})
+	defer fake.Close()
+
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	res, body := do(t, "POST", srv.URL+"/api/server/login", testToken, map[string]any{"url": fake.URL, "username": "alice", "password": "pw"})
+	if res != 200 {
+		t.Fatalf("login: %d %s", res, body)
+	}
+
+	name, dir := "neterrdemo", filepath.Join(t.TempDir(), "work")
+	mkProjectAt(t, okHome, name, dir)
+	st := stFor(t, okHome, name)
+	r := syncx.Open(st.Root)
+	if err := r.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(st.KnowledgeDir(), "k.md"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.CommitAll("init"); err != nil {
+		t.Fatal(err)
+	}
+	// 不可达远端（127.0.0.1:1 必 connection refused）
+	remoteURL := "http://127.0.0.1:1/alice/ok-x.git"
+	if err := r.SetRemote(remoteURL); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(st.ConfigPath(), []byte("[sync]\nenabled = true\nremote = \""+remoteURL+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, body = do(t, "POST", srv.URL+"/api/project/sync", testToken, map[string]any{"project": name})
+	if res != 200 {
+		t.Fatalf("sync: %d %s", res, body)
+	}
+	if tokCalls != 0 {
+		t.Fatalf("网络错误不应触发 token 重发, got %d", tokCalls)
 	}
 }

@@ -85,3 +85,17 @@ func TestCredentialURLWithAuth(t *testing.T) {
 		t.Fatalf("space must be escaped: %q", got)
 	}
 }
+
+func TestStripURLAuth(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"http://alice:tok-1@nas:3000/alice/ok-demo.git", "http://nas:3000/alice/ok-demo.git"},
+		{"http://alice@nas:3000/alice/ok-demo.git", "http://nas:3000/alice/ok-demo.git"},
+		{"http://nas:3000/alice/ok-demo.git", "http://nas:3000/alice/ok-demo.git"},
+		{"file:///tmp/bare", "file:///tmp/bare"},
+	}
+	for _, c := range cases {
+		if got := StripURLAuth(c.in); got != c.want {
+			t.Errorf("StripURLAuth(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

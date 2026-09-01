@@ -321,7 +321,7 @@ func (h *Handler) serveBindRepo(w http.ResponseWriter, r *http.Request, st *stor
 		writeErr(w, http.StatusInternalServerError, "同步配置写入失败："+err.Error())
 		return
 	}
-	o := syncx.SyncOnce(st.Root, syncCommitMsg())
+	o := h.syncOnceWithCredHeal(r.Context(), st)
 	syncx.RecordOutcome(st.Root, st.StateDir(), o)
 	msg := describeOutcome(o) + credNote
 	switch {

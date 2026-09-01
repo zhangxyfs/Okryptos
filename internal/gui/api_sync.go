@@ -111,6 +111,59 @@ func describeOutcome(o syncx.Outcome) string {
 	return strings.Join(parts, "，")
 }
 
+// isGitAuthFailure 判定同步失败是否 git 认证类（execGit 固定 LC_ALL=C，文案稳定）：
+// "Authentication failed"=凭据无效/被吊销；"could not read Username"=无凭据且禁交互。
+func isGitAuthFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "Authentication failed") || strings.Contains(s, "could not read Username")
+}
+
+// syncOnceWithCredHeal 同步一次；遇 git 认证失败时自助重发 token、刷新凭据后重试一次。
+// 根因（2026-09-01 Linux 实证）：HasStoredCredential 只认"helper 有记录"不认"凭据仍
+// 有效"——服务端 token 被删除/改密码/同名重发顶掉后，重新拉取因"有记录"跳过重发，
+// git 持死凭据推送永久失败。这里在认证失败点兜底自愈。重发失败（旧服务端 404 等）
+// 或非认证类失败时原样返回首次结果。
+func (h *Handler) syncOnceWithCredHeal(ctx context.Context, st *store.Store) syncx.Outcome {
+	o := syncx.SyncOnce(st.Root, syncCommitMsg())
+	if o.Err == nil || !isGitAuthFailure(o.Err) {
+		return o
+	}
+	c, cfgServer, err := h.serverClient()
+	if err != nil || c == nil {
+		return o
+	}
+	cfg, cfgErr := config.LoadMerged(st.ConfigPath(), "")
+	if cfgErr != nil || cfg.Sync.Remote == "" {
+		return o
+	}
+	host, _ := os.Hostname()
+	tok, terr := c.GitToken(ctx, host)
+	if terr != nil {
+		return o
+	}
+	clean := syncx.StripURLAuth(cfg.Sync.Remote)
+	remote := clean
+	if cerr := syncx.StoreCredential(st.Root, clean, cfgServer.Username, tok); cerr != nil {
+		if !errors.Is(cerr, syncx.ErrNoCredentialHelper) {
+			return o
+		}
+		remote = syncx.CredentialURLWithAuth(clean, cfgServer.Username, tok)
+	}
+	if remote != cfg.Sync.Remote {
+		repo := syncx.Open(st.Root)
+		if err := repo.SetRemote(remote); err != nil {
+			return o
+		}
+		if err := config.SetSync(st.ConfigPath(), config.Sync{Enabled: cfg.Sync.Enabled, Remote: remote, AutoIntervalMin: cfg.Sync.AutoIntervalMin}); err != nil {
+			return o
+		}
+	}
+	return syncx.SyncOnce(st.Root, syncCommitMsg())
+}
+
 // apiProjectSync 触发一次同步；未 init 且带 remote 则先走三情形初始化（§14）。
 func (h *Handler) apiProjectSync(w http.ResponseWriter, r *http.Request) {
 	var req syncRequest
@@ -143,7 +196,7 @@ func (h *Handler) apiProjectSync(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	o := syncx.SyncOnce(st.Root, syncCommitMsg())
+	o := h.syncOnceWithCredHeal(r.Context(), st)
 	syncx.RecordOutcome(st.Root, st.StateDir(), o)
 	switch {
 	case o.Err != nil:
