@@ -76,6 +76,8 @@ button { font:inherit; color:inherit; }
 .side.collapsed .mi .tip { position:fixed; margin-left:46px; margin-top:-30px; background:#111827; color:#fff;
                            font-size:12px; padding:3px 10px; border-radius:4px; white-space:nowrap; z-index:50; }
 .side.collapsed .mi:hover .tip { display:block; }
+/* 有新版本且未跳过：misc 菜单项尾部红点 */
+.nav-dot { width:6px; height:6px; border-radius:50%; background:#e5484d; display:inline-block; margin-left:6px; vertical-align:middle; }
 /* 终端最小化的恢复按钮：沉底（margin-top:auto）+ 顶部分隔线，与其他选项卡拉开距离 */
 .term-restore { margin-top:auto; border-top:1px solid var(--border); border-radius:0 0 6px 6px; padding-top:12px; }
 .side.collapsed .term-restore { padding-top:9px; }

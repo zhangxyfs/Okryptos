@@ -139,7 +139,7 @@ const I18N = {
     xDelPartial:"项目已注销，但{w}，请手动清理 {d}",
     xAbout:"关于", xVer:"版本", xHome:"数据目录", xProjCount:"已注册项目", xProjUnit:" 个",
     xLoadFail:"数据加载失败：",
-    uVerCard:"版本升级", uVerCur:"当前版本", uVerLatest:"最新版本", uVerCheck:"检查更新",
+    uVerCard:"版本升级", uVerDesc:"检查新版本并一键升级", uVerCur:"当前版本", uVerLatest:"最新版本", uVerCheck:"检查更新",
     uVerNone:"已是最新", uVerNew:"发现新版本", uVerUpgrade:"立即升级", uVerSkip:"跳过此版本",
     uVerLater:"知道了", uVerDl:"下载中", uVerInstalling:"正在安装，程序将自动重启…",
     uVerLinuxHint:"请下载对应包手动升级",
@@ -360,7 +360,7 @@ const I18N = {
     xDelPartial:"Project unregistered, but {w}; please remove {d} manually",
     xAbout:"About", xVer:"Version", xHome:"Data dir", xProjCount:"Registered projects", xProjUnit:"",
     xLoadFail:"Failed to load data: ",
-    uVerCard:"Version Update", uVerCur:"Current", uVerLatest:"Latest", uVerCheck:"Check for Updates",
+    uVerCard:"Version Update", uVerDesc:"Check for new versions and upgrade in one click", uVerCur:"Current", uVerLatest:"Latest", uVerCheck:"Check for Updates",
     uVerNone:"Up to date", uVerNew:"New version available", uVerUpgrade:"Upgrade Now", uVerSkip:"Skip This Version",
     uVerLater:"Got It", uVerDl:"Downloading", uVerInstalling:"Installing, app will restart…",
     uVerLinuxHint:"Download the package to upgrade manually",
@@ -4991,6 +4991,7 @@ function refreshMisc(){
   // update/check 失败静默（fail-open 端点本身也几乎不报错）：不影响主数据展示
   Promise.all([api("/api/projects"), api("/api/status"), api("/api/update/check").catch(()=>null)]).then(([ps, st, uc])=>{
     MISC = { projects: ps || [], status: st || null, update: uc || null };
+    if(uc) UPD = uc;   // 侧栏红点共用最近一次检查结果
   }).catch(err=>{
     MISC = { projects: [], status: null, update: null, loadErr: err.message };
   }).then(()=>menuRender("misc", ()=>!miscDoc && !delTarget));
@@ -5153,6 +5154,7 @@ function renderMisc(){
   {
     const c = el("div","pcard");
     c.appendChild(Object.assign(el("h3"),{textContent:t("uVerCard")}));
+    c.appendChild(Object.assign(el("div","pdesc"),{textContent:t("uVerDesc")}));
     const u = MISC.update;   // /api/update/check 结果（null=未返回/拉取失败）
     const cur = st ? st.app_version : "";
     const r = el("div","prow"); r.style.margin = "0";
@@ -5181,6 +5183,7 @@ function renderMisc(){
     chk.onclick = ()=>{
       api("/api/update/check").then(d=>{
         MISC.update = d || null;
+        if(d) UPD = d;   // 侧栏红点随手动检查刷新
         if(d && d.update_available) render();   // 出现升级入口/新内容，直接重渲
         else flashMiscFb("upd", t("uVerNone"));
       }).catch(err=>{
@@ -5345,6 +5348,8 @@ function updHandle(flow, snap){
       .catch(err=>updFail(flow, err.message));   // 成功无需再画：okd 随即自退，安装提示已定格
   } else if(snap.state==="error"){
     updFail(flow, snap.err || "download error");
+  } else {
+    updFail(flow, "unknown state: "+snap.state);   // 未知快照状态兜底，防弹窗卡死
   }
 }
 // 1s 轮询下载快照（照 embPoll：只重画状态条不整页重渲）；连续 5 次拉取失败定格错误
@@ -5376,6 +5381,16 @@ function updFail(flow, msg){
    启动时拉 /api/changelog：pending 非空 → 弹更新日志（API 升序 → 展示翻转为降序，版本间 <hr>）。
    弹窗挂 document.body、不进 render() 周期——任何菜单页启动都会弹且不被页面重渲打掉。
    仅升级弹窗关闭时 POST /api/changelog/seen；其他页「查看」入口只读 all，不影响 seen 状态。 */
+/* 启动弹窗串行队列：changelog 首弹与客户端新版本弹窗（checkClientUpdate）排队依次展示，
+   关一个出下一个，防双弹窗同时糊屏。 */
+const startModals = [];
+let startModalOpen = false;
+function queueStartModal(open){
+  startModals.push(open);
+  if(startModalOpen) return;
+  startModalOpen = true;
+  startModals.shift()(()=>{ startModalOpen = false; if(startModals.length) queueStartModal(startModals.shift()); });
+}
 function checkUpgrade(){
   api("/api/changelog").then(c=>{
     const p = c && c.pending;
@@ -5384,10 +5399,10 @@ function checkUpgrade(){
     const title = p.length>1
       ? t("upTitleN").replace("{v}",latest).replace("{n}",p.length)
       : t("upTitle1").replace("{v}",latest);
-    openUpgradeModal(title, p);
+    queueStartModal(done=>openUpgradeModal(title, p, done));
   }).catch(()=>{ /* 拉取失败不阻断主界面（旧语义） */ });
 }
-function openUpgradeModal(title, entries){
+function openUpgradeModal(title, entries, onClose){
   const mask = el("div","mask");
   const m = el("div","modal");
   m.appendChild(Object.assign(el("h3"),{textContent:title}));
@@ -5400,6 +5415,7 @@ function openUpgradeModal(title, entries){
   const close = ()=>{
     if(closed) return; closed = true;
     mask.remove();
+    if(onClose) onClose();
     // seen 失败则下次启动再弹，自行愈合，不打扰本次使用
     api("/api/changelog/seen", { method:"POST" }).catch(()=>{});
   };
@@ -5408,6 +5424,58 @@ function openUpgradeModal(title, entries){
   m.appendChild(foot);
   mask.appendChild(m);
   mask.onclick = e=>{ if(e.target===mask) close(); };
+  document.body.appendChild(mask);
+}
+
+/* ================= 启动客户端版本检查（新版本弹窗 + 侧栏红点） =================
+   启动时拉 /api/update/check（服务端 6h 缓存，fail-open）：update_available 且最新版未被
+   跳过 → 三按钮弹窗（立即升级 / 跳过此版本 / 知道了），走 startModals 队列不与其他启动
+   弹窗叠屏。UPD 缓存最近一次检查结果，侧栏 misc 红点与「知道了/跳过」后的刷新都读它。 */
+let UPD = null;   // 最近一次 /api/update/check 结果（含 skipped_version 透传）
+// 红点/弹窗共用判定：有可用更新且最新版未被跳过
+function updAvailable(){ return !!(UPD && UPD.update_available && UPD.latest && UPD.latest !== UPD.skipped_version); }
+function checkClientUpdate(){
+  api("/api/update/check").then(u=>{
+    if(!u) return;
+    UPD = u;
+    if(!updAvailable()) return;
+    render();   // 侧栏红点
+    queueStartModal(done=>openUpdatePrompt(u, done));
+  }).catch(()=>{ /* fail-open：检查失败不打扰启动 */ });
+}
+/* 新版本启动弹窗（仿 openUpgradeModal，挂 document.body 不进 render 周期）：
+   立即升级 → 跳 misc 页 + 复用 openUpdModal 下载流程（无安装器资产的 Linux 只跳页，
+   卡片上给手动包链接）；跳过此版本 → POST /api/update/skip 后关窗刷红点；知道了 → 关窗。 */
+function openUpdatePrompt(u, onClose){
+  const mask = el("div","mask");
+  const m = el("div","modal");
+  m.appendChild(Object.assign(el("h3"),{textContent:t("uVerNew")+"：v"+u.latest}));
+  const body = el("div","md");
+  body.innerHTML = renderMd(u.body || "");
+  m.appendChild(body);
+  const foot = el("div","mfoot");
+  const later = el("button","btn"); later.textContent = t("uVerLater");
+  const skip = el("button","btn"); skip.textContent = t("uVerSkip");
+  const up = el("button","btn btn-primary"); up.textContent = t("uVerUpgrade");
+  foot.appendChild(later); foot.appendChild(skip); foot.appendChild(up);
+  m.appendChild(foot);
+  mask.appendChild(m);
+  let closed = false;
+  const close = ()=>{ if(closed) return; closed = true; mask.remove(); if(onClose) onClose(); };
+  later.onclick = close;
+  mask.onclick = e=>{ if(e.target===mask) close(); };
+  skip.onclick = ()=>{
+    skip.disabled = true;
+    api("/api/update/skip", { method:"POST", body:{ version:u.latest } }).then(()=>{
+      UPD = Object.assign({}, u, { skipped_version:u.latest });
+      render();   // 红点随 skipped 消失
+    }).catch(()=>{ /* 写失败：下次启动再弹，自行愈合 */ }).then(close);
+  };
+  up.onclick = ()=>{
+    close();
+    state.menu = "misc"; location.hash = "misc"; render();
+    if(u.installer_url) openUpdModal(u);
+  };
   document.body.appendChild(mask);
 }
 
@@ -5560,6 +5628,7 @@ function renderBody(app){
     const b = el("button","mi"+(state.menu===m.key?" active":""));
     b.innerHTML = '<span class="ico">'+m.ico+'</span><span class="txt">'+t(m.key)+'</span>'
                 + '<span class="tip">'+t(m.key)+'</span>';
+    if(m.key==="misc" && updAvailable()) b.innerHTML += '<span class="nav-dot"></span>';   // 有未跳过的新版本：侧栏红点
     b.onclick = ()=>{
       exitEdit();
       state.syncConflict=null; state.merge=null; CF.project="";   // 冲突/合并子页逃生口：点侧栏即退出，防分发链弹回死局；CF 缓存一并清——重进以仓态为准，消"缓存态重进"困惑
@@ -6589,9 +6658,11 @@ render();
 /* 启动横切（旧 GUI 语义，Task 8 核对清单 1/6）：
    1. 无项目 → 落 setup 引导页（旧：无项目隐藏管理 tab 只展示引导页；新 UI 树对空数据健壮，
       只落页不隐藏菜单，覆盖 hash 恢复——首次运行的引导意图优先）
-   2. 升级后首次打开自动弹更新日志（pending 非空 → 弹窗，关闭时 POST seen） */
+   2. 升级后首次打开自动弹更新日志（pending 非空 → 弹窗，关闭时 POST seen）
+   3. 客户端版本检查：有未跳过的新版本 → 三按钮弹窗 + 侧栏红点（与 2 共用串行队列） */
 api("/api/projects").then(ps=>{
   if(ps && ps.length) return;
   state.menu = "setup"; location.hash = "setup"; render();
 }).catch(()=>{ /* 拉取失败保持 hash/默认页，不阻断 */ });
 checkUpgrade();
+checkClientUpdate();
