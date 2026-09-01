@@ -224,6 +224,11 @@ const I18N = {
     srvAutoBindDone:"已自动绑定 {n} 个项目", srvAutoBindFail:"，失败：",
     srvPullable:"服务器仓（本机未拉取）", srvPull:"拉取", srvPullAll:"全部拉取", srvPulling:"拉取中…",
     srvPullDone:"已拉取 {n} 个项目到本机", srvPullFail:"，失败：",
+    srvUnlinked:"未关联目录", srvAttach:"关联目录", srvAttaching:"关联中…",
+    srvAttachPrompt:"为项目 {n} 登记工作目录的绝对路径（目录须已存在；目录名可与项目名不同）：",
+    srvAttachPh:"如 /home/you/develop/foo 或 D:\\develop\\foo",
+    srvAttachOneDone:"已关联目录", srvAttachDone:"已关联 {n} 个项目", srvAttachFail:"，失败：",
+    srvAttachAll:"一键关联", srvAttachAllPrompt:"为每个项目填工作目录绝对路径（留空跳过）：",
     srvAutoBindConfirm2:"服务器上有 {n} 个本机尚未拉取的项目仓：{l}\n\n是否现在拉取到本机？（注册同名项目并克隆全部知识条目）",
     srvMyOrgs:"我的组织", srvMyOrgsDesc:"只读（本期）；成员与团队仓由管理员维护。", srvNoOrg:"未加入任何组织。",
     srvName:"名称",
@@ -429,6 +434,11 @@ const I18N = {
     srvAutoBindDone:"Auto-bound {n} project(s)", srvAutoBindFail:", failed: ",
     srvPullable:"Server repos (not on this machine)", srvPull:"Pull", srvPullAll:"Pull all", srvPulling:"Pulling…",
     srvPullDone:"Pulled {n} projects to this machine", srvPullFail:", failed: ",
+    srvUnlinked:"No workdir linked", srvAttach:"Link dir", srvAttaching:"Linking…",
+    srvAttachPrompt:"Register the absolute working-directory path for project {n} (directory must exist; its name may differ from the project name):",
+    srvAttachPh:"e.g. /home/you/develop/foo or D:\\develop\\foo",
+    srvAttachOneDone:"Directory linked", srvAttachDone:"Linked {n} projects", srvAttachFail:", failed: ",
+    srvAttachAll:"Link all", srvAttachAllPrompt:"Fill in the working-directory absolute path for each project (leave blank to skip):",
     srvAutoBindConfirm2:"The server has {n} project repos not on this machine: {l}\n\nPull them now? (registers same-named projects and clones all entries)",
     srvMyOrgs:"My organizations", srvMyOrgsDesc:"Read-only (this release); membership and team repos are admin-managed.", srvNoOrg:"No organization.",
     srvName:"Name",
@@ -6048,10 +6058,14 @@ function bindCard(){
   tb.innerHTML = '<tr><th>'+t("srvProject")+'</th><th>'+t("srvStatus")+'</th><th style="text-align:right">'+t("srvActions")+'</th></tr>';
   (SRV.projects || []).forEach(p=>{
     const bound = p.sync && p.sync.is_repo;
+    const linked = (p.paths || []).length > 0;
     const tr = el("tr","");
     const td1 = el("td",""); td1.innerHTML = '<b>'+esc(p.name)+'</b>';
     const td2 = el("td","");
-    td2.innerHTML = bound ? '<span class="chip on">'+t("srvBound")+'</span>' : '<span class="chip off">'+t("srvNotCreated")+'</span>';
+    // 壳项目（服务器拉取/备份恢复，paths 空）不算已绑定——hooks 按 paths 匹配 cwd，空壳 hooks 全失效
+    td2.innerHTML = bound
+      ? (linked ? '<span class="chip on">'+t("srvBound")+'</span>' : '<span class="chip off">'+t("srvUnlinked")+'</span>')
+      : '<span class="chip off">'+t("srvNotCreated")+'</span>';
     const td3 = el("td",""); td3.style.textAlign = "right";
     // syncStatusJSON 无 remote 字段（恒 undefined）——已绑定态不再显示远端地址 span
     if(!bound){
@@ -6059,6 +6073,12 @@ function bindCard(){
       btn.textContent = SRV.bindBusy[p.name] ? t("srvBinding") : t("srvBind");
       btn.disabled = !!SRV.bindBusy[p.name];
       btn.onclick = ()=>srvBind(p.name);
+      td3.appendChild(btn);
+    } else if(!linked){
+      const btn = el("button","btn btn-primary");
+      btn.textContent = SRV.bindBusy[p.name] ? t("srvAttaching") : t("srvAttach");
+      btn.disabled = !!SRV.bindBusy[p.name];
+      btn.onclick = ()=>srvAttachOne(p.name);
       td3.appendChild(btn);
     }
     tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
@@ -6114,6 +6134,20 @@ async function srvPull(project){
   try{
     const r = await api("/api/server/pull", { method:"POST", body:{ project: project }, skip401Reload:true });
     toast(r.message || t("srvPullDone").replace("{n}", 1), r.status === "error");
+    SRV.projects = null; loadServerRoleData(); refreshManage();
+  }catch(err){ toast(err.message, true); }
+  SRV.bindBusy[project] = false;
+  if(state.menu === "server") render();
+}
+
+/* 壳项目关联工作目录：uiPrompt 收绝对路径 → attach 端点（hooks 即时恢复，无需重启） */
+async function srvAttachOne(project){
+  const dir = await uiPrompt(t("srvAttachPrompt").replace("{n}", project), t("srvAttachPh"));
+  if(!dir) return;
+  SRV.bindBusy[project] = true; render();
+  try{
+    await api("/api/project/attach", { method:"POST", body:{ project: project, path: dir }, skip401Reload:true });
+    toast(t("srvAttachOneDone"));
     SRV.projects = null; loadServerRoleData(); refreshManage();
   }catch(err){ toast(err.message, true); }
   SRV.bindBusy[project] = false;
