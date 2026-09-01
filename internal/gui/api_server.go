@@ -272,7 +272,7 @@ func (h *Handler) serveBindRepo(w http.ResponseWriter, r *http.Request, st *stor
 	gitToken := pr.GitToken
 	if gitToken == "" && !syncx.HasStoredCredential(st.Root, pr.Repo.CloneURL, cfgServer.Username) {
 		host, _ := os.Hostname()
-		tok, terr := c.GitToken(r.Context(), host)
+		tok, _, terr := c.GitToken(r.Context(), host)
 		if terr != nil {
 			var se *serverx.Error
 			if errors.As(terr, &se) && se.Code == http.StatusNotFound {

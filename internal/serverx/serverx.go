@@ -188,16 +188,17 @@ func (c *Client) ChangePassword(ctx context.Context, oldPassword, newPassword st
 }
 
 // GitToken 自助重发 git token（okserver v2.25 起；旧服务端返回 404 *Error，
-// 调用方据此提示升级服务端或回退旧文案）。
-// nameHint 一般是本机 hostname——服务端按 ok-sync-r-<hint> 分名，多机互不吊销。
-func (c *Client) GitToken(ctx context.Context, nameHint string) (string, error) {
+// 调用方据此提示升级）。nameHint 一般是本机 hostname——服务端按 ok-sync-r-<hint>
+// 分名，多机互不吊销。返回明文 token 与凭证名（token_name 回显）。
+func (c *Client) GitToken(ctx context.Context, nameHint string) (token, tokenName string, err error) {
 	var out struct {
-		GitToken string `json:"git_token"`
+		GitToken  string `json:"git_token"`
+		TokenName string `json:"token_name"`
 	}
 	if err := c.call(ctx, "POST", "/git-token", map[string]string{"name_hint": nameHint}, &out); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return out.GitToken, nil
+	return out.GitToken, out.TokenName, nil
 }
 
 // TokenInfo 与 oksrv 契约同形状（updated_at 即最近使用，可能为零值时间串）。

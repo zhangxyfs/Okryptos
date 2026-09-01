@@ -140,7 +140,7 @@ func (h *Handler) syncOnceWithCredHeal(ctx context.Context, st *store.Store) syn
 		return o
 	}
 	host, _ := os.Hostname()
-	tok, terr := c.GitToken(ctx, host)
+	tok, _, terr := c.GitToken(ctx, host)
 	if terr != nil {
 		return o
 	}

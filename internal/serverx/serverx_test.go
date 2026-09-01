@@ -76,6 +76,23 @@ func fakeOKServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
+// TestGitTokenReturnsName 凭证统一：重发响应回显 token_name（清理按钮保本机用）。
+func TestGitTokenReturnsName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/git-token" || r.Method != "POST" {
+			w.WriteHeader(404)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"git_token": "tok-x", "token_name": "ok-sync-r-H1"})
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "tok")
+	tok, name, err := c.GitToken(context.Background(), "H1")
+	if err != nil || tok != "tok-x" || name != "ok-sync-r-H1" {
+		t.Fatalf("GitToken: %v %q %q", err, tok, name)
+	}
+}
+
 func TestClientFlow(t *testing.T) {
 	srv := fakeOKServer(t)
 	defer srv.Close()
