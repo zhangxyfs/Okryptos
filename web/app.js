@@ -5687,7 +5687,7 @@ function renderBody(app){
 }
 
 /* ================= 服务器页（P1-C2，§10，定稿原型变体 B：stepper 三步向导） ================= */
-const SRV = { loaded:false, url:"", username:"", loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, projects:null, tokens:null, adminTokens:null, wizardStep:null, bindBusy:{}, pwdModalOpen:false };
+const SRV = { loaded:false, url:"", username:"", loggedIn:false, user:null, users:null, orgs:null, repos:null, audit:null, projects:null, tokens:null, adminTokens:null, wizardStep:null, bindBusy:{}, pwdModalOpen:false, appVer:"" };
 
 /* 数据装载：进页面拉配置；已登录则拉 me；按角色惰性拉管理/成员数据 */
 function loadServer(){
@@ -5702,6 +5702,11 @@ function loadServer(){
         if(state.menu === "server" && !state.syncConflict && !state.merge) render();
       }).catch(()=>{});
     }
+    // 客户端版本（顶部升级提示 chip 用，与 misc 版本卡同一来源：/api/status 的 app_version）
+    api("/api/status", { skip401Reload:true }).then(st=>{
+      SRV.appVer = (st && st.app_version) || "";
+      if(state.menu === "server" && !state.syncConflict && !state.merge) render();
+    }).catch(()=>{});
     if(SRV.loggedIn){
       return api("/api/server/me", { skip401Reload:true }).then(me=>{
         SRV.user = me;
@@ -5761,6 +5766,16 @@ function renderServer(){
   head.style.cssText = "display:flex;align-items:baseline;gap:12px";
   const bt = el("div","bigtitle"); bt.textContent = titles[cur];
   head.appendChild(bt);
+  // 服务端版本严格高于客户端时顶部提示 chip（沿用 chip on 样式），点击跳 misc 页版本卡
+  const appV = verParse(SRV.appVer), srvV = verParse(SRV.srvVer);
+  if(appV && srvV && verLess(appV, srvV)){
+    const chip = el("span","chip on");
+    chip.textContent = t("uSrvNewer").replace("{v}", SRV.srvVer);
+    chip.style.cursor = "pointer";
+    chip.title = t("uVerCard");
+    chip.onclick = ()=>{ state.menu = "misc"; location.hash = "misc"; render(); };
+    head.appendChild(chip);
+  }
   if(cur !== realCur){
     const back = el("button","btn"); back.textContent = t("srvBackCur"); back.style.marginLeft="auto";
     back.onclick = ()=>{ SRV.wizardStep = null; render(); };
