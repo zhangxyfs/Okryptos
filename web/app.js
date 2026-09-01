@@ -229,6 +229,9 @@ const I18N = {
     srvAttachPh:"如 /home/you/develop/foo 或 D:\\develop\\foo",
     srvAttachOneDone:"已关联目录", srvAttachDone:"已关联 {n} 个项目", srvAttachFail:"，失败：",
     srvAttachAll:"一键关联", srvAttachAllPrompt:"为每个项目填工作目录绝对路径（留空跳过）：",
+    srvPathsBtn:"目录", srvDetach:"解除", srvDetachDone:"已解除关联",
+    srvPathsTitle:"项目 {n} 已关联的工作目录（解除不影响知识库数据；全部解除后项目回到「未关联目录」状态）：",
+    srvDetachConfirm:"解除项目 {n} 与该目录的关联？\n{p}",
     srvAutoBindConfirm2:"服务器上有 {n} 个本机尚未拉取的项目仓：{l}\n\n是否现在拉取到本机？（注册同名项目并克隆全部知识条目）",
     srvMyOrgs:"我的组织", srvMyOrgsDesc:"只读（本期）；成员与团队仓由管理员维护。", srvNoOrg:"未加入任何组织。",
     srvName:"名称",
@@ -439,6 +442,9 @@ const I18N = {
     srvAttachPh:"e.g. /home/you/develop/foo or D:\\develop\\foo",
     srvAttachOneDone:"Directory linked", srvAttachDone:"Linked {n} projects", srvAttachFail:", failed: ",
     srvAttachAll:"Link all", srvAttachAllPrompt:"Fill in the working-directory absolute path for each project (leave blank to skip):",
+    srvPathsBtn:"Dirs", srvDetach:"Unlink", srvDetachDone:"Unlinked",
+    srvPathsTitle:"Working directories linked to project {n} (unlinking does not touch knowledge data; unlinking all returns the project to 'No workdir linked'):",
+    srvDetachConfirm:"Unlink this directory from project {n}?\n{p}",
     srvAutoBindConfirm2:"The server has {n} project repos not on this machine: {l}\n\nPull them now? (registers same-named projects and clones all entries)",
     srvMyOrgs:"My organizations", srvMyOrgsDesc:"Read-only (this release); membership and team repos are admin-managed.", srvNoOrg:"No organization.",
     srvName:"Name",
@@ -6080,6 +6086,12 @@ function bindCard(){
       btn.disabled = !!SRV.bindBusy[p.name];
       btn.onclick = ()=>srvAttachOne(p.name);
       td3.appendChild(btn);
+    } else {
+      // 已绑定：目录管理入口（逐条解除——挂错目录的撤销）
+      const btn = el("button","btn");
+      btn.textContent = t("srvPathsBtn");
+      btn.onclick = ()=>srvPathsModal(p.name);
+      td3.appendChild(btn);
     }
     tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
     tb.appendChild(tr);
@@ -6159,6 +6171,46 @@ async function srvAttachOne(project){
   }catch(err){ toast(err.message, true); }
   SRV.bindBusy[project] = false;
   if(state.menu === "server") render();
+}
+
+/* 已关联目录管理（「目录」按钮入口）：列出 paths 逐条解除——挂错目录的撤销入口。
+   解除不动知识库数据；最后一条解除后项目回到「未关联目录」壳状态（hooks 现读注册表即时生效）。 */
+function srvPathsModal(project){
+  const proj = (SRV.projects||[]).find(x=>x.name===project);
+  const paths = (proj && proj.paths) || [];
+  const mask = el("div","mask");
+  const m = el("div","modal"); m.style.width = "560px";
+  const msg = el("div","pdesc"); msg.textContent = t("srvPathsTitle").replace("{n}", project); m.appendChild(msg);
+  const list = el("div",""); m.appendChild(list);
+  const finish = ()=>{ document.removeEventListener("keydown", onKey, true); mask.remove(); if(state.menu === "server") render(); };
+  paths.forEach(p=>{
+    const row = el("div","prow"); row.style.marginTop = "8px";
+    const k = el("span","k"); k.textContent = p; k.style.wordBreak = "break-all"; k.style.flex = "1"; row.appendChild(k);
+    const btn = el("button","btn"); btn.textContent = t("srvDetach"); btn.style.marginLeft = "10px";
+    btn.onclick = async ()=>{
+      if(!await uiConfirm(t("srvDetachConfirm").replace("{n}", project).replace("{p}", p), true)) return;
+      btn.disabled = true;
+      try{
+        const r = await api("/api/project/detach", { method:"POST", body:{ project: project, path: p }, skip401Reload:true });
+        toast(t("srvDetachDone"));
+        row.remove();
+        const remaining = (r && r.paths) || [];
+        if(proj) proj.paths = remaining;
+        if(!remaining.length){ finish(); }
+        SRV.projects = null; loadServerRoleData(); refreshManage();
+      }catch(err){ toast(err.message, true); btn.disabled = false; }
+    };
+    row.appendChild(btn);
+    list.appendChild(row);
+  });
+  const foot = el("div","mfoot"); foot.style.marginTop = "14px";
+  const no = el("button","btn"); no.textContent = t("fCancel"); no.onclick = finish;
+  foot.appendChild(no); m.appendChild(foot);
+  mask.appendChild(m);
+  mask.onclick = ev=>{ if(ev.target===mask) finish(); };
+  const onKey = ev=>{ if(ev.key === "Escape"){ ev.stopPropagation(); finish(); } };
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(mask);
 }
 
 /* 一键关联：一个 modal 列出全部壳项目，每行一个路径输入框，留空跳过 */

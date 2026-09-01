@@ -180,6 +180,28 @@ func (r *Registry) AddPath(name, path string) error {
 	return nil
 }
 
+// RemovePath 从项目 Paths 解除一个工作目录关联（AddPath 的对偶——挂错目录的
+// 撤销入口）。锁由调用方（Update）持有；规范化相等匹配；路径不在该项目下
+// 幂等 nil；项目未知 → ErrProjectNotFound。最后一条解除后项目回到空 Paths
+// 壳状态（项目本身保留，知识库数据不动）。持久化由 Update/Save 负责。
+func (r *Registry) RemovePath(name, path string) error {
+	npath := NormalizePath(path)
+	for i := range r.Projects {
+		p := &r.Projects[i]
+		if p.Name != name {
+			continue
+		}
+		for j, ep := range p.Paths {
+			if NormalizePath(ep) == npath {
+				p.Paths = append(p.Paths[:j], p.Paths[j+1:]...)
+				return nil
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("%w: %q", ErrProjectNotFound, name)
+}
+
 // ValidProjectName 校验项目名形状：必须是不含路径分隔符与盘符的基本名，
 // 且不是 Windows 保留设备名/尾部带点或空格的名字。项目名会被拼进
 // projects/<name>/ 目录路径，穿越段（../、绝对路径、C: 盘符）与 NTFS 上

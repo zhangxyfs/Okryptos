@@ -2323,3 +2323,58 @@ func TestApiProjectAttach(t *testing.T) {
 		t.Fatalf("conflict: %d", res)
 	}
 }
+
+func TestApiProjectDetach(t *testing.T) {
+	h, _, _ := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	// 挂了两条路径的项目，其中一条指向已不存在的目录（解绑不许做存在性校验——
+	// 目录已删正是常见解绑场景）
+	gone := filepath.Join(t.TempDir(), "deleted")
+	reg := &registry.Registry{Projects: []registry.Project{
+		{Name: "ok", Paths: []string{t.TempDir(), gone}},
+	}}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	// 解除已删除目录的关联 → 200，注册表落盘
+	res, body := do(t, "POST", srv.URL+"/api/project/detach", testToken, map[string]any{"project": "ok", "path": gone})
+	if res != 200 {
+		t.Fatalf("detach: %d %s", res, body)
+	}
+	loaded, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Projects[0].Paths) != 1 {
+		t.Fatalf("detach should persist: %+v", loaded.Projects[0].Paths)
+	}
+	// 幂等：路径不在项目下仍 200
+	res, body = do(t, "POST", srv.URL+"/api/project/detach", testToken, map[string]any{"project": "ok", "path": gone})
+	if res != 200 {
+		t.Fatalf("re-detach: %d %s", res, body)
+	}
+	// 解除最后一条 → 200 且回到空壳（项目保留）
+	res, body = do(t, "POST", srv.URL+"/api/project/detach", testToken, map[string]any{"project": "ok", "path": loaded.Projects[0].Paths[0]})
+	if res != 200 {
+		t.Fatalf("detach last: %d %s", res, body)
+	}
+	if !strings.Contains(string(body), `"paths":[]`) && !strings.Contains(string(body), `"paths":null`) {
+		t.Fatalf("expected empty paths in response: %s", body)
+	}
+	loaded, _ = registry.Load(registry.DefaultPath())
+	if len(loaded.Projects) != 1 || len(loaded.Projects[0].Paths) != 0 {
+		t.Fatalf("project should survive as empty shell: %+v", loaded.Projects)
+	}
+
+	// 404 未知项目 / 400 空路径
+	res, _ = do(t, "POST", srv.URL+"/api/project/detach", testToken, map[string]any{"project": "nope", "path": gone})
+	if res != 404 {
+		t.Fatalf("unknown project: %d", res)
+	}
+	res, _ = do(t, "POST", srv.URL+"/api/project/detach", testToken, map[string]any{"project": "ok", "path": ""})
+	if res != 400 {
+		t.Fatalf("empty path: %d", res)
+	}
+}

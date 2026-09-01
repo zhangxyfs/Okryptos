@@ -240,3 +240,34 @@ func TestAddPath(t *testing.T) {
 		t.Fatalf("expected ErrProjectNotFound, got %v", err)
 	}
 }
+
+func TestRemovePath(t *testing.T) {
+	r := &Registry{Projects: []Project{
+		{Name: "ok", Paths: []string{`D:\develop\OpenKnowledge`, `D:\wrong\dir`}},
+	}}
+	// 解除成功（规范化相等：尾分隔符差异也命中）
+	if err := r.RemovePath("ok", `D:\wrong\dir\`); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Projects[0].Paths) != 1 || r.Projects[0].Paths[0] != `D:\develop\OpenKnowledge` {
+		t.Fatalf("unexpected paths %+v", r.Projects[0].Paths)
+	}
+	// 幂等：路径不在该项目下 → nil，不动其他路径
+	if err := r.RemovePath("ok", `D:\not\there`); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Projects[0].Paths) != 1 {
+		t.Fatalf("idempotent remove should keep paths: %+v", r.Projects[0].Paths)
+	}
+	// 解除最后一条 → 回到空壳（项目保留）
+	if err := r.RemovePath("ok", `D:\develop\OpenKnowledge`); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Projects[0].Paths) != 0 {
+		t.Fatalf("expected empty paths: %+v", r.Projects[0].Paths)
+	}
+	// 未知项目
+	if err := r.RemovePath("nope", `D:\x`); !errors.Is(err, ErrProjectNotFound) {
+		t.Fatalf("expected ErrProjectNotFound, got %v", err)
+	}
+}

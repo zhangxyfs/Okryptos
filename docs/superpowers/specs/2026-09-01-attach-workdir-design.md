@@ -64,6 +64,12 @@ func (r *Registry) AddPath(name, path string) error
 
 壳项目（bound 且空 paths）≥ 2 个时卡底部出现「一键关联」按钮 → modal 列出全部壳项目、每行一个路径输入框（可留空跳过）→ 一次提交逐个串行调 attach，单个失败不阻断，结束汇总 toast「已关联 n 个，失败：…」（与「全部拉取」同款交互）。
 
+### 解除关联（2026-09-01 增补，挂错目录的撤销路径）
+
+- `registry.RemovePath(name, path)`：AddPath 对偶——锁内、规范化相等匹配、路径不在项目下幂等 nil、未知项目 ErrProjectNotFound；最后一条解除后项目回到空 Paths 壳（项目与知识库数据保留）。
+- `POST /api/project/detach {project, path}`：**不做目录存在性校验**（目录已删是常见解绑场景）；400 空路径 / 404 未知项目；paths 锁内取出回包。
+- 已绑定行新增「目录」按钮 → modal 列出 paths 逐条「解除」（确认 + busy + toast）；全部解除后回到「未关联目录」。
+
 ### i18n
 
 zh/en 词条补齐：`srvUnlinked`（未关联目录）、`srvAttach`（关联目录）、`srvAttachAll`（一键关联）、`srvAttachPathPlaceholder`、`srvAttachDone`（已关联 {n} 个）、`srvAttachFail`（，失败：）等。遵守「假功能按钮必须有可见反馈」约定：所有按钮有 busy 态与结果 toast。

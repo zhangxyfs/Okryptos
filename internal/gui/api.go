@@ -74,6 +74,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("GET /api/logs", h.apiLogs)
 	api("GET /api/projects", h.apiProjects)
 	api("POST /api/project/attach", h.apiProjectAttach)
+	api("POST /api/project/detach", h.apiProjectDetach)
 	api("GET /api/entries", h.apiEntries)
 	api("GET /api/graph", h.apiGraph)
 	api("GET /api/entry", h.apiEntryGet)
@@ -732,6 +733,45 @@ func (h *Handler) apiProjectAttach(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, registry.ErrPathConflict):
 			writeErr(w, http.StatusConflict, err.Error())
 		default:
+			writeErr(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"name": req.Project, "paths": paths})
+}
+
+// apiProjectDetach 解除项目与工作目录的关联（attach 的对偶——挂错目录的撤销入口）。
+// 故意不做目录存在性校验：目录已删正是常见解绑场景。最后一条解除后项目回到
+// 空 Paths 壳状态，知识库数据不动；hooks 现读注册表即时生效。
+func (h *Handler) apiProjectDetach(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project string `json:"project"`
+		Path    string `json:"path"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Path == "" {
+		writeErr(w, http.StatusBadRequest, "path 不能为空")
+		return
+	}
+	// paths 在锁内取出（同 attach 终审裁决：锁外二次现读有窄窗口语义倒挂）
+	var paths []string
+	if err := registry.Update(func(reg *registry.Registry) error {
+		if err := reg.RemovePath(req.Project, req.Path); err != nil {
+			return err
+		}
+		for _, p := range reg.Projects {
+			if p.Name == req.Project {
+				paths = append([]string(nil), p.Paths...)
+				break
+			}
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, registry.ErrProjectNotFound) {
+			writeErr(w, http.StatusNotFound, err.Error())
+		} else {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 		}
 		return
