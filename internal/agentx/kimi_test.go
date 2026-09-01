@@ -312,12 +312,20 @@ func TestOKHookCommandRegex(t *testing.T) {
 		{"quoted exe stop", `command = "\"D:/x/ok.exe\" hook stop"`, true},
 		{"bare ok legacy", `command = "ok hook prompt"`, true},
 		{"leading spaces", `  command = "ok hook stop"`, true},
+		// gui-split 注册 bug 的存量形态（okd.exe hook ...，2026-08-22 实证）——
+		// 必须命中以被清理/迁移；okd 是 daemon 二进制，hook 注册的合法入口只有 ok。
+		{"quoted okd exe prompt", `command = "\"D:/x/okd.exe\" hook prompt"`, true},
+		{"quoted okd exe post-tool", `command = "\"D:/x/okd.exe\" hook post-tool"`, true},
+		{"quoted okd exe stop", `command = "\"D:/x/okd.exe\" hook stop"`, true},
+		{"bare okd legacy", `command = "okd hook prompt"`, true},
 		// 用户自装同名 ok 工具的其它命令行——不得命中误删。
 		{"user ok deploy", `command = "ok deploy"`, false},
 		{"user ok hook run", `command = "ok hook run"`, false},
 		{"user ok hook with args", `command = "ok hook prompt --verbose"`, false},
 		{"user ok bare hook", `command = "ok hook"`, false},
+		{"user okd deploy", `command = "okd deploy"`, false},
 		{"myok 词边界", `command = "myok hook prompt"`, false},
+		{"myokd 词边界", `command = "myokd hook prompt"`, false},
 		{"third-party", `command = "echo hi"`, false},
 		{"非 command 行", `event = "ok hook prompt"`, false},
 	}

@@ -62,11 +62,15 @@ func HookTimeoutSec() int {
 
 // okHookCommand 匹配指向 ok hook 的 command 行（如 "ok hook prompt"、
 // "\"D:/x/ok.exe\" hook stop"——exe 加引号后值内含转义引号，需一并兼容）。
-// 完整形态收紧（L-06）：ok/ok.exe（可带引号路径前缀）+ " hook " + 三个 ok 子命令
-// 之一 + 值结束——用户自装同名 ok 工具的其它命令行（"ok deploy"、"ok hook run"、
-// "ok hook prompt --verbose"）不再命中误删。残余不可区分形态：用户工具恰好也有
-// `hook prompt|post-tool|stop` 子命令且命令行形态逐字相同。
-var okHookCommand = regexp.MustCompile(`(?i)^\s*command\s*=\s*"(?:[^"]|\\")*\bok(?:\.exe)?(?:\\")?\s+hook\s+(?:prompt|post-tool|stop)(?:\\")?"\s*$`)
+// okd 形态（"okd.exe hook prompt"）同样命中：它是 gui-split 注册 bug 留下的存量
+// 形态（2026-08-22 实证，见知识库"二进制拆分后daemon内注册命令必须换算CLI入口"），
+// okd 是 daemon 二进制，hook 注册的合法入口只有 ok——不识别则存量块永远剥不掉，
+// 与标记块并存导致同一事件重复派发（双注入实证 2026-08-28）。
+// 完整形态收紧（L-06）：ok/okd/ok.exe/okd.exe（可带引号路径前缀）+ " hook " +
+// 三个 ok 子命令之一 + 值结束——用户自装同名 ok 工具的其它命令行（"ok deploy"、
+// "ok hook run"、"ok hook prompt --verbose"）不再命中误删。残余不可区分形态：
+// 用户工具恰好也有 `hook prompt|post-tool|stop` 子命令且命令行形态逐字相同。
+var okHookCommand = regexp.MustCompile(`(?i)^\s*command\s*=\s*"(?:[^"]|\\")*\bokd?(?:\.exe)?(?:\\")?\s+hook\s+(?:prompt|post-tool|stop)(?:\\")?"\s*$`)
 
 // StripLegacyOKHooks 移除配置中所有指向 ok hook 的无标记 [[hooks]] 表
 // （历史遗留的手动粘贴块），其它工具的 hooks 原样保留。
