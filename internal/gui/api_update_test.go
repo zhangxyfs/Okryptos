@@ -306,6 +306,72 @@ func TestUpdateDownloadJob(t *testing.T) {
 	}
 }
 
+// 断点续传：预置半截 .part，客户端须带 Range: bytes=N-；服务器 206 时追加续传，
+// 不认 Range 回 200 时截断重写——两种路径最终文件内容都必须完整、.part 已改名消失。
+func TestUpdateDownloadResume(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		honorRange bool // 服务器是否认 Range（206）还是忽略（200）
+	}{
+		{"206 续传", true},
+		{"200 降级重写", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := changelogEnv(t)
+			resetUpdateDownloadJob(t)
+			content := []byte(strings.Repeat("fake installer;", 128))
+			const offset = 512
+			// 预置半截 .part：完整内容的前 offset 字节
+			dest := filepath.Join(os.Getenv("OK_HOME"), "update", "OpenKnowledge-Setup-99.0.0.exe")
+			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(dest+".part", content[:offset], 0o644); err != nil {
+				t.Fatal(err)
+			}
+			fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got, want := r.Header.Get("Range"), fmt.Sprintf("bytes=%d-", offset); got != want {
+					t.Errorf("Range header = %q, want %q", got, want)
+				}
+				if tc.honorRange {
+					w.Header().Set("Content-Length", strconv.Itoa(len(content)-offset))
+					w.WriteHeader(http.StatusPartialContent)
+					_, _ = w.Write(content[offset:])
+					return
+				}
+				// 不认 Range：回 200 + 完整内容，客户端应截断重写
+				w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(content)
+			}))
+			defer fake.Close()
+			withUpdateURLPrefix(t, fake.URL+"/")
+
+			body := postUpdateDownload(t, h, fake.URL+"/setup.exe", "99.0.0")
+			if body["state"] != "running" {
+				t.Fatalf("post state = %v, want running: %v", body["state"], body)
+			}
+			final := pollUpdateDownload(t, h)
+			if final["state"] != "done" {
+				t.Fatalf("final state = %v, want done (err=%v)", final["state"], final["err"])
+			}
+			got, err := os.ReadFile(dest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, content) {
+				t.Fatalf("final content mismatch: %d bytes, want %d bytes of full content", len(got), len(content))
+			}
+			if _, err := os.Stat(dest + ".part"); !os.IsNotExist(err) {
+				t.Fatalf(".part should be renamed away, stat err = %v", err)
+			}
+			if final["done"] != float64(len(content)) || final["total"] != float64(len(content)) {
+				t.Fatalf("done/total = %v/%v, want %d", final["done"], final["total"], len(content))
+			}
+		})
+	}
+}
+
 // SSRF 纪律：URL 必须以 release 下载前缀开头，否则 400。
 func TestUpdateDownloadBadURL(t *testing.T) {
 	h, _ := changelogEnv(t)

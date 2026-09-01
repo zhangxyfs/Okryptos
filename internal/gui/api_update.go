@@ -128,7 +128,6 @@ var updateURLPrefix = "https://github.com/zhangxyfs/OpenKnowledge/releases/downl
 
 // updateDownloadClient 不设整体 Timeout（安装器动辄数百 MB，慢速网络下整体超时会
 // 误杀正常下载），只给响应头 30s 兜底——同 embed/download.go defaultClient 的思路。
-// 包级 var 以便测试替换。
 var updateDownloadClient = func() *http.Client {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.ResponseHeaderTimeout = 30 * time.Second
