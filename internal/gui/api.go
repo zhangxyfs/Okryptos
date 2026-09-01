@@ -73,6 +73,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("GET /api/status", h.apiStatus)
 	api("GET /api/logs", h.apiLogs)
 	api("GET /api/projects", h.apiProjects)
+	api("POST /api/project/attach", h.apiProjectAttach)
 	api("GET /api/entries", h.apiEntries)
 	api("GET /api/graph", h.apiGraph)
 	api("GET /api/entry", h.apiEntryGet)
@@ -678,6 +679,57 @@ func (h *Handler) apiProjects(w http.ResponseWriter, _ *http.Request) {
 	}
 	projects := listProjects(reg)
 	writeJSON(w, http.StatusOK, projects)
+}
+
+// apiProjectAttach 给已注册项目（服务器拉取/备份恢复的空壳）补挂工作目录：
+// hooks 的 cwd 匹配即时恢复（注册表现读，无需重启）。
+func (h *Handler) apiProjectAttach(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project string `json:"project"`
+		Path    string `json:"path"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Path == "" {
+		writeErr(w, http.StatusBadRequest, "path 不能为空")
+		return
+	}
+	if fi, err := os.Stat(req.Path); err != nil || !fi.IsDir() {
+		writeErr(w, http.StatusBadRequest, "目录不存在或不是目录: "+req.Path)
+		return
+	}
+	if err := registry.Update(func(reg *registry.Registry) error {
+		// 先判项目存在再补挂：AddPath 两阶段扫描先报路径冲突，
+		// 未注册项目会被误报 409——契约要求未知项目一律 404
+		found := false
+		for _, p := range reg.Projects {
+			if p.Name == req.Project {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("%w: %q", registry.ErrProjectNotFound, req.Project)
+		}
+		return reg.AddPath(req.Project, req.Path)
+	}); err != nil {
+		switch {
+		case errors.Is(err, registry.ErrProjectNotFound):
+			writeErr(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, registry.ErrPathConflict):
+			writeErr(w, http.StatusConflict, err.Error())
+		default:
+			writeErr(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	_, paths, _, err := findProject(req.Project)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"name": req.Project, "paths": paths})
 }
 
 // apiProjectDelete 删除项目知识库：先注销注册表（Save 失败则中止、目录不动），

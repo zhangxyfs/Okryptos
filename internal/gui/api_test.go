@@ -2258,3 +2258,68 @@ func TestApproveArchiveReadError(t *testing.T) {
 		}
 	}
 }
+
+func TestApiProjectAttach(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	// 空壳项目（模拟服务器拉取）：无 paths
+	reg := &registry.Registry{Projects: []registry.Project{{Name: "shell"}}}
+	if err := reg.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(okHome, "projects", "shell", "knowledge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workdir := t.TempDir()
+
+	res, body := do(t, "POST", srv.URL+"/api/project/attach", testToken, map[string]any{"project": "shell", "path": workdir})
+	if res != 200 {
+		t.Fatalf("attach: %d %s", res, body)
+	}
+	loaded, err := registry.Load(registry.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := loaded.FindByCwd(filepath.Join(workdir, "sub")); p == nil || p.Name != "shell" {
+		t.Fatalf("FindByCwd should hit after attach: %+v", loaded.Projects)
+	}
+
+	// 幂等重入仍 200 且不重复
+	res, body = do(t, "POST", srv.URL+"/api/project/attach", testToken, map[string]any{"project": "shell", "path": workdir})
+	if res != 200 {
+		t.Fatalf("reattach: %d %s", res, body)
+	}
+	loaded, _ = registry.Load(registry.DefaultPath())
+	if len(loaded.Projects[0].Paths) != 1 {
+		t.Fatalf("duplicate attach: %+v", loaded.Projects[0].Paths)
+	}
+
+	// 404 未知项目 / 400 空路径与不存在目录
+	res, _ = do(t, "POST", srv.URL+"/api/project/attach", testToken, map[string]any{"project": "nope", "path": workdir})
+	if res != 404 {
+		t.Fatalf("unknown project: %d", res)
+	}
+	res, _ = do(t, "POST", srv.URL+"/api/project/attach", testToken, map[string]any{"project": "shell", "path": ""})
+	if res != 400 {
+		t.Fatalf("empty path: %d", res)
+	}
+	res, _ = do(t, "POST", srv.URL+"/api/project/attach", testToken, map[string]any{"project": "shell", "path": filepath.Join(workdir, "nonexistent")})
+	if res != 400 {
+		t.Fatalf("missing dir: %d", res)
+	}
+
+	// 409：路径已挂别的项目
+	other := t.TempDir()
+	reg2 := &registry.Registry{Projects: []registry.Project{
+		{Name: "a", Paths: []string{workdir}},
+		{Name: "b", Paths: []string{other}},
+	}}
+	if err := reg2.Save(registry.DefaultPath()); err != nil {
+		t.Fatal(err)
+	}
+	res, _ = do(t, "POST", srv.URL+"/api/project/attach", testToken, map[string]any{"project": "b", "path": workdir})
+	if res != 409 {
+		t.Fatalf("conflict: %d", res)
+	}
+}
