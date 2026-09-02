@@ -4991,7 +4991,7 @@ function loadMisc(){
 }
 function refreshMisc(){
   // update/check 失败静默（fail-open 端点本身也几乎不报错）：不影响主数据展示
-  Promise.all([api("/api/projects"), api("/api/status"), api("/api/update/check").catch(()=>null)]).then(([ps, st, uc])=>{
+  Promise.all([api("/api/projects"), api("/api/status"), api("/api/update/check?force=1").catch(()=>null)]).then(([ps, st, uc])=>{
     MISC = { projects: ps || [], status: st || null, update: uc || null };
     if(uc) UPD = uc;   // 侧栏红点共用最近一次检查结果
   }).catch(err=>{
@@ -5183,7 +5183,7 @@ function renderMisc(){
     }
     const chk = el("button","btn"); chk.textContent = t("uVerCheck");
     chk.onclick = ()=>{
-      api("/api/update/check").then(d=>{
+      api("/api/update/check?force=1").then(d=>{
         MISC.update = d || null;
         if(d) UPD = d;   // 侧栏红点随手动检查刷新
         // d.error（GitHub 不可达/响应异常，fail-open 200 带回）：手动检查如实报失败，不谎报「已是最新」

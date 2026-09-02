@@ -99,6 +99,47 @@ func TestUpdateCheckNewVersion(t *testing.T) {
 	}
 }
 
+// force=1 绕过 6h 缓存强制真查（手动「检查更新」/进 misc 页用），结果仍写回缓存。
+func TestUpdateCheckForce(t *testing.T) {
+	h, _ := changelogEnv(t)
+	withVersion(t, "1.0.0")
+	var hits int32
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		json.NewEncoder(w).Encode(map[string]any{"tag_name": "v99.0.0", "assets": []map[string]any{}})
+	}))
+	defer fake.Close()
+	withGithubAPI(t, fake.URL)
+
+	// 预置新鲜缓存（CheckedAt=now，Latest 旧）——不带 force 不得请求 GitHub
+	if err := writeGuiState(guiState{UpdateCheck: &UpdateCheck{CheckedAt: time.Now().Unix(), Latest: "1.0.0"}}); err != nil {
+		t.Fatal(err)
+	}
+	body := doJSON(t, h, "GET", "/api/update/check")
+	if n := atomic.LoadInt32(&hits); n != 0 {
+		t.Fatalf("无 force 应命中缓存，github hits = %d", n)
+	}
+	if body["latest"] != "1.0.0" {
+		t.Fatalf("cached latest = %v", body["latest"])
+	}
+
+	// force=1 绕过缓存真查，并把新结果写回缓存
+	body = doJSON(t, h, "GET", "/api/update/check?force=1")
+	if n := atomic.LoadInt32(&hits); n != 1 {
+		t.Fatalf("force=1 应真查，github hits = %d", n)
+	}
+	if body["update_available"] != true || body["latest"] != "99.0.0" {
+		t.Fatalf("force resp = %v", body)
+	}
+	st, err := readGuiState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.UpdateCheck == nil || st.UpdateCheck.Latest != "99.0.0" {
+		t.Fatalf("force 后缓存未更新: %+v", st.UpdateCheck)
+	}
+}
+
 func TestUpdateCheckNotNewer(t *testing.T) {
 	h, _ := changelogEnv(t)
 	withVersion(t, "99.0.0")

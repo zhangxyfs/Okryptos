@@ -92,14 +92,16 @@ type githubRelease struct {
 // GitHub 请求失败/超时/解析失败一律 fail-open 返回 200 + update_available:false 并带
 // error 标记（前端手动「检查更新」据此如实报失败），失败态仍写缓存（CheckedAt + Error，
 // Latest 留空）防雪崩，TTL 内缓存命中同样透传 error。
-func (h *Handler) apiUpdateCheck(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) apiUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	st, err := readGuiState()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// force=1 绕过缓存（手动「检查更新」/进 misc 页），启动自动检查不带 force 走缓存。
+	force := r.URL.Query().Get("force") == "1"
 	uc := st.UpdateCheck
-	if uc == nil || time.Since(time.Unix(uc.CheckedAt, 0)) >= updateCheckTTL {
+	if uc == nil || force || time.Since(time.Unix(uc.CheckedAt, 0)) >= updateCheckTTL {
 		uc = fetchLatestRelease()
 		st.UpdateCheck = uc
 		if err := writeGuiState(st); err != nil {
