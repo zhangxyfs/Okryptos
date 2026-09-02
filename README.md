@@ -127,6 +127,19 @@ summary: 每次代码修改必须立即记录变更日志
   <sub>实际会话：一次发布完成后，AI 主动沉淀 wiki 条目，并询问是否要把踩坑单独记为 pitfall（propose 模式）</sub>
 </p>
 
+## 多端同步（自托管服务器）
+
+知识库支持跨设备同步：在常年在线的机器（NAS / 服务器）上部署 **okserver**（Docker 化，自带 Web 管理面），各设备在 GUI「服务器」页登录账号、按项目一键建仓绑定，之后条目变更由 okd 自动同步（每项目独立 git 仓，冲突时手动解决）。
+
+服务器部署用 **okdeploy 一键部署器**（SSH 连上去全自动装 Docker 环境 + okserver，装完可升级/看日志/备份/恢复/重置密码）：
+
+| 平台 | 下载（Releases 资产） |
+|------|------|
+| Windows | `okdeploy-windows-amd64.exe` |
+| Linux | `okdeploy-linux-amd64` |
+
+> 下载地址：[GitHub Releases](https://github.com/zhangxyfs/OpenKnowledge/releases)（与安装包同页）。已部署的服务器后续可直接在 okdeploy 管理页一键升级。
+
 ## 常用命令
 
 | 命令 | 作用 |
@@ -139,6 +152,7 @@ summary: 每次代码修改必须立即记录变更日志
 | `ok capture [propose\|auto\|interval <n>]` | 查看/切换沉淀模式与轮次间隔 |
 | `ok search <词>` | 命令行预览检索效果 |
 | `ok index` | 同步索引与向量（手改条目后执行） |
+| `ok sync [init]` | 项目多端同步：绑定服务器仓库 / 手动同步（需先在「服务器」页登录绑定） |
 | `ok doctor` | 体检：配置、embedding 连通性、hooks 状态 |
 | `ok on` / `ok off` | 全局开关 |
 | `ok daemon [stop]` | 常驻进程管理（开机自启，一般无需手动操作） |

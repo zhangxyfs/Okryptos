@@ -130,6 +130,19 @@ Body (free-form Markdown)
   <sub>In a real session: after finishing a release, the AI captures wiki entries on its own and asks whether to record the pitfall separately (propose mode)</sub>
 </p>
 
+## Multi-device sync (self-hosted server)
+
+Knowledge bases can sync across devices: deploy **okserver** (Dockerized, with a built-in web admin console) on an always-on machine (NAS / server), sign in from each device's GUI on the **Server** tab, bind projects with one click, and entry changes are then synced automatically by okd (one git repo per project; conflicts are resolved manually).
+
+Deploy the server with the **okdeploy one-click deployer** (SSH in, fully automated Docker + okserver setup; afterwards it can upgrade / view logs / back up / restore / reset passwords):
+
+| Platform | Download (Releases asset) |
+|------|------|
+| Windows | `okdeploy-windows-amd64.exe` |
+| Linux | `okdeploy-linux-amd64` |
+
+> Download: [GitHub Releases](https://github.com/zhangxyfs/OpenKnowledge/releases) (same page as the installer). Already-deployed servers can be upgraded in one click from the okdeploy console.
+
 ## Common commands
 
 | Command | Purpose |
@@ -142,6 +155,7 @@ Body (free-form Markdown)
 | `ok capture [propose\|auto\|interval <n>]` | Show/switch capture mode and the turn interval |
 | `ok search <term>` | Preview retrieval results from the CLI |
 | `ok index` | Sync index & vectors (run after hand-editing entries) |
+| `ok sync [init]` | Multi-device project sync: bind the server repo / sync manually (sign in & bind on the Server tab first) |
 | `ok doctor` | Health check: config, embedding connectivity, hook status |
 | `ok on` / `ok off` | Global switch |
 | `ok daemon [stop]` | Resident process management (auto-starts at login; rarely needs manual action) |

@@ -25,7 +25,7 @@
 
 ## 1. 项目概述
 
-**OpenKnowledge** 是一个为 AI 编程助手提供项目知识库的命令行工具，编译产物为单二进制 `ok`。知识按项目隔离存储，通过 **Kimi Code 的 hooks 机制**在 AI 会话中自动注入项目约定与踩坑经验，并能对"必须写变更日志"这类强制工作流做机制级检查。
+**OpenKnowledge** 是一个为 AI 编程助手提供项目知识库的命令行工具，客户端编译产物为 `ok`（+ 常驻 `okd`、GUI 拉起器 `OkManager`）。知识按项目隔离存储，通过 **Kimi Code 的 hooks 机制**在 AI 会话中自动注入项目约定与踩坑经验，并能对"必须写变更日志"这类强制工作流做机制级检查。v2.23 起另有服务端面：`okserver`（NAS/Docker 部署的多端同步与管理服务端）与 `okdeploy`（一键部署器，独立分发）。
 
 | 功能 | 说明 |
 |------|------|
@@ -35,6 +35,8 @@
 | **知识管理** | `ok init/add/search/index/list/doctor` 命令维护知识库 |
 | **首次引导** | `ok setup` 一键写入 hooks 配置、安装 kimi 技能、配置 embedding |
 | **全局开关** | `ok on` / `ok off` 随时启停全部 hooks |
+| **多端同步** | `ok sync`/`ok sync init` + okd 自动触发（ticker/写入防抖），知识库即 git 仓，GUI 冲突解决页 |
+| **服务端** | okserver 管理面（账号/仓库/凭证/强制改密）+ okdeploy 一键部署到 NAS（docker compose） |
 
 **模块名**: `openknowledge`
 **二进制名**: `ok`（Windows 为 `ok.exe`）
@@ -54,30 +56,33 @@
 | HTTP | 标准库 `net/http`（embedding API 调用） |
 | 测试 | 标准库 `testing` + `net/http/httptest` |
 
-**表格 B — 第三方依赖清单**（全部，仅 4 个，与 `go.mod` 一致）：
+**表格 B — 第三方依赖清单**（直接依赖 7 个，与 `go.mod` 一致）：
 
 | 依赖 | 版本 | 用途 |
 |------|------|------|
 | `github.com/BurntSushi/toml` | v1.6.0 | registry.toml 与各层 config.toml 解析 |
 | `gopkg.in/yaml.v3` | v3.0.1 | 知识条目 frontmatter 解析 |
 | `github.com/bmatcuk/doublestar/v4` | v4.10.0 | 强制规则的 `**` glob 匹配 |
-| `modernc.org/sqlite` | v1.54.0 | kb.db 索引库（FTS5 全文检索 + 向量存储），纯 Go 无 CGO |
+| `modernc.org/sqlite` | v1.54.0 | kb.db 索引库（FTS5 全文检索 + 向量存储）与 okserver 管理面存储，纯 Go 无 CGO |
+| `golang.org/x/crypto` | v0.55.0 | oksrv bcrypt 口令散列 + deployx SSH 客户端（x/crypto/ssh） |
+| `golang.org/x/sys` | v0.47.0 | Windows 系统调用（托盘/窗口/已知目录解析） |
+| `github.com/jchv/go-webview2` | v0.0.0-2026… | OkManager/okdeploy 的 WebView2 内嵌窗口（仅 Windows 构建路径） |
 
 ---
 
 ## 3. 模块架构
 
-单 module（`openknowledge`），internal/ 下 30 个包（含 `rxext/sdk` 子包）+ `cmd/` 三入口（ok/okd/okmanager），严格单向依赖、无环：
+单 module（`openknowledge`），internal/ 下 34 个包（含 `rxext/sdk`、`deployx/webui` 子包）+ `cmd/` 五入口（ok/okd/okmanager/okserver/okdeploy），严格单向依赖、无环：
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ cmd/ok·okd·okmanager （三 exe：CLI 入口/daemon/GUI） │
-└───────┬───────────────────┬─────────────────┬───────┘
-        │                   │                 │
-┌───────▼────────┐  ┌───────▼────────┐  ┌─────▼─────────────┐
-│ internal/cli   │  │ internal/gui   │  │ internal/hook     │
-│ （人用的命令）  │  │ （Web GUI）    │  │ （hooks 入口）     │
-└───────┬────────┘  └───────┬────────┘  └─────┬─────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│ cmd/ok·okd·okmanager（客户端三 exe）· okserver（服务端）· okdeploy │
+└───────┬───────────────────┬─────────────────┬───────────┬───────┘
+        │                   │                 │           │
+┌───────▼────────┐  ┌───────▼────────┐  ┌─────▼──────┐ ┌──▼───────────┐
+│ internal/cli   │  │ internal/gui   │  │internal/hook│ │internal/oksrv│
+│ （人用的命令）  │  │ （Web GUI）    │  │（hooks 入口）│ │（服务端管理面）│
+└───────┬────────┘  └───────┬────────┘  └─────┬──────┘ └──────────────┘
         │                   │         ┌───────▼────────┐
         │                   │         │ internal/project│（cwd→项目）
         │                   │         └───────┬────────┘
@@ -87,26 +92,31 @@
    │ embedsidecar · index · retrieve · state · enforce · setupx · │
    │ agentx（宿主适配）· rxext（Reasonix 扩展）· daemon · daemonx │
    │ tray · webdir · fsx（原子写/文件锁）· logx（日志/轮替）·     │
-   │ llmx · backup · wiki · procx · version                       │
+   │ llmx · backup · wiki · procx · version ·                     │
+   │ syncx（个人多端同步）· serverx（okserver 客户端）· credmig · │
+   │ deployx（一键部署器，okdeploy 独占）                         │
    └───────────────────────────────────────────────────────────────┘
 ```
 
 **依赖关系**（→ 表示 import；仅列主干，完整以 `go list -deps` 为准）：
 
-- `cmd/ok` → `cli`、`gui`、`hook`、`daemon`、`rxext`；`cmd/okd`（daemon 常驻）→ `daemon`、`gui`、`tray`；`cmd/okmanager`（GUI 拉起器）→ `daemon`
-- `cli` → `registry`、`entry`、`store`、`embed`、`index`、`retrieve`、`project`、`config`、`setupx`、`backup`、`agentx`
-- `gui` → `registry`、`entry`、`store`、`index`、`retrieve`、`config`、`setupx`、`agentx`、`llmx`、`wiki`、`webdir`
+- `cmd/ok` → `cli`、`gui`、`hook`、`daemon`、`rxext`；`cmd/okd`（daemon 常驻）→ `daemon`、`gui`、`tray`；`cmd/okmanager`（GUI 拉起器 + WebView2 窗口宿主）→ `daemon`、`gui`、`registry`；`cmd/okserver`（服务端，Linux/NAS）→ `oksrv`、`logx`、`version`；`cmd/okdeploy`（部署器，独立分发）→ `deployx`、`gui`（BrowserOptions 共用浏览器回退）
+- `cli` → `registry`、`entry`、`store`、`embed`、`index`、`retrieve`、`project`、`config`、`setupx`、`backup`、`agentx`、`syncx`
+- `gui` → `registry`、`entry`、`store`、`index`、`retrieve`、`config`、`setupx`、`agentx`、`llmx`、`wiki`、`webdir`、`syncx`、`serverx`、`credmig`、`daemonx`、`version`
 - `hook` → `project`、`registry`、`store`、`embed`、`index`、`retrieve`、`state`、`enforce`、`setupx`、`wiki`
 - `agentx`（多 agent 宿主适配层，hook/cli/gui/setupx 共享）→ `fsx`、`config`、`registry`、`daemonx`
 - `rxext`（+`rxext/sdk`，Reasonix 扩展协议 sidecar）→ `hook`、`agentx`、`logx`
-- `daemon`/`daemonx` → `gui`、`embedsidecar`、`tray`、`webdir`（单实例端口锁、指纹校验）
+- `daemon`/`daemonx` → `gui`、`embedsidecar`、`tray`、`webdir`、`syncx`、`credmig`（单实例端口锁、指纹校验、同步 ticker）
+- `syncx`（个人多端同步引擎，叶子包）→ `fsx`、`procx`；`serverx`（okserver 薄客户端）→ 仅标准库；`credmig`（凭证统一迁移）→ `config`、`registry`、`serverx`、`store`、`syncx`
+- `oksrv`（okserver 服务端管理面）→ 标准库 + modernc.org/sqlite + x/crypto(bcrypt)
+- `deployx`（+`webui` 内嵌前端）→ `gui`（仅 BrowserOptions 类型）、x/crypto(ssh)
 - `setupx` → `registry`、`config`、`embed`、`embedsidecar`、`agentx`（setup 引导共享逻辑，cli 与 gui 复用）
 - `project` → `registry`、`config`、`store`
 - `index` → `entry`、`embed`、`retrieve`、`config`（+ modernc.org/sqlite）
 - `enforce` → `config`、`state`（+ doublestar）
 - `fsx`（原子写 tmp+fsync+rename、WithFileLock 文件锁）、`logx`（按行时间戳 Writer + 大小轮替归档）、`llmx`、`procx`、`version`、`backup`、`wiki`、`embedx`、`embedsidecar` → 仅标准库 + 少量上述基础包
 
-**分层原则**：`hook`、`cli`、`gui` 是三个互不 import 的应用层；`project` 是 hook 与 cli 共享的项目解析层；`setupx` 是 cli 与 gui 共享的引导逻辑层；其余为单一职责的基础包。
+**分层原则**：`hook`、`cli`、`gui` 是三个互不 import 的应用层；`project` 是 hook 与 cli 共享的项目解析层；`setupx` 是 cli 与 gui 共享的引导逻辑层；`syncx`/`serverx` 是 cli、gui、daemon 三方共享的同步引擎与服务端客户端；`oksrv`（服务端）与 `deployx`（部署器）各自独立成面、不进客户端依赖链；其余为单一职责的基础包。
 
 ---
 
@@ -118,6 +128,10 @@ OpenKnowledge/
 ├── cmd/ok/
 │   ├── main.go                    # 入口：子命令调度，hook 路径 panic-recover 兜底
 │   └── integration_test.go        # 端到端测试（编译真实二进制驱动）
+├── cmd/okd/                       # 常驻 daemon 入口（生产形态；cmd/ok 的 daemon 子命令仅为兼容残留）
+├── cmd/okmanager/                 # GUI 拉起器 + WebView2 原生窗口宿主（窗口状态记忆/token 注入）
+├── cmd/okserver/                  # 服务端管理面入口（env 配置 + root 首启 + reset-root 子命令）
+├── cmd/okdeploy/                  # 一键部署器入口（双击启动 + 随机回环端口 + 内嵌窗口/浏览器回退）
 ├── internal/
 │   ├── registry/                  # ★ 项目注册表与路由
 │   │   ├── registry.go            #   Registry/Project、NormalizePath、FindByCwd、HooksDisabled
@@ -178,21 +192,56 @@ OpenKnowledge/
 │   ├── logx/                      # 按行时间戳 Writer + 日志大小轮替归档（RotateIfOversize/CleanArchives）
 │   ├── llmx/                      # LLM 调用（超时按场景区分、temperature 缺省不传）
 │   ├── backup/                    # 导出/导入 zip 包（防 zip-slip/zip-bomb、路径与项目名校验）
+│   ├── syncx/                     # ★ 个人多端同步引擎（叶子包：fsx + procx + 外部 git 命令）
+│   │   ├── git.go                 #   git 执行器：参数数组不走 shell、错误三分类（ErrGitNotFound/ErrTimeout/*ExitError）
+│   │   ├── repo.go                #   Repo 原语：IsRepo 纯文件系统判断、Status/CommitAll/Push/CloneToDir
+│   │   ├── sync.go                #   Sync 编排（commit→pull --rebase→push、冲突守卫、single-flight SyncOnce）
+│   │   ├── status.go              #   分层同步状态文件（sync-status.json/sync-conflict.json/syncing 标记）
+│   │   ├── conflict.go            #   冲突解决原语（三版本按用户语义映射 local/remote，不直译 ours/theirs）
+│   │   ├── init.go                #   sync init 三情形编排（本地 init / 克隆 / 首推，cli 与 gui 共用）
+│   │   └── credential.go          #   git 凭据写系统 credential helper（无 helper 回退 URL 内嵌）
+│   ├── serverx/                   # okserver 薄客户端（Bearer + 全端点，照 llmx 形态，叶子包）
+│   ├── credmig/                   # 凭证统一迁移：机器级 git 凭证 ensure/覆盖 remote/迁移标记
+│   ├── oksrv/                     # ★ okserver 服务端管理面（SQLite 存储/bcrypt 认证/GitBackend/HTTP API）
+│   │   ├── store.go               #   users/sessions/orgs/org_members/repos/audit/meta 七表（must_change_password 幂等迁移）
+│   │   ├── auth.go                #   会话 token、root 首启、登录限流
+│   │   ├── gitbackend.go + gitea.go  # GitBackend 接口（fake 实现供测试）与 Gitea admin API 实现
+│   │   └── http.go                #   管理面 API：Bearer 鉴权 + admin 门控 + 强制改密 gate + 审计
+│   ├── deployx/                   # ★ okdeploy 部署器内核（okdeploy 独占）
+│   │   ├── executor.go + ssh.go   #   Executor 接口（流式执行/上传/下载）+ x/crypto/ssh 实现、LogHub 广播
+│   │   ├── task.go                #   任务编排框架（步骤序列 + 掩码敏感输出）
+│   │   ├── probe/deploy/manage/backup.go  # 远端探测 / 部署编排 / 管理任务（升级·卸载·重置 root）/ 备份恢复
+│   │   ├── templates/ + templates.go      # compose 模板与 .env 渲染（full/external 双模式）
+│   │   ├── api.go                 #   本地 HTTP API + SSE 日志服务（token 鉴权）
+│   │   └── webui/                 #   go:embed 内嵌前端（四页 + 中英切换）
 │   ├── tray/ · webdir/ · procx/ · version/   # 托盘、embed 前端资源、进程、版本
 │   └── gui/                       # ★ 配置中心 API + 静态页分发（okd 承载；ok gui / OkManager 双入口）
 │       ├── server.go              #   hostGuard/withAuth 路由管线、令牌 fragment 下发
-│       ├── api.go                 #   管理 API（条目 CRUD/检索/setup/toggle/终端白名单执行）
-│       ├── llm.go · embedding.go · changelog.go · api_enforce.go · api_hookstimeout.go
-│       ├── browser.go · browser_windows.go · browser_unix.go
+│       ├── api.go                 #   管理 API（条目 CRUD/检索/setup/toggle/终端白名单执行/attach/detach）
+│       ├── api_sync.go            #   同步七端点（sync/status/conflict-file/resolve/finish/abort/ai-merge）
+│       ├── api_server.go          #   服务器页本地端点（[server] 配置/登录/建仓一条龙/拉取/管理类透传）
+│       ├── api_update.go          #   版本升级四端点（check 6h 缓存/skip/download .part 续传/apply 静默安装+熔断）
+│       ├── graph.go               #   GET /api/graph 图谱数据（ref/struct/sem 三类边、sem 动态阈值）
+│       ├── gui_state.go · changelog.go  # 窗口状态（gui-state.json）与 gui.json 小状态（更新缓存/跳过版本）
+│       ├── token_script.go        #   内嵌窗口 token 注入脚本（window.__okToken）
+│       ├── llm.go · embedding.go · api_enforce.go · api_hookstimeout.go
+│       ├── browser.go · browser_windows.go · browser_unix.go · open_windows.go · open_other.go
 │       ├── window_other.go        #   非 Windows 平台无操作实现
 │       └── *_test.go
-├── web/                           # 配置中心前端（零依赖原生 HTML/JS/CSS，五菜单：管理/引导/设置/日志/其他）
+├── web/                           # 配置中心前端（零依赖原生 HTML/JS/CSS，七菜单：管理/图谱/引导/服务器/设置/日志/其他）
 │   ├── index.html                 #   页面骨架（{{TOKEN}} 占位符由服务端注入令牌）
-│   ├── app.js                     #   条目 CRUD、检索预览、引导流程、心跳（5s）
-│   └── style.css
+│   ├── app.js                     #   条目 CRUD、检索预览、引导流程、图谱力导向引擎（自绘 SVG，无图库依赖）、服务器页、版本升级
+│   ├── style.css
+│   └── vendor/                    #   图谱选型期的 vendored 对照库（vis-network/G6/sigma，仅原型用，生产页面不加载）
+├── server/nas/                    # okserver NAS 部署包（Dockerfile/docker-compose.yml/systemd/backup）
+├── installer/                     # Inno Setup 安装包脚本（[Run] 段装完拉起 okd/OkManager）
 ├── scripts/
-│   └── build-dist.sh              # 发布构建：-ldflags "-s -w" + 版本注入，产出 dist/ok.exe + dist/web/
-├── dist/                          # 发布产物（.gitignore 忽略）：ok.exe + web/
+│   ├── build-dist.sh              # 发布构建：-ldflags "-s -w" + 版本注入，产出 dist/ok.exe + dist/web/ + dist/deploy/okdeploy
+│   ├── build.py                   # 一键构建（dist/ + Inno 安装包）；--test 产出版本号带 _test 后缀的测试安装包（不改 iss）
+│   ├── build-linux.sh · sync-version.sh   # Linux 发布（tar+deb）；版本三处同步（README/站点/四个 winres.json）
+│   └── publish-release.py · verify-deb.py
+├── .github/workflows/docker.yml   # v* tag 触发 okserver 镜像多架构构建，GHCR + Docker Hub 双发
+├── dist/                          # 发布产物（.gitignore 忽略）：ok.exe/okd.exe/OkManager.exe + web/ + deploy/okdeploy
 ├── docs/
 │   ├── ARCHITECTURE.md            # 本文档
 │   ├── changelogs/                # 变更日志（强制规则要求的落点）
@@ -262,7 +311,7 @@ func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环�
 
 ### 5.8 enforce — 强制规则判定（34 行）
 
-v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 不存在匹配 `changelog_glob` 的 → 阻断并返回用户配置的 message。用 doublestar 做 `**` glob 匹配（`**/*.go` 可匹配根目录文件）。刻意**不理解**变更日志的细则——细则写在知识条目里由注入教给 AI，hook 只做机械检查。
+v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 不存在匹配 `changelog_glob` 的 → 阻断并返回用户配置的 message。用 doublestar 做 `**` glob 匹配（`**/*.go` 可匹配根目录文件）。刻意**不理解**变更日志的细则——细则写在知识条目里由注入教给 AI，hook 只做机械检查。判定层兼容短写法别名 `changelog`（2026-08-22~08-27 GUI 规则卡误用的存量写法；hook/core.go 归一，GUI 落盘已统一为 `changelog_required`）。
 
 ### 5.9 hook — hooks 事件处理（337 行）
 
@@ -276,15 +325,16 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 - `HandlePostTool`：记录触碰文件（经 `relativize` 转项目相对、小写、`/` 分隔）
 - `HandleStop`：先按 `[capture]` 配置评估 **auto 自省**——`mode = "auto"` 且本轮有触碰文件、距上次提醒满 `turn_interval` 个 Stop 时，输出自省提醒并以 exit 2 阻断一次（强制 AI 复盘本轮经验、值得沉淀则当场 `ok propose` 草稿）；随后评估 enforce 规则，命中即 `MarkBlocked` → 保存状态 → stderr 输出 message → **exit 2**（全项目唯一非零出口）
 
-### 5.10 cli — 管理命令（cli.go 369 行 + setup.go 147 行 + toggle.go 38 行）
+### 5.10 cli — 管理命令（cli.go 1294 行 + setup.go + toggle.go）
 
-- `cli.go`：`Init`（项目名缺省取目录基名）、`Add`（重复条目拒绝；后接索引库同步）、`Propose`（AI 面向的草稿写入：`draft:true`、只同步 INDEX 不算向量）、`Approve`（草稿转正，同步 INDEX 并补算向量；同一秒内 mtime 不变时手动推进一秒防 diff 漏判）、`CaptureCmd`（打印或设置项目 `[capture]` 模式，整段替换幂等写入）、`Search`（检索预览，走 `index.Query`）、`Index`（索引库增量同步并打印条目数）、`List`（文件扫描，人用命令开销可忽略）、`Doctor`（注册表/配置/embedding 连通性/hooks 安装状态/开关状态）
+- `cli.go`：`Init`（项目名缺省取目录基名；**同名项目幂等补挂工作目录**——服务器拉取/备份恢复产生的空壳项目（无 paths）`ok init` 同名时经 `registry.AddPath` 补挂，防串库收窄）、`Add`（重复条目拒绝；后接索引库同步）、`Propose`（AI 面向的草稿写入：`draft:true`、只同步 INDEX 不算向量）、`Approve`（草稿转正，同步 INDEX 并补算向量；同一秒内 mtime 不变时手动推进一秒防 diff 漏判）、`CaptureCmd`（打印或设置项目 `[capture]` 模式，整段替换幂等写入）、`Search`（检索预览，走 `index.Query`；克隆/拉取后索引滞后时先按需增量同步再检索）、`Index`（索引库增量同步并打印条目数）、`List`（文件扫描，人用命令开销可忽略）、`Doctor`（注册表/配置/embedding 连通性/hooks 安装状态/开关状态）
+- `Sync`：`ok sync`（一次执行 = commit → pull --rebase → push，编排与守卫全在 syncx；冲突时列文件并指引到 GUI 冲突解决页）与 `ok sync init [remote-url]`（三情形：无远端仅本地历史 / 本地无内容克隆远端 / 本地有内容首推；远端已有内容报 `ErrRemoteNotEmpty` 不自动合并）
 - `setup.go`：见第 6.4 节
 - `toggle.go`：`On`/`Off` 即删除/创建 `~/.openknowledge/hooks-disabled` 标志文件
 
-### 5.11 gui — 配置中心 Web UI（api.go 1552 行 + changelog/embedding/llm/api_hookstimeout/api_enforce 五个专题文件 + browser/window 平台件）
+### 5.11 gui — 配置中心 Web UI（api.go + api_sync/api_server/api_update/graph 等专题文件 + browser/window/open 平台件）
 
-配置中心是五页单页应用（管理/引导/设置/日志/其他），供不熟悉命令行的用户完成首次引导与日常知识维护。gui 包只出 HTTP API 与静态页，进程生命周期由 internal/daemon 托管（okd 常驻，页面关闭不退出）。**双入口**：`ok gui`（或无参数运行）与 `OkManager.exe` 同为薄启动器——EnsureCurrent 确保 okd 在线后以应用模式打开浏览器即退（`daemon.OpenGUI`）；托盘双击同链路。
+配置中心是七页单页应用（管理/图谱/引导/服务器/设置/日志/其他），供不熟悉命令行的用户完成首次引导与日常知识维护。gui 包只出 HTTP API 与静态页，进程生命周期由 internal/daemon 托管（okd 常驻，页面关闭不退出）。**双入口**：`ok gui`（或无参数运行）与 `OkManager.exe` 同为薄启动器——EnsureCurrent 确保 okd 在线后打开窗口即退；Windows 上 **内嵌窗口优先**（`OpenPreferred` 决策层：WebView2 常青运行时在位且 OkManager.exe 同目录时由 cmd/okmanager 自建原生窗口嵌 WebView2——离屏可见创建避白帧、窗口状态记忆（gui-state.json）、导航前注入 `window.__okToken`（token_script.go，origin 门控）；不可用时回退应用模式浏览器（`daemon.OpenGUI`）；托盘双击同链路。
 
 - **server.go**：仅剩包注释（gui-split 后监听/托管全在 daemon）。web 资源目录由入口定位：`<exe目录>/web` 优先，其次 `<当前目录>/web`（dist/ 布局正好满足前者）；资源不内嵌、实时读盘分发（no-cache）。
 - **api.go**：`/` 原样返回 index.html（token 不再内嵌 HTML，由前端从 URL `#token=` fragment 读取并转存 sessionStorage）；静态资源仅白名单 `app.js`/`style.css`/`favicon.ico`/`help.md`；全 mux 外层有 Host/Origin 校验（Host 必须回环、`/api/*` 的 Origin/Referer 存在则必须同源、永不输出 CORS 头，见 daemon/server.go hostGuard）；`/api/*` 全部经 `X-Ok-Token` 头鉴权（缺失/错误 401）；条目文件名参数必须是不含 `..` 与路径分隔符的 `.md` 基本名（防路径穿越）；写操作（POST/PUT/DELETE entry）落盘后自动 `index.Sync` 同步索引库。项目列表（`/api/status`、`/api/projects`）附 `last_update`（kb.db mtime）并按其降序——最近有知识写入的项目排最前。`DELETE /api/project` 删除项目知识库：**先注销注册表**（`registry.RemoveProject` + Save，失败 500 中止、目录不动）**再 `os.RemoveAll` 项目目录**（失败 200 + `warning`/`dir`——兜底永远偏向留数据）；目录名取注册表匹配后的 `p.Name`，不接受用户原始输入拼路径。
@@ -293,14 +343,18 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 
 | 页面 | 端点 |
 |------|------|
-| 管理 | `GET /api/projects`、`GET /api/entries?project=`、`GET/POST/PUT/DELETE /api/entry`（标题 slug 定文件名、重复 409、写后同步索引）、`POST /api/approve`（草稿转正）、`POST /api/entry/archive`（归档/取消）、`POST /api/entry/optimize`（LLM 优化对照，未配置 409 `no_llm`）、`GET /api/search?project=&q=`、`GET /api/project/branch-info?project=`（继承徽标 hover 数据） |
+| 管理 | `GET /api/projects`（附同步状态：enabled/ahead/behind/conflict + dirty（mtime 比对）/syncing（标记文件））、`GET /api/entries?project=`、`GET/POST/PUT/DELETE /api/entry`（标题 slug 定文件名、重复 409、写后同步索引）、`POST /api/approve`（草稿转正）、`POST /api/entry/archive`（归档/取消）、`POST /api/entry/optimize`（LLM 优化对照，未配置 409 `no_llm`）、`GET /api/search?project=&q=`、`GET /api/project/branch-info?project=`（继承徽标 hover 数据）、`POST /api/project/attach` / `POST /api/project/detach`（空壳项目补挂/解除工作目录，registry.AddPath/RemovePath） |
+| 同步 | `POST /api/project/sync`（force 同步；含 sync init 三情形）、`GET /api/project/sync/status`、`GET /api/project/sync/conflict-file`、`POST /api/project/sync/resolve`（me/theirs/merged）、`POST /api/project/sync/finish`、`POST /api/project/sync/abort`、`POST /api/project/sync/ai-merge`（LLM 辅助合并，只返回不落盘） |
+| 图谱 | `GET /api/graph?project=`（nodes/edges/categories；ref 边来自正文 md 链接、struct 边挂 wiki 目录节点、sem 边来自向量 top-3 近邻经动态阈值过滤） |
 | 引导 | `GET /api/status`（agents[id/name/detected/hooksInstalled]、skillsInstalled、hooksTimeout、rxEnforceMode、disabled、app_version、home）、`POST /api/setup/hooks`（`{"agent":id}` 单装 / 缺省全装）、`POST /api/setup/hooks/remove`（单 agent 卸载）、`POST /api/setup/skills`、`POST /api/reasonix/enforce-mode`（mixed/soft/hard，落盘即生效） |
 | 设置 | `POST /api/toggle`（全局开关）；`POST /api/hooks/timeout`（独立写 `[hooks] timeout_sec`，1~60，**不重装 hooks**）；`GET/POST /api/retrieve`（dedup_turns 跨轮冷却）；`GET/POST /api/capture`（沉淀 mode/turn_interval；`turn_interval:0`=保持不变）；`GET/POST /api/gate`（泛化门控开关+短语表）；`GET/POST /api/enforce/rules`（`[[enforce]]` 整体读写，type 仅 changelog、code_globs/message 非空，空数组=清空）——retrieve/capture/gate/enforce-rules 四族的 `project` 参数可选：**缺省读写全局 `config.toml`**（经 `resolveConfigTarget` 分流，读 `config.Load` 缺文件按默认值），显式传项目名保持项目级合并读、项目 config 写的旧行为；embedding：`GET /api/setup/embedding` + `profile`/`DELETE profile`/`active`/`test`/`download`（断点续传+sha256，前端 1s 轮询进度）/`download/cancel`（留 .part 续传）/`models-dir`/`open-models-dir`/`ollama-models`；LLM：`GET /api/llm` + `profile`/`delete`/`active`/`max-tokens`/`test` |
+| 服务器 | `GET/PUT /api/server/config`（全局 `[server]` 段读写，token 空串保留旧值；空 URL 整段清空即 logout）、`POST /api/server/test`、`POST /api/server/login`、`GET /api/server/me`、`POST /api/server/change-password`、`POST /api/server/repos`（建仓一条龙）、`POST /api/server/pull`（新机器注册空壳项目 + clone 服务器仓）、`POST /api/server/credential/ensure`（本机 git 凭证 ensure）、管理类透传（users/orgs/repos/audit/tokens 列删，serverx 转发 okserver） |
+| 更新 | `GET /api/update/check`（GitHub 最新版本，gui.json 缓存 6h fail-open；`?force=1` 绕过）、`POST /api/update/skip`（记录跳过版本）、`POST/GET /api/update/download`（安装器下载任务，.part 断点续传 + 轮询快照）、`POST /api/update/apply`（Windows 静默安装 + 升级熔断标记） |
 | 日志 | `GET /api/logs?tail=&sig=`（ok/daemon/sidecar 三来源，行带 `src`/`semantic` 标记；sig 命中返回 `unchanged` 前端跳过重绘） |
 | 其他 | `GET /api/export?project=`（zip）、`POST /api/import`（multipart 32MB，`Report{imported,skipped,projects}`）、`GET /api/changelog`（`current/pending/all`，pending 只算严格大于 last_seen 且不超过 current 的版本）、`POST /api/changelog/seen`（仅升级首弹关闭才标已读，写 `~/.openknowledge/gui.json`）、`DELETE /api/project`、`GET /help.md`（静态） |
 | 横切 | `POST /api/heartbeat?project=`（返回该项目 kb.db mtime 作 `version`；beats 通道生产传 nil——存活感知由 daemon.json 自省 + 托盘承担，新前端不再 5s 轮询）、`POST /api/shutdown`、`POST /api/uninstall`、`GET/POST /api/inject`（注入预算） |
 
-前端 `web/`（零依赖原生 HTML/JS/CSS，无构建链；index.html 骨架 + app.js + style.css）：左右栏五菜单 + `location.hash` 路由（刷新恢复当前菜单）+ 中英切换（只翻界面 chrome 不翻数据）+ 昼夜 CSS 变量双主题 + 整页重渲保持各滚动容器 scrollTop。「管理」=项目→条目两级树（类型徽标/mandatory★/draft/归档置灰 + 标题过滤 + 计数）+ markdown 详情 + 右上操作组（编辑/批准/归档/删除）+ 新建/编辑弹窗内 ✨优化（loading→对照预览→逐字段回填，409 弹「尚未配置模型」）；「引导」=agent 卡片（品牌字形 data-URI、未检测不渲染、安装/卸载双态、明细展开）+ Reasonix 强制检查三档卡 + Codex 信任门说明卡；「设置」=八卡（全局开关/语义检索/模型配置/Hook 超时/跨轮注入冷却/经验沉淀/泛化门控/规则配置；后四卡为全局配置，不带 project、无项目也可用），开关即存、简单输入行内保存改回原值变灰、弹窗确定生效闪 ✓；「日志」=深色控制台（来源 chips+仅语义+过滤，贴底滚动）；「其他」=导出/导入/更新日志/使用帮助/删除项目知识库（备份+ack+输名三重解锁）/关于。启动横切：升级后首次打开自动弹更新日志（pending 非空 → body 级弹窗，不进 render 周期）；`/api/projects` 为空时落「引导」页（旧 GUI"无项目隐藏管理 tab"语义的等价形态）。daemon 被替换致 token 过期 401 时自动刷新一次页面取新 token（sessionStorage 标志防循环）。
+前端 `web/`（零依赖原生 HTML/JS/CSS，无构建链；index.html 骨架 + app.js + style.css）：左右栏七菜单 + `location.hash` 路由（刷新恢复当前菜单）+ 中英切换（只翻界面 chrome 不翻数据）+ 昼夜 CSS 变量双主题 + 整页重渲保持各滚动容器 scrollTop。「管理」=项目→条目两级树（类型徽标/mandatory★/draft/归档置灰 + 标题过滤 + 计数）+ markdown 详情 + 右上操作组（编辑/批准/归档/删除）+ 行内同步状态点（五态：dirty 黄/syncing 黄闪/冲突红/落后/同步）与同步按钮 + 新建/编辑弹窗内 ✨优化（loading→对照预览→逐字段回填，409 弹「尚未配置模型」）；「图谱」=项目知识图谱（自绘 SVG 力导向引擎：中心双锚辐射布局、拖拽缩放、悬停邻居淡化、双击关联条目跳管理页定位；>400 条目自动分层模式——骨架（is_dir 或 deg≥6）常显 + 类目下钻，叶子不进 DOM 不参与物理；收敛后自动二次取景）；「引导」=agent 卡片（品牌字形 data-URI、未检测不渲染、安装/卸载双态、明细展开）+ Reasonix 强制检查三档卡 + Codex 信任门说明卡；「服务器」=okserver 连接三步向导（地址/登录/建仓）+ 管理/成员双视图（账号/仓库/凭证管理）+ 强制改密弹窗（全局 403 `must_change_password` 钩子）+ 服务器仓拉取（单拉/全部拉取/登录自动提示未注册仓）；「设置」=八卡（全局开关/语义检索/模型配置/Hook 超时/跨轮注入冷却/经验沉淀/泛化门控/规则配置；后四卡为全局配置，不带 project、无项目也可用），开关即存、简单输入行内保存改回原值变灰、弹窗确定生效闪 ✓；「日志」=深色控制台（来源 chips+仅语义+过滤，贴底滚动，2s 轮询 + sig 跳过重绘）；「其他」=导出/导入/更新日志/使用帮助/版本升级卡（检查/进度下载/一键安装/跳过版本）/删除项目知识库（备份+ack+输名三重解锁）/关于。冲突解决页（hash 路由子页）=卡片流 + 顶部钉住操作条 + 三向合并编辑器（marker 块采纳三栏）+ AI 合并。启动横切：升级后首次打开自动弹更新日志（pending 非空 → body 级弹窗，不进 render 周期）；新版本启动弹窗（升级/跳过/知道了）+ 侧栏红点；`/api/projects` 为空时落「引导」页（旧 GUI"无项目隐藏管理 tab"语义的等价形态）。daemon 被替换致 token 过期 401 时自动刷新一次页面取新 token（sessionStorage 标志防循环）。
 
 ### 5.12 backup — 知识库导出/导入（251 行）
 
@@ -312,7 +366,40 @@ GUI「其他」tab 背后的备份包（叶子包：stdlib zip + registry/entry/
 
 ### 5.13 version — 构建期注入的应用版本号（6 行）
 
-`var Version = "dev"`；`scripts/build-dist.sh` 用 sed 从 `installer/openknowledge.iss` 的 `#define AppVersion` 提取版本，经 `-ldflags -X openknowledge/internal/version.Version=` 注入——版本事实源只有 .iss 一处，裸 `go build` 为 `dev`。经 `/api/status` 的 `app_version` 暴露给前端。
+`var Version = "dev"`；`scripts/build-dist.sh` 用 sed 从 `installer/openknowledge.iss` 的 `#define AppVersion` 提取版本，经 `-ldflags -X openknowledge/internal/version.Version=` 注入——版本事实源只有 .iss 一处，裸 `go build` 为 `dev`。经 `/api/status` 的 `app_version` 暴露给前端。四个 exe（ok/okd/okmanager/okdeploy）与 okserver 镜像共用同一注入机制。
+
+### 5.14 syncx — 个人多端同步引擎（v2.23，git.go + repo.go + sync.go + status.go + conflict.go + init.go + credential.go，约 760 行）
+
+在项目数据目录（`~/.openknowledge/projects/<名>/`）里直接执行系统 git 的单机引擎——知识库即 git 仓，同步 = 普通 git 工作流，无自建协议。叶子包（仅 fsx + procx），cli/gui/daemon 三方共用：
+
+- **git 执行器（git.go）**：参数数组调 `git -C dir`，不走 shell；env 固定 `GIT_TERMINAL_PROMPT=0`（防凭据提示挂起）、`LC_ALL=C`（防本地化输出影响解析）、`GIT_EDITOR=true`（防唤起编辑器）；`-c core.quotepath=false` 保中文路径可读。错误三分类：`ErrGitNotFound`（未装 git，同步禁用但本地功能不受影响）/ `ErrTimeout`（本地 10s、网络 60s）/ `*ExitError`（退出码 + 合并输出）
+- **Repo 原语（repo.go）**：`IsRepo` 纯文件系统判断（.git 目录或 worktree gitfile 指针，不起子进程——/api/projects 对每项目都调，Windows 进程创建是管理页加载主要开销）；Status/CommitAll/Push/CloneToDir（同卷临时目录、仓级 autocrlf=false）
+- **Sync 编排（sync.go）**：一次执行 = `add -A` → 有变更则 commit（身份内置 `-c user.name=OpenKnowledge Sync`，无全局 git 身份的环境可跑）→（有远端先 fetch）`pull --rebase` → push。**冲突守卫**：rebase/merge 进行中（上次冲突未解决）直接报告未决冲突返回，不做任何提交/拉取——否则 `add -A` 会把冲突标记提交进历史；MERGE_HEAD 同样拦（init 情形 3 的手工 merge 中途）；pull 冲突 = 结构化结果（`Outcome.Conflicts`，err=nil）而非错误，停在半途等人解决并停止 push。`SyncOnce` 为 single-flight：同 dir 并发合并为一次执行，后到者拿同一结果（计数归执行者）
+- **分层状态文件（status.go）**：`state/sync-status.json`（`layers.personal` = last_sync/ahead/behind/conflict/last_error，从第一天按层建模，团队层演进时平移）、`state/sync-conflict.json`（GUI 冲突页数据源，syncx 独占写）、`state/syncing`（同步进行中标记，stale 5 分钟守卫防进程死亡残留）
+- **冲突解决原语（conflict.go，供 GUI 冲突页）**：pull --rebase 期间 stage 语义反转——`:1:`=base、`:2:`=远端、`:3:`=本地；对外只暴露用户语义（local=本机改动/remote=远端改动），严禁直译 git ours/theirs；ResolveFile 写解决结果并 add，Continue/Abort 走 rebase --continue/--abort
+- **init 三情形（init.go，cli 与 gui 共用）**：无远端 = 仅本地历史；本地无内容 = 克隆远端；本地有内容 = init+commit+关联 remote+首推。两边各自初始化过且均有内容报 `ErrRemoteNotEmpty`（不自动合并，指引手工 `merge --allow-unrelated-histories` 一次）
+- **凭据（credential.go）**：git 凭据写系统 credential helper；无 helper 时 approve 会静默丢弃（git 语义），显式返回 `ErrNoCredentialHelper` 由调用方回退 URL 内嵌。同步遇 git 认证失败自愈：`HasStoredCredential` 探测 → 经 serverx 自助重发 token（okserver `POST /api/v1/git-token`）→ 刷新凭据重试一次
+- **触发面**：CLI `ok sync`；daemon 每分钟 ticker 检查按项目 `auto_interval_min` 到点触发 + 条目写入后 30s 防抖触发（均走 SyncOnce，见 6.5）；GUI 管理页同步按钮与冲突解决页（七端点，见 5.11）
+
+### 5.15 oksrv / serverx / credmig — okserver 服务端管理面（v2.23~v2.24）
+
+okserver 是独立的**服务端程序**（cmd/okserver，NAS/Docker 部署，Linux 形态，不进 Windows 安装包）：SQLite 存储 + bcrypt 认证 + Gitea GitBackend + 管理面 HTTP API。薄 main：env 配置（`OKSERVER_LISTEN` 默认 `:3100`、`OKSERVER_DATA_DIR`、`OKSERVER_GITEA_URL`/`OKSERVER_GITEA_ADMIN_TOKEN`）→ 存储 → root 首启（明文写 `<dataDir>/INITIAL_ROOT_PASSWORD` 0600 + 日志打印一次）→ HTTP 服务；`reset-root` 子命令供部署器远程重置 root 密码。
+
+- **存储（store.go）**：users/sessions/orgs/org_members/repos/audit/meta 七表，时间列一律 TEXT 存 UTC RFC3339；`users.must_change_password` 列幂等迁移（初始/重置密码置位，重置时踢掉目标用户全部会话）
+- **认证（auth.go）**：bcrypt + 会话 token + 登录限流
+- **GitBackend（gitbackend.go + gitea.go + gitbackend_fake.go）**：接口隔离 Gitea admin API（建用户/建仓/发 token；建 token 带 `write:repository` scope，失败回滚不留半截），fake 实现供测试不碰真实 Gitea
+- **HTTP API（http.go）**：`Bearer` 鉴权 + `admin` 角色门控 + **强制改密 gate**（带标记的会话只放行 me/change-password 白名单，其余 403 `must_change_password`）+ 审计随事实落盘。端点：login/me/change-password、`POST /api/v1/repos/personal`（建仓）、`POST /api/v1/git-token`（自助重发 git token——按机器分名 `ok-sync-r-<hostname>`，删本机同名旧 token 再建，多端互不吊销）、tokens 列删（自助 + 管理员任意用户）、users/orgs/repos/audit 管理面。无 cookie/静态页 → CSRF 结构免疫（LAN 服务不做 Origin/Host 白名单）
+- **凭证统一（v2.24.2）**：git 凭证唯一发放通道 = `apiGitToken` 自助重发（建仓/建用户不再下发 token）；**每台机器一条** `ok-sync-r-<hostname>`。`internal/credmig` 负责本机迁移：daemon 同步周期发现已配服务器且未迁移（`~/.openknowledge/cred-migrated.json` 标记）时先 ensure 本机新凭证、覆盖所有已绑定项目 remote 再同步（失败仅记日志下轮重试）；GUI 凭证页「清理旧版凭证」按钮同走此包
+- **serverx（客户端，338 行叶子包）**：ok/okd/GUI 侧打 okserver 管理 API 的薄 Bearer 客户端（15s 超时，`Error{Code,Msg}` 透传状态码；`GitToken` 回显 token_name）；GUI `/api/server/*` 端点大部分为其转发 + 本地编排（建仓一条龙、拉取注册空壳项目 + clone、绑定管线共用 serveBindRepo）
+
+### 5.16 deployx / okdeploy — 一键部署器（v2.24，okdeploy 独占）
+
+把 okserver 经 SSH 一键部署到 NAS 的**独立程序**（cmd/okdeploy，不进客户端安装包，`dist/deploy/` 单独分发）：双击启动 → 监听 127.0.0.1 随机端口 → 内嵌 WebView2 窗口（不可用回退浏览器，与 GUI 共用 `gui.BrowserOptions` 形态）→ 四页前端（连接/探测/部署/管理，go:embed 内嵌 + 中英切换）。
+
+- **Executor 接口（executor.go + ssh.go）**：流式执行/上传/下载三原语；`SSHClient` 用 `x/crypto/ssh` 实现（go.mod 已有依赖，零新增）；`LogHub` 收集日志并向订阅者广播（保留全量历史，迟到订阅者先补历史）
+- **任务编排（task.go）**：Task = 步骤序列，掩码步骤的失败可附 stdout 尾（gitea CLI 日志走 stdout）；前端经本地 HTTP API + SSE 实时日志（api.go，token 鉴权）
+- **探测/部署/管理（probe/deploy/manage/backup.go）**：远端环境探测（docker/compose 分两档、端口、已有 Gitea/已有部署，sudo 自动回退）；compose 模板 + .env 渲染双模式——`full`（全新部署：Gitea + okserver 两容器，Gitea 无人值守初始化，root 密码安全读取）/ `external`（接入已有 Gitea）；管理页任务 = 状态/升级（新版本检测 + 重拉当前版本）/容器日志/备份/恢复（停机一致性语义）/重置 root（`okserver reset-root`）/卸载（默认保留数据）
+- **发布线**：`.github/workflows/docker.yml` 打 v* tag 构建 okserver 多架构镜像，GHCR + Docker Hub（`z7dream/openknowledge-okserver`）双发；部署侧默认拉 Docker Hub，不可达时 `.env` 的 `OKSERVER_IMAGE` 可切 GHCR 全名；registry 未发布前优先用本地 `docker load` 的镜像（tag 白名单防线）；拉镜像 3 次重试 + 60min 超时（NAS 直连 Docker Hub 限速）
 
 ---
 
@@ -367,7 +454,7 @@ ok setup [--agent <id>]
     一个都未检测到时跳过 hooks 写入继续后续步骤
       kimi：备份 ~/.kimi-code/config.toml → 标记块幂等写入 3 条 hook
       pi：渲染 TS 扩展写入 ~/.pi/agent/extensions/openknowledge.ts（既有非本工具文件先备份）
-  → 安装 openknowledge-init/on/off/propose/capture/wiki 六个技能到 ~/.agents/skills/（烧入 exe 路径）
+  → 安装 openknowledge-propose / openknowledge-wiki 两个技能到各 agent 技能目录（烧入 exe 路径）
   → 交互（或 flags）收集 embedding：三选一（线上 OpenAI 兼容 / Ollama / 内置本地模型，
       内置含清单选择与镜像下载进度）→ 写全局 ~/.openknowledge/config.toml（0600）→ 立即连通性验证
   → 打印引导
@@ -387,8 +474,10 @@ ok setup [--agent <id>]
 - hook 兜底：daemon 不在时本次请求本地直接处理（hook.Handle* 原逻辑），同时后台拉起 daemon
 - 安装器写 HKCU Run 登录自启；卸载/ok daemon stop/setupx.Uninstall 均可停 daemon
 - kb.db 所有写入收敛到 daemon 单进程；index.Open 另加 busy_timeout(3000) 兜底短暂并发
-- 系统托盘（internal/tray）内嵌 daemon 进程：右下角图标，单击弹菜单（版本号 + 退出）、双击打开/聚焦唯一 GUI 窗口；菜单"退出"与 `ok daemon stop` 同走 /api/shutdown 链路
+- 系统托盘（internal/tray）内嵌 daemon 进程：右下角图标，单击弹菜单（版本号 + 检查更新 + 退出）、双击打开/聚焦唯一 GUI 窗口；"检查更新"打开 GUI 直达版本卡（内含窗口长轮询，异步派发避免卡死消息线程）；菜单"退出"与 `ok daemon stop` 同走 /api/shutdown 链路
 - embedding sidecar janitor（10s 周期调和）：active=内置且模型就绪 → 拉起/保持 llama-server；空闲 10 分钟回收、崩溃有界重启 ×3、切换/停用即回收、daemon 退出兜底回收（实现见 5.5/17.4）
+- 同步 janitor（internal/daemon/sync.go）：每分钟 ticker 遍历注册项目，启用 `[sync]` 且到点（`auto_interval_min`）的跑 `syncx.SyncOnce`（`auto_interval_min=0` 关闭全部自动触发）；条目写入（approve、GUI 编辑保存等）经 `NotifyWrite` 30s 防抖后对启用同步的项目 force 跑一轮——未同步窗口压到分钟级。两路并发经 syncCycleMu 串行化（RecordOutcome 对状态文件的读-改-写不加锁存在 lost-update 窗口）。每轮先做凭证统一迁移（credmig，已配服务器且未迁移时换新 `ok-sync-r-<hostname>` 凭证，失败仅记日志下轮重试）。失败仅记 daemon 日志，绝不影响本地链路
+- 升级熔断：`~/.openknowledge/update/.upgrading` 存在期间 `daemon.Ensure/EnsureCurrent` 一律不拉起 daemon（升级安装期间 hook/托盘的拉起被挡住）；okd 启动时自愈删除残留标记（升级收尾/异常中断兜底，见 6.9）
 
 ### 6.6 wiki（项目 wiki 的生成驱动与落后提醒）
 
@@ -427,6 +516,67 @@ hook prompt（基础注入之后）
 **GUI 打磨与项目删除（v2.8.1~v2.9.0）**：表头/类型显示中文化（存储值保持英文）；摘要列 `line-clamp:2` 两行截断 + 单例浮窗跟随鼠标（溢出视口自动翻转、滚动收起）；项目列表接口附 `last_update`（kb.db mtime）降序，打开默认选中最近写入的项目；「刷新」从只重拉条目改为全量 `refreshStatus` + 三态反馈；v2.9.0 落地「删除项目知识库」——GUI 三重确认（影响面计数 + 默认勾 zip 备份 + 勾选/输名解锁）+ 后端先注销后删目录，删除当前选中项目时前端先清 `state.project` 再刷新，避免 capture 接口 404 误报。
 
 **目标**：wiki 由 AI 技能生成、但"该不该更新"由机制提醒——游标 + 阈值把 wiki 新鲜度变成可检查的状态，提示复用现有 prompt 注入通道，不增加新 hook。
+
+### 6.7 个人多端同步链路（v2.23）
+
+```
+ok sync init [remote-url]（或 GUI 管理页建仓一条龙）
+  → 三情形编排（syncx.InitForSync）：仅本地历史 / 克隆远端 / 首推
+  → 写项目 config.toml [sync]（enabled/remote/auto_interval_min/llm_assist，随仓同步）
+
+日常触发（三路均收敛到 syncx.SyncOnce single-flight）
+  → ok sync（手动）
+  → okd 同步 ticker：每分钟检查，按项目 auto_interval_min 到点触发
+  → 写入防抖：approve/GUI 保存后 30s 防抖 force 一轮
+
+一次同步 = add -A → commit（身份内置）→ fetch → pull --rebase → push
+  → 冲突：停在 rebase 半途，Outcome.Conflicts 非空、err=nil，停止 push
+  → state/sync-conflict.json 落冲突清单 → GUI 冲突解决页（卡片流/三向合并/AI 合并）
+  → resolve → finish（rebase --continue + push）或 abort 回到同步前
+```
+
+**目标**：知识库即 git 仓，多端同步复用成熟 git 语义；冲突不是错误而是等人解决的状态；所有自动触发失败仅记日志，绝不影响本地链路。git 认证失败自愈：探测本机凭据缺失 → 经 serverx 向 okserver 自助重发 token（`ok-sync-r-<hostname>`）→ 刷新凭据重试一次。
+
+### 6.8 okserver 服务端与空壳项目（v2.23~v2.24）
+
+```
+GUI 服务器页（三步向导：地址 → 登录 → 建仓）
+  → [server] 段（全局 config.toml：url/username/token）+ serverx 客户端
+  → 建仓一条龙：okserver 建个人仓（Gitea）→ 本地 sync init + 绑定 + 首推
+
+新机器接入
+  → 登录后自动提示本机未注册的服务器仓 → 一次确认批量绑定
+  → POST /api/server/pull：注册空壳项目（无 paths）+ clone 服务器仓到 KB 目录
+
+空壳项目（服务器拉取/备份恢复产生：注册表有条目但无工作目录关联）
+  → ok init 同名项目幂等补挂工作目录（registry.AddPath，幂等/冲突哨兵）
+  → GUI 行内「关联目录」按钮 / 一键批量关联；挂错可 detach 解除（RemovePath）
+
+强制改密（v2.24.0）
+  → 初始/重置密码置 must_change_password（重置时踢掉目标用户全部会话）
+  → 服务端 gate 中间件拦截已认证端点（me/change-password 白名单除外，403）
+  → GUI 全局 403 must_change_password 钩子 → 强制改密弹窗
+```
+
+### 6.9 客户端版本升级链路（v2.24.3）
+
+```
+检查：GET /api/update/check（gui.json 缓存 6h，fail-open；启动自动检查走缓存，
+      手动「检查更新」/进其他页带 ?force=1 真查；GitHub 不可达如实报 error）
+提示：新版本 → 启动弹窗（升级/跳过/知道了）+ 侧栏红点 + 其他页版本卡；
+      服务器页另检测服务端版本高于客户端时提示升级；托盘菜单「检查更新」直达版本卡
+下载：POST /api/update/download 任务化（.part 断点续传，Range/206，200 降级整下），
+      前端轮询 GET 快照进度
+安装：POST /api/update/apply（Windows）
+      → 先写升级熔断 ~/.openknowledge/update/.upgrading（200 之前写好，写失败 500 中止）
+      → goroutine detached 拉起安装器 /VERYSILENT /SUPPRESSMSGBOXES /NORESTART 后 okd 自退
+      → 安装期间 hook/托盘的 daemon 拉起全被熔断挡住（daemon.Ensure 检查标记）
+      → 安装器 [Run] 段收尾拉起新 okd；okd 启动自愈删除残留熔断标记
+      → 升级成功 5s 后前端自动 reload
+跳过：POST /api/update/skip 记 gui.json SkippedVersion，该版本不再弹窗/红点
+```
+
+apply 序列刻意移出 okd 进程（安装器收尾 + 自愈兜底），并发防护防重复安装；安装器没起来而熔断已写时回滚熔断 + 复位 guard，避免永久锁死。
 
 ---
 
@@ -477,8 +627,12 @@ hook prompt（基础注入之后）
 │                           #   （CleanArchives 在轮替发生与 daemon 启动时清理；Windows 上被
 │                           #   占用的文件改不了名，失败跳过本轮 fail-open）
 ├── registry.toml           # 项目注册表：[[project]] name + paths
-├── config.toml             # 全局配置：[[embedding.profiles]]/inject/retrieve 默认值
+├── config.toml             # 全局配置：[[embedding.profiles]]/inject/retrieve 默认值/[server] 段
 ├── hooks-disabled          # 全局开关标志文件（存在即全部静默）
+├── gui.json                # GUI 持久化小状态：last_seen_version / update_check（6h 缓存）/ skipped_version
+├── gui-state.json          # 内嵌窗口状态（maximized + normal 矩形，机器本地不进同步面）
+├── cred-migrated.json      # 凭证统一迁移标记（username/hostname/token_name/at，credmig）
+├── update/.upgrading       # 升级熔断标记（存在期间 daemon.Ensure 不拉起 okd；okd 启动自愈删除）
 ├── models/                 # 内置 embedding 模型旧默认位置（GGUF，约 146MB–639MB/档，sha256 钉死校验）；现默认 <安装目录>/models（[embedding] models_dir 可配）
 ├── embed-sidecar.json      # 内置 sidecar 状态（pid/port/model_id/last_used；hook/cli 只读发现）
 ├── embed-sidecar.want      # want 拉起标记（hook/cli 写，daemon 调和时见到拉起后清除）
@@ -490,7 +644,10 @@ hook prompt（基础注入之后）
     ├── kb.db               # SQLite 索引库：entries（原文）+ entries_fts（FTS5）+ vectors（向量 blob）+ meta（embedding_model/embedding_dim 身份）
     └── state/
         ├── session-*.json  # 会话状态（Touched/BlockedRules/BaseInjected/WikiNudged，超 7 天 GC）
-        └── wiki.json       # wiki 游标（base_branch + cursors 按分支记录 last_commit/generated_at/entry_count + merges 合并谱系数组，旧单游标格式读取时惰性迁移；固定文件名，不受 session 7 天 GC 影响）
+        ├── wiki.json       # wiki 游标（base_branch + cursors 按分支记录 last_commit/generated_at/entry_count + merges 合并谱系数组，旧单游标格式读取时惰性迁移；固定文件名，不受 session 7 天 GC 影响）
+        ├── sync-status.json   # 分层同步状态（layers.personal = last_sync/ahead/behind/conflict/last_error）
+        ├── sync-conflict.json # 当前冲突文件清单（GUI 冲突页数据源，syncx 独占写）
+        └── syncing            # 同步进行中标记（RFC3339 时间戳；stale 5 分钟视为进程死亡残留忽略）
 ```
 
 **写入纪律**：INDEX.md 与 kb.db 由工具维护，不手改；knowledge/ 是人工维护区；config.toml 项目级手写（模板含注释示例）。旧版 vectors.json 首次打开 kb.db 时自动导入并改名为 `.bak`。
@@ -585,15 +742,20 @@ dsh 适配器（`deepharness.go` + 内嵌模板 `dsh_plugin.js`）：DeepSeek Ha
 - 协议：`POST {base_url}/embeddings`，请求 `{model, input:[...]}`，响应 `{data:[{embedding,index}]}`（按 index 重排）
 - 超时：客户端 `timeout_sec`（默认 5s）< hook 配置的 10s 上限，保证任何情况下 hook 不会拖累会话；builtin 未就绪**立即**降级（写 want 标记），不占超时预算
 
+### 9.4 okserver 与 Gitea（服务端二依赖）
+
+okserver（见 5.15）把"团队/多端 git 仓托管"外包给 **Gitea**：`GitBackend` 接口的 gitea.go 实现走 Gitea admin API（建用户/建个人仓/组织仓/发删 token）；部署形态为 docker compose 双容器（okserver + Gitea，`server/nas/` 或 okdeploy full 模式），也可 `external` 模式接入已有 Gitea。Gitea 版本兼容点实测钉住：1.22 起 token 必须带 scope（`write:repository`）、从 `[security]` 段读安装锁、1.24+ token 列表才有 `last_used_at` 时间字段（≤1.23 零值输出空串前端回落）；容器内 gitea CLI 需 `-u git`（官方镜像主进程 root，默认 exec 用户触发运行用户检查 fatal）。
+
 ---
 
 ## 10. 性能与可靠性策略
 
 | 优化项 | 位置 | 说明 |
 |--------|------|------|
-| **单二进制 + 进程内无状态** | 全项目 | hook 冷启动 ~10ms；无 daemon、无 IPC |
+| **单二进制 + 进程内无状态** | 全项目 | hook 冷启动 ~10ms；状态全在磁盘，daemon 不在时本地直接处理（fail-open） |
 | **SQLite 索引 + mtime 增量同步** | `index` | 检索不逐文件扫描 Markdown；未变化条目不重算向量，每次调用最多为提问算 1 次 embedding |
 | **embedding 失败降级** | `hook.HandlePrompt` | 超时/失败自动退化为纯关键词检索，注入永不缺席 |
+| **同步失败隔离** | `syncx`/`daemon` | 同步（ticker/防抖/手动）任何失败仅记日志，本地链路零影响；冲突是状态不是错误，守卫防吞冲突标记 |
 | **token 预算截断** | `store.TruncateToBudget` | 注入文本按 `inject.max_tokens` 截断（字符数÷2 保守估算） |
 | **全面 fail-open** | 所有 hook handler | 任何内部错误 → ok.log + exit 0；`main.runHook` 还有 panic-recover 兜底 |
 | **损坏条目跳过** | `index.Sync` | 变化条目解析失败跳过该文件（已索引旧行保留）并返回 `*CorruptEntriesError`：一个坏条目不拖垮全部注入 |
@@ -605,7 +767,7 @@ dsh 适配器（`deepharness.go` + 内嵌模板 `dsh_plugin.js`）：DeepSeek Ha
 
 ## 11. 依赖关系图
 
-（早期核心链路快照；完整包清单与主干依赖以 §3 为准——agentx/rxext/daemon/fsx/logx 等新增层未画入本图。）
+（早期核心链路快照；完整包清单与主干依赖以 §3 为准——agentx/rxext/daemon/fsx/logx/syncx/serverx/oksrv/deployx 等新增层未画入本图。）
 
 ```
                  ┌─────────┐
@@ -650,19 +812,25 @@ dsh 适配器（`deepharness.go` + 内嵌模板 `dsh_plugin.js`）：DeepSeek Ha
 ```bash
 go build -o ok.exe ./cmd/ok   # Windows
 go build -o ok ./cmd/ok       # Linux/macOS
-bash scripts/build-dist.sh    # 发布构建：dist/ok.exe（-ldflags "-s -w -H windowsgui" + 版本注入）+ dist/web/
-python scripts/build.py       # 一键构建：dist/（ok.exe + web/ + changelogs/ + runtime/）+ Inno 安装包
+bash scripts/build-dist.sh    # 发布构建：dist/ok.exe·okd.exe·OkManager.exe（-ldflags "-s -w -H windowsgui" + 版本注入）+ dist/web/ + dist/deploy/okdeploy-windows-amd64.exe
+python scripts/build.py       # 一键构建：dist/（ok.exe + web/ + changelogs/ + runtime/）+ Inno 安装包；--test 产测试包（版本号追加 _test，临时 iss 不改原文件）
 bash scripts/build-linux.sh   # Linux 发布：tar + deb（含 runtime/）
 ```
 
-无构建标签、无代码生成、无资源嵌入；`go.mod` 声明 `go 1.25.0`。GUI 的 web 资源不内嵌，由 `dist/web/` 随二进制分发。应用版本号由 build-dist.sh 用 sed 从 `installer/openknowledge.iss` 的 `#define AppVersion` 提取，经 `-ldflags -X openknowledge/internal/version.Version=<版本>` 注入 `internal/version.Version`（事实源只有 .iss 一处；裸 `go build` 为 `dev`）。**版本 bump 三处同步**：`scripts/sync-version.sh` 统一改写 README 徽标、官网（site/ 的 VER 变量/直链/文案）与 `cmd/ok/winres.json` 的 exe 版本资源（四段式 = 三段版本号 + ".0"；v2.9.0 起曾漏改 winres.json 漂移停在 2.8.0.0，v2.16.0 起脚本兜底，pre-push 钩子也会跑）。
+无构建标签、无代码生成；前端资源仅 deployx/webui 内嵌（go:embed），客户端 GUI 的 web 资源不内嵌、由 `dist/web/` 随二进制分发。应用版本号由 build-dist.sh 用 sed 从 `installer/openknowledge.iss` 的 `#define AppVersion` 提取，经 `-ldflags -X openknowledge/internal/version.Version=<版本>` 注入 `internal/version.Version`（事实源只有 .iss 一处；裸 `go build` 为 `dev`）。**版本 bump 三处同步**：`scripts/sync-version.sh` 统一改写 README 徽标、官网（site/ 的 VER 变量/直链/文案）与四个 `cmd/*/winres.json` 的 exe 版本资源（ok/okd/okmanager/okdeploy，四段式 = 三段版本号 + ".0"；v2.9.0 起曾漏改 winres.json 漂移停在 2.8.0.0，v2.16.0 起脚本兜底，pre-push 钩子也会跑）。
+
+**okdeploy 独立分发**：构建进 `dist/deploy/`（windows + linux 双平台），**不进客户端安装包**（iss 不打 dist/deploy）。
+
+**安装器收尾（iss）**：`[Run]` 段静默覆盖安装后拉起新 okd（`nowait runhidden`，不带 skipifsilent——配合升级熔断的收尾，见 6.9），交互安装另给「打开配置中心」勾选项拉起 OkManager。
+
+**okserver 镜像发布（CI）**：`.github/workflows/docker.yml` 打 `v*` tag（或 workflow_dispatch 手动单发）构建 okserver 多架构镜像，GHCR + Docker Hub（`z7dream/openknowledge-okserver`）双发；NAS 侧默认拉 Docker Hub，`OKSERVER_IMAGE` 可切 GHCR。
 
 **runtime 随包分发（内置 embedding 推理运行时）**：`build.py`/`build-linux.sh` 从 llama.cpp release 下载预编译 `llama-server`（版本钉死 b10405 CPU 版，win `bin-win-cpu-x64` zip / linux `bin-ubuntu-x64` tar；`LLAMA_CPP_BASE_URL` 可换源）到 `dist/runtime/`，iss 装到 `{app}\runtime`、linux 包装进 tar/deb 同目录——安装包体积因此约 50MB 级。运行时定位 `<exe 所在目录>/runtime/llama-server`，缺失则内置形态不可用（裸 exe 便携形态）并在 GUI/CLI/doctor 明确提示。**模型不随包分发**：首次启用内置形态时按清单从镜像源下载（默认 hf-mirror，约 146MB–639MB/档，断点续传 + sha256 校验）默认下载到 `<安装目录>/models/`（`[embedding] models_dir` 可改；GUI 配置弹窗可直接修改并打开文件夹，已有模型文件不随迁）。
 
 ### 12.2 常用开发命令
 
 ```bash
-go test ./...          # 全部测试（33 包）
+go test ./...          # 全部测试（42 包）
 go vet ./...           # 静态检查
 go build ./...         # 编译检查
 ```
@@ -677,10 +845,12 @@ go build ./...         # 编译检查
 
 | 命令 | 作用 | 关键行为 |
 |------|------|----------|
-| `ok setup` | 首次引导 | 写 hooks 配置（标记块幂等）+ 装 6 个 kimi 技能 + 交互配 embedding + 连通性验证 |
+| `ok setup` | 首次引导 | 写 hooks 配置（标记块幂等）+ 装 2 个技能（propose/wiki）+ 交互配 embedding + 连通性验证 |
 | `ok gui` | 打开配置中心 | 无参数运行同效；与 OkManager.exe 同为薄启动器——确保 okd 在线后开浏览器即退；127.0.0.1:17888 + 令牌鉴权（由常驻 okd 承载）；页面关闭不退出进程 |
 | `ok daemon [stop]` | 常驻进程管理 | 无参启动常驻 daemon（承载 GUI 与 hook 转发，端口 17888 即单实例锁）；`stop` 停止 daemon |
-| `ok init [名字]` | 注册当前项目 | 名字缺省取目录基名；建 KB 骨架；幂等写入/更新 hooks 配置（复用 setup 逻辑，失败仅提示） |
+| `ok init [名字]` | 注册当前项目 | 名字缺省取目录基名；建 KB 骨架；幂等写入/更新 hooks 配置（复用 setup 逻辑，失败仅提示）；同名空壳项目（无 paths）幂等补挂工作目录（registry.AddPath，救拉取/恢复空壳） |
+| `ok sync` | 项目知识库多端同步 | 一次执行 = commit → pull --rebase → push（syncx.SyncOnce）；冲突时列文件并指引 GUI 冲突解决页或手动 rebase --continue；同步失败不影响本地功能 |
+| `ok sync init [remote-url]` | 初始化同步 | 三情形：无远端仅本地历史 / 本地无内容克隆远端 / 本地有内容首推；写项目 `[sync]` 段；远端已有内容报 ErrRemoteNotEmpty 不自动合并 |
 | `ok add --title …` | 新建条目 | `--type/--tags/--mandatory/--file`；自动同步索引库（无 key 时向量跳过） |
 | `ok propose --title …` | AI 提议草稿条目 | `--type/--tags/--summary/--file|--body`；写 `draft:true`，只同步 INDEX 不算向量，不参与检索 |
 | `ok approve <文件>` | 批准草稿转正 | draft=false 并同步 INDEX 与向量；非草稿/缺文件报错 |
@@ -704,11 +874,11 @@ go build ./...         # 编译检查
 
 ### 14.1 自动化测试
 
-- **单元测试**（`internal/` 各包白盒单测，共 84 个 `*_test.go` 文件）：registry 路由、entry 解析（含 CRLF/BOM）、config 三层合并、store 截断、embed（httptest fake server）、index（同步/查询/mandatory/迁移/2k 条目）、retrieve 分词、state 持久化、enforce 全分支、project 解析、hook 三入口、cli 各命令、setup 幂等写入
-- **端到端测试**（`tests/e2e/`，integration/daemon/wiki 共 3 个文件）：`TestMain` 编译真实二进制，驱动完整流程——init → add → 首次提问基础注入 → 二次提问不重复 → 手改条目后 hook 查询前增量同步命中并重建 INDEX → enforce 阻断一次后放行 → 未注册目录静默 → 开关 off/on
+- **单元测试**（`internal/` 各包白盒单测，共 144 个 `*_test.go` 文件）：registry 路由、entry 解析（含 CRLF/BOM）、config 三层合并、store 截断、embed（httptest fake server）、index（同步/查询/mandatory/迁移/2k 条目）、retrieve 分词、state 持久化、enforce 全分支、project 解析、hook 三入口、cli 各命令、setup 幂等写入、syncx（git 执行器/三情形 init/冲突守卫/single-flight，内置 git 身份无需全局配置）、oksrv（存储/认证/端点 + fake GitBackend）、deployx（任务编排/模板渲染/sudo 回退）、gui（同步/服务器/升级端点真 HTTP 测试）
+- **端到端测试**（`tests/e2e/`，integration/daemon/wiki/okserver/sync 共 5 个文件）：`TestMain` 编译真实二进制，驱动完整流程——init → add → 首次提问基础注入 → 二次提问不重复 → 手改条目后 hook 查询前增量同步命中并重建 INDEX → enforce 阻断一次后放行 → 未注册目录静默 → 开关 off/on；okserver 部署全链路（root 首启→建用户→建仓→权限负例→审计）；同步双设备闭环与冲突路径（bare 仓 + 双工作目录）
 - **隔离保证**：`OK_HOME` + `KIMI_CODE_HOME` + `OK_SKILLS_HOME` 指向 `t.TempDir()`，`OPENAI_API_KEY` 置空，全程零网络
 
-运行：`go test ./... -v`（33 包全绿）；`go vet ./...` 干净。
+运行：`go test ./... -v`（42 包全绿）；`go vet ./...` 干净。
 
 ### 14.2 真实环境验证（曾执行的手动验收）
 
@@ -759,6 +929,15 @@ go build ./...         # 编译检查
 - config.toml 里标记块是否完整（`# >>> openknowledge hooks >>>` 成对）
 - hooks command 指向的 ok.exe 路径是否还存在（移动过 exe 需重跑 `ok setup`）
 
+### 15.6 同步不工作 / 冲突卡住
+
+检查：
+- `git --version` 是否在 PATH（syncx 调系统 git；缺失时同步禁用，本地功能不受影响）
+- 项目 config.toml 的 `[sync]`：`enabled = true`、`remote` 已配、`auto_interval_min > 0`（0 = 关闭全部自动触发，手动 `ok sync` 不受影响）
+- `state/sync-status.json` 的 `last_error`（daemon 每轮同步的失败落在这里与 daemon.log）
+- `state/sync-conflict.json` 非空 = 有未决冲突：GUI 管理页状态点红色，进冲突解决页处理，或手动 `git -C <KB目录> rebase --continue` / `--abort`
+- 认证失败反复出现：本机 git credential helper 是否配置（无 helper 时凭据只能 URL 内嵌）；GUI 服务器页「凭证管理」确认本机 `ok-sync-r-<hostname>` token 存在
+
 ---
 
 ## 16. 后续维护建议
@@ -769,7 +948,8 @@ go build ./...         # 编译检查
 4. **ok.log 治理**（✅ 已落地）：大小滚动已实现——超 8MB 在句柄释放窗口轮替归档 `logs/`，保留 7 天（logx.RotateIfOversize/CleanArchives，见 §8）；embedding 错误响应体裁剪部分若仍存余量可后续收尾。
 5. **Doctor 校验 enforce glob**：用 doublestar 预编译用户配置的 glob，格式错误提前暴露（当前 malformed glob 静默不生效）。
 6. **CRLF 归一**：仓库在 Windows 下全量 CRLF，`gofmt -l` 全报未格式化；建议加 `.gitattributes`（`* text=auto eol=lf`）统一为 LF。
-7. **v2 候选方向**（当前为非目标，勿提前实现）：hooks 自动沉淀经验、其他 AI 工具适配、知识库远程同步。（v2.14.0 已实现原候选"本地 embedding"：内置 llama.cpp sidecar 形态，见 5.5/17.4；原"模型漂移检测"与"ok index 强制重算"也由 meta 身份管理落地——身份不符显式跳过，`ok index` 自动清向量全量重建。）
+7. **v2 候选方向**（当前为非目标，勿提前实现）：hooks 自动沉淀经验、其他 AI 工具适配、~~知识库远程同步~~（v2.23.0 已实现个人多端同步：syncx 引擎 + daemon ticker/防抖 + GUI 冲突解决页，见 5.14/6.7；v2.23~v2.24 另落地 okserver 服务端管理面与 okdeploy 一键部署器，见 5.15/5.16——团队组织仓已有管理面地基但团队同步能力未上线）。（v2.14.0 已实现原候选"本地 embedding"：内置 llama.cpp sidecar 形态，见 5.5/17.4；原"模型漂移检测"与"ok index 强制重算"也由 meta 身份管理落地——身份不符显式跳过，`ok index` 自动清向量全量重建。）
+8. **本文档更新记录**：2026-09 增量修订至 v2.24.3——新增 §5.14（syncx）、§5.15（oksrv/serverx/credmig）、§5.16（deployx/okdeploy）、§6.7（个人多端同步链路）、§6.8（okserver 服务端与空壳项目）、§6.9（客户端版本升级链路）、§9.4（okserver 与 Gitea）；就地修订 §1/§2（依赖 4→7）/§3（包数与依赖主干）/§4（目录结构）/§5.10（ok sync）/§5.11（七页 GUI + 新端点）/§6.5（同步 janitor 与升级熔断）/§8（新状态文件）/§12（发布线变化）/§13（CLI 命令面）/§14（测试规模）。
 
 ---
 
@@ -982,6 +1162,7 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | `retrieve.feedback.enabled` | `false` | 注入→采纳反馈闭环：窗口内持续注入但从未被读的条目降权（v1 只降不升）；默认 false——宿主 read 派发未接通前采纳信号恒零，降权默认关闭（事件照常记录），read 派发接通后恢复 `true` |
 | `retrieve.feedback.window_days` / `min_injections` / `demote` | `30` / `4` / `0.8` | 统计窗口（天）/ 触发降权的最低注入次数 / 降权系数 |
 | `retrieve.top_n` | `3` | 每次最多注入条数；调大注意挤占 `max_tokens` 预算 |
+| `server.url` / `server.username` / `server.token` | 空 | okserver 管理面连接（GUI 服务器页写入；token 空串保留旧值，空 URL 整段清空即 logout）；[server] 仅全局层有意义 |
 
 ### 18.2 项目配置 `~/.openknowledge/projects/<名>/config.toml`
 
@@ -991,6 +1172,9 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 |------|------|
 | `capture.mode` | 经验沉淀模式：`propose`（默认，AI 主动提议草稿人批准）或 `auto`（Stop hook 周期阻断强制自省）；`ok capture <mode>`（写项目层）或 GUI 设置页沉淀卡（写全局层） |
 | `capture.turn_interval` | auto 模式的自省间隔（Stop 次数，默认 3）；GUI 设置页沉淀卡（写全局层）或手改 |
+| `sync.enabled` / `sync.remote` | 多端同步开关与远端 URL（`ok sync init` 或 GUI 建仓写入；项目 config.toml 随仓同步，多端共享同一配置） |
+| `sync.auto_interval_min` | daemon 自动同步间隔（分钟）；`0` = 关闭全部自动触发（ticker 与写入防抖），手动 `ok sync` 不受影响 |
+| `sync.llm_assist` | 冲突 AI 合并档位：`off`/`local`；空 = auto（有本地 LLM 则 local，否则 off）；`server` 档预留未开放 |
 | `provenance.auto_born` | 新建条目自动记录 born 分支溯源标签（默认 true）；手改配置文件（新配置中心未暴露该键） |
 | `wiki.stale_commits` | wiki 落后多少 commit 触发 prompt 提示（默认 20，0 = 关闭；游标失效 gone/归属存疑 legacy_orphan 提示不受此阈值门控） |
 | `[[enforce]].type` | 规则类型，v1 仅 `changelog_required` |
@@ -1007,6 +1191,7 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | `OK_SKILLS_HOME` | 技能安装目录（默认 `~/.agents/skills`） |
 | `PI_CODING_AGENT_DIR` | pi 配置根目录（默认 `~/.pi/agent`；`ok setup` 写扩展时定位 extensions/） |
 | `OK_DSH_HOME` | dsh 家目录测试隔离口（默认 `~/.dsh`；`DSH_HOME` 为官方重定位变量，次之） |
+| `OKSERVER_LISTEN` / `OKSERVER_DATA_DIR` / `OKSERVER_GITEA_URL` / `OKSERVER_GITEA_ADMIN_TOKEN` | okserver 服务端配置（默认 `:3100` / `./okserver-data`；部署器写进 compose `.env`） |
 | `api_key_env` 指向的变量 | embedding key 的环境变量通道（如 `OPENAI_API_KEY`） |
 
 ### 18.4 hooks 配置（由 `ok setup` 维护）
