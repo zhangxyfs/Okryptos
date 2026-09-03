@@ -181,14 +181,14 @@
 - **显示层**：任务名 "部署/卸载 OpenKnowledge 服务端"（deploy.go:98、manage.go:141）、webui 标题（webui/web/app.js:8,98）、部署表单镜像提示（webui/web/app.js:763）、`web/app.js:6649` 指引卡 compose 示例，随 Phase 2 规则统一替换。
 - 测试夹具里的 `/home/u/openknowledge`、容器名样例等随全局替换机械更新。
 
-### 待实测清单（改名当天逐项验证）
+### 待实测清单（改名当天逐项验证）→ 实测结果（2026-09-03 已验）
 
-1. GitHub API 对改名仓的 301 重定向（`releases/latest`）及响应体内 `browser_download_url` 是否已换新仓名。
-2. GitHub web 下载 URL（`releases/download/...`）是否重定向——决定 site/ 与 README 旧链接存活期。
-3. GitHub Pages 旧站 URL（`zhangxyfs.github.io/OpenKnowledge`）是否跟随重定向——历史上有 Pages 不跟随的案例，不跟随则需保留旧仓或改 DNS/书签说明。
-4. Gitea（z7dream-gitea.iepose.cn）：① git clone/push 旧 URL 重定向；② `/api/v1/repos/...` 重定向（影响过渡期 publish-release.py）；③ web 页面重定向。
-5. GHCR 老包 `ghcr.io/zhangxyfs/openknowledge/okserver` 在仓改名后 `GITHUB_TOKEN` 是否仍有推权限（包-仓绑定是否保持）——决定"旧名双发"在 GHCR 侧可行性；Docker Hub 侧无此问题。
-6. 双名并存下 okdeploy 升级实测：.env 旧名 → sed 改写新名 → 镜像拉取/本地探测全链路。
+1. ✅ GitHub API 旧仓 `releases/latest` 301 → `/repositories/1334068923/...`，跟随重定向返回 v2.25.0，响应体内 `browser_download_url` 已是新仓名。旧版一键升级断链担忧消除。
+2. ✅ GitHub web 下载 URL（`releases/download/...`）301 → 新仓，site/ 与 README 历史旧链接继续可用。
+3. ❌ **Pages 旧站 URL 不跟随重定向**：`zhangxyfs.github.io/OpenKnowledge/` 直接 **404**；新站 `zhangxyfs.github.io/Okryptos/` 200。后果：所有外链到旧 Pages 的书签/引用失效，无补救手段（除非旧仓名被重新占用建 Pages）。已在官网/README 全面换新地址。
+4. ✅ Gitea 三项全通：web 301 → 新仓、`/api/v1/repos/...` 301 → 新仓、git ls-remote 旧 URL 跟随重定向成功（返回 HEAD 8992a05）。
+5. ✅ GHCR 老包推权限保持：v2.25.0 Docker 工作流四组 tag 全部推送成功且 digest 相同（`docker.io z7dream/okryptos-okserver`、`docker.io z7dream/openknowledge-okserver`、`ghcr.io/zhangxyfs/okryptos/okserver`、`ghcr.io/zhangxyfs/openknowledge/okserver`，各 latest+v2.25.0）——仓改名不断包-仓绑定，旧名双发在 GHCR 侧同样可行。
+6. ⏳ 双名并存下 okdeploy 升级实测——需真实 NAS 环境，留待用户侧验证；compose/.env sed 改写逻辑已有单测覆盖。
 
 ### 确认无雷区（逐包核实，免改）
 
@@ -210,5 +210,5 @@
 - **Logo 字标**：三份字标 SVG（site 明暗 + docs）改 `O + K(翻转) + ryptos` 三段，viewBox 580→415，书形 mark 的 O/K 镂空与新名天然对齐；坐标修正过一次（K 组 translate 162、ryptos x=183，消除重叠/空隙）；installer 两份纯图标 SVG 仅改 aria-label；README `<img width>` 同步 415。
 - **官网 changelog**：新增 v2.25.0 中英条目（badge-latest 从 v2.21.0 移到 v2.25.0）；历史条目（含旧插件路径描述）按冻结原则不动。
 - **`docs/changelogs/2.25.0.md`** 已写（GUI 更新弹窗数据源，build.py 拷入 dist/changelogs）。
-- 待实测清单 6 项不变，留待改名当天人工验证。
+- 待实测清单已逐项验证（结果见上节）：#1/#2/#4/#5 通过，**#3 Pages 旧站 404 不跟随重定向**（唯一实质性损失），#6 留用户侧 NAS 实测。
 - **Logo 入场动画初始偏移要随文宽重调**：右侧文字组的初始 translate（-150）是按旧字宽调的"贴住书本"起点，字标改短后不收缩会把首字母压进书本图标；改为 -57（=期望起点 84 − K 组绝对终点 141），中间关键帧等比收缩。截图验证必须覆盖 t≈0 初始帧与定格帧两个状态（virtual-time-budget 600 / 4000），只看定格态会漏掉入场穿模。
