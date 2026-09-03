@@ -59,13 +59,14 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: VERSION=${{ steps.t.outputs.tag }}
+          # 2.25.0 改名过渡期旧名双发：存量 NAS 的 .env/okdeploy 固化旧镜像名，
+          # 停推即掐断其升级渠道；过渡 2~3 个大版本并在 changelog 宣布后摘除。
+          # 注意：注释必须放在 tags 块外——`| 块标量内 # 不是注释，会被当镜像 tag。
           tags: |
             ghcr.io/zhangxyfs/okryptos/okserver:${{ steps.t.outputs.tag }}
             ghcr.io/zhangxyfs/okryptos/okserver:latest
             z7dream/okryptos-okserver:${{ steps.t.outputs.tag }}
             z7dream/okryptos-okserver:latest
-            # 2.25.0 改名过渡期旧名双发：存量 NAS 的 .env/okdeploy 固化旧镜像名，
-            # 停推即掐断其升级渠道；过渡 2~3 个大版本并在 changelog 宣布后摘除
             ghcr.io/zhangxyfs/openknowledge/okserver:${{ steps.t.outputs.tag }}
             ghcr.io/zhangxyfs/openknowledge/okserver:latest
             z7dream/openknowledge-okserver:${{ steps.t.outputs.tag }}
