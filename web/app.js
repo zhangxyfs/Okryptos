@@ -65,6 +65,7 @@ const I18N = {
     modified:"修改于",
     mandatory:"★ mandatory", optional:"非 mandatory", draft:"草稿", archived:"已归档",
     collapseTip:"收起/展开侧栏",
+    brandName:"归藏", brandSub:"Okryptos 配置中心", brandTag:"纳万理于幽 · 应机而启", appTitle:"归藏 · Okryptos 配置中心",
     stDetected:"已检测到", stAgentUnit:"个 agent", stHooked:"已接入", stHookedUnit:"个",
     setupSub:"接入 = 写入 hooks 配置 + 安装 ok 技能（等同 CLI 的 ok setup）",
     redetect:"↻ 重新检测", detecting:"↻ 检测中…",
@@ -287,6 +288,7 @@ const I18N = {
     modified:"Modified",
     mandatory:"★ mandatory", optional:"optional", draft:"Draft", archived:"Archived",
     collapseTip:"Collapse/expand sidebar",
+    brandName:"Okryptos", brandSub:"Config Center", brandTag:"A hidden store, revealed when called upon", appTitle:"Okryptos · Config Center",
     stDetected:"Detected", stAgentUnit:"agents", stHooked:"integrated", stHookedUnit:"",
     setupSub:"Integrating = writing hooks config + installing ok skills (same as CLI ok setup)",
     redetect:"↻ Re-detect", detecting:"↻ Detecting…",
@@ -5240,7 +5242,7 @@ function renderMisc(){
     const c = el("div","pcard");
     c.appendChild(Object.assign(el("h3"),{textContent:t("xAbout")}));
     const v = el("div","about-line");
-    v.textContent = t("xVer")+"：OkManager v"+(st ? st.app_version : "…");
+    v.textContent = t("xVer")+"："+t("brandName")+" v"+(st ? st.app_version : "…");
     const h = el("div","about-line");
     h.appendChild(document.createTextNode(t("xHome")+"："));
     h.appendChild(Object.assign(el("span","mono"),{textContent:st ? st.home : "…"}));
@@ -5583,6 +5585,7 @@ function toast(msg, isErr){
 
 function render(){
   document.documentElement.dataset.theme = state.theme;
+  document.title = t("appTitle");
   const app = document.getElementById("app");
   // 整页重渲不丢滚动：重渲前记住各滚动容器位置，重渲后同步恢复
   const keep = {};
@@ -5603,7 +5606,10 @@ function renderBody(app){
   // 顶栏：品牌在前，折叠按钮紧随其后（用户指定位置）
   const bar = el("div","topbar");
   const brand = el("div","brand");
-  brand.innerHTML = '<span class="logo">ok</span>OkManager';
+  brand.innerHTML = '<span class="logo">ok</span>';
+  const bn = el("span","brand-name"); bn.textContent = t("brandName"); brand.appendChild(bn);
+  const bs = el("span","brand-sub"); bs.textContent = t("brandSub"); brand.appendChild(bs);
+  brand.title = t("brandTag");
   bar.appendChild(brand);
   const collapse = el("button","collapse-btn");
   collapse.innerHTML = ICON.panel; collapse.title = t("collapseTip");

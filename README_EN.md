@@ -14,8 +14,13 @@
 </p>
 
 <p align="center">
-  A <b>project knowledge base</b> for AI coding assistants — knowledge is isolated per project and injected into the AI's context<br>
-  through each assistant's hooks/extensions, and it can enforce workflow rules like "no code change without a changelog entry".<br>
+  <b>Okryptos</b> — from the Greek root <i>kryptós</i>: a hidden store, revealed when called upon.<br>
+  Chinese name <b>归藏</b> (Guīzàng) — gathering all principles into the hidden, unveiled when the moment calls.
+</p>
+
+<p align="center">
+  A <b>latent knowledge base for AI-agent hooks</b> — distill references, notes, rules and hard-won pitfalls;<br>
+  knowledge rests silent until an agent hook calls it into context; multi-device sync and team sharing supported.<br>
   Single-binary Go CLI (<code>ok</code>) with zero runtime dependencies.
 </p>
 

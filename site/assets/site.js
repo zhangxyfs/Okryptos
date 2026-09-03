@@ -19,8 +19,9 @@
     't.note': 'Notes',
 
     /* ── 首页 ── */
-    'meta.title.i': 'Okryptos — Project knowledge base for AI coding assistants',
-    'i.tagline': 'A <b>project knowledge base</b> for AI coding assistants — knowledge is isolated per project and injected into the AI&#39;s context through each assistant&#39;s hooks/extensions, and it can enforce workflow rules like "no code change without a changelog entry".',
+    'meta.title.i': 'Okryptos — A latent knowledge base for AI-agent hooks',
+    'i.brand': 'From the Greek root <i>kryptós</i> — a hidden store, revealed when called upon',
+    'i.tagline': 'A <b>latent knowledge base for AI-agent hooks</b> — distill references, notes, rules and hard-won pitfalls; knowledge rests silent until an agent hook calls it into context; multi-device sync and team sharing supported.',
     'i.src': 'Source',
     'i.hint': 'Auto-detects your OS · <a href="https://github.com/zhangxyfs/Okryptos/releases/download/v2.25.0/OkryptosSetup-2.25.0.exe">Windows</a> / <a href="https://github.com/zhangxyfs/Okryptos/releases/download/v2.25.0/openknowledge_2.25.0_amd64.deb">Linux .deb</a> / <a href="https://github.com/zhangxyfs/Okryptos/releases/download/v2.25.0/openknowledge_2.25.0_linux_amd64.tar.gz">Linux .tar.gz</a> · <a href="https://github.com/zhangxyfs/Okryptos/releases" target="_blank" rel="noopener">All releases</a>',
     'i.feat.h': 'Features',

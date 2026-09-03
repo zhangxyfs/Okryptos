@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title data-i18n="meta.title.i">Okryptos — 为 AI 编程助手打造的项目知识库</title>
+<title data-i18n="meta.title.i">Okryptos 归藏 — 面向 AI-Agent Hooks 的隐性知识库</title>
 <meta name="description" content="知识按项目隔离，通过 AI 助手的 hooks/扩展自动注入上下文，并可强制执行工作流规则。单二进制 Go CLI，零运行时依赖。">
 <script>(function(){try{var t=new URLSearchParams(location.search).get('theme')||localStorage.getItem('ok-theme');if(!t)t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;}catch(e){}})();</script>
 <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
@@ -20,6 +20,10 @@
     background: linear-gradient(180deg, #eff6ff 0%, var(--bg) 100%);
   }
   header.hero img.logo { width: min(480px, 82vw); }
+  header.hero .brand-line {
+    margin: 14px auto 0; max-width: 720px;
+    font-size: 15px; color: var(--text-3);
+  }
   header.hero .tagline {
     margin: 26px auto 0; max-width: 720px;
     font-size: 18px; color: var(--text-2);
@@ -112,9 +116,10 @@
 
 <header class="hero" id="top">
   <img class="logo logo-light" src="assets/logo.svg" alt="Okryptos"><img class="logo logo-dark" src="assets/logo-dark.svg" alt="Okryptos">
+  <p class="brand-line" data-i18n="i.brand">中文名「归藏」——归藏者，纳万理于幽，应机而启</p>
   <p class="tagline" data-i18n="i.tagline">
-    为 AI 编程助手提供的<b>项目知识库</b>——知识按项目隔离，通过各 AI 助手的 hooks/扩展自动注入 AI 上下文，
-    并能强制执行「改代码必须写变更日志」这类工作流规则。
+    面向 <b>AI-Agent Hooks</b> 的隐性知识库——沉淀参考资料、笔记、规则与踩坑经验，
+    知识静默封存，经由 Agent Hook 触发方才对外输出；支持多设备迁移、团队知识共享。
   </p>
   <div class="badges">
     <img alt="version" src="https://img.shields.io/badge/version-2.25.0-2563eb">
