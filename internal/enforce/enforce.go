@@ -6,8 +6,8 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/state"
+	"okryptos/internal/config"
+	"okryptos/internal/state"
 )
 
 // EvalChangelog 判定 changelog_required 规则：触碰过 code_globs 且未触碰

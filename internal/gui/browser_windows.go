@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"time"
 
-	"openknowledge/internal/procx"
+	"okryptos/internal/procx"
 )
 
 // openBrowser 以最大化窗口打开 Edge/Chrome 应用模式，返回新窗口句柄（未找到返回 0）；

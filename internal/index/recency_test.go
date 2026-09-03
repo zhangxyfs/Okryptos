@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"openknowledge/internal/config"
+	"okryptos/internal/config"
 )
 
 var recencyCfg = config.RetrieveRecency{Enabled: true, Floor: 0.85, Windows: config.RecencyWindows{

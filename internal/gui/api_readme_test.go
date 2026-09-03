@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/registry"
+	"okryptos/internal/registry"
 )
 
 // mkProjectAt 注册一个项目：项目根目录指向已存在的 dir（README 夹具用），

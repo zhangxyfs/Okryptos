@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"openknowledge/internal/gui"
+	"okryptos/internal/gui"
 )
 
 const (
@@ -157,7 +157,7 @@ func Run(ctx context.Context, version string, openGUI func() uintptr, onCheckUpd
 }
 
 func (t *Tray) init() error {
-	className, _ := windows.UTF16PtrFromString("OpenKnowledgeTrayMsg")
+	className, _ := windows.UTF16PtrFromString("OkryptosTrayMsg")
 	hinst, _, _ := procGetModuleHandleW.Call(0)
 	cb := windows.NewCallback(trayWndProc)
 	wcx := wndClassExW{
@@ -169,7 +169,7 @@ func (t *Tray) init() error {
 	if r, _, err := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wcx))); r == 0 {
 		return err
 	}
-	title, _ := windows.UTF16PtrFromString("OpenKnowledgeTray")
+	title, _ := windows.UTF16PtrFromString("OkryptosTray")
 	hwnd, _, err := procCreateWindowExW.Call(
 		0, uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(title)),
 		0, 0, 0, 0, 0, hwndMessage, 0, hinst, 0)
@@ -187,7 +187,7 @@ func (t *Tray) init() error {
 		HIcon:            icon,
 	}
 	nid.CbSize = uint32(unsafe.Sizeof(nid))
-	tip, _ := windows.UTF16FromString("OpenKnowledge v" + t.version)
+	tip, _ := windows.UTF16FromString("Okryptos v" + t.version)
 	copy(nid.SzTip[:], tip)
 	if r, _, err := procShellNotifyIconW.Call(nimAdd, uintptr(unsafe.Pointer(&nid))); r == 0 {
 		return err
@@ -211,7 +211,7 @@ func (t *Tray) cleanup() {
 	nid.CbSize = uint32(unsafe.Sizeof(nid))
 	procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&nid)))
 	procDestroyWindow.Call(t.hwnd)
-	className, _ := windows.UTF16PtrFromString("OpenKnowledgeTrayMsg")
+	className, _ := windows.UTF16PtrFromString("OkryptosTrayMsg")
 	hinst, _, _ := procGetModuleHandleW.Call(0)
 	procUnregisterClassW.Call(uintptr(unsafe.Pointer(className)), hinst)
 }
@@ -247,7 +247,7 @@ func (t *Tray) showMenu() {
 		return
 	}
 	defer procDestroyMenu.Call(menu)
-	ver, _ := windows.UTF16PtrFromString("OpenKnowledge v" + t.version)
+	ver, _ := windows.UTF16PtrFromString("Okryptos v" + t.version)
 	procAppendMenuW.Call(menu, mfString|mfGrayed, 0, uintptr(unsafe.Pointer(ver)))
 	procAppendMenuW.Call(menu, mfSeparator, 0, 0)
 	checkUpd, _ := windows.UTF16PtrFromString("检查更新")

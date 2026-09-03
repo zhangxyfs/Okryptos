@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"openknowledge/internal/config"
+	"okryptos/internal/config"
 )
 
 const daySeconds int64 = 86400

@@ -36,7 +36,7 @@ function userMessage(text) {
     id: randomUUID(),
     role: "user",
     content: [{ type: "text", text }],
-    source: { kind: "plugin", plugin: "openknowledge" },
+    source: { kind: "plugin", plugin: "okryptos" },
   };
 }
 
@@ -48,7 +48,7 @@ function sessionFields(agent) {
   };
 }
 
-export const name = "openknowledge";
+export const name = "okryptos";
 
 export function apply(ctx) {
   // ≈ UserPromptSubmit：检索注入。waterfall 语义：先跑 ok（fail-open）再 delegate

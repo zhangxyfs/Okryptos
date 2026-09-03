@@ -1,4 +1,4 @@
-/* OpenKnowledge 官网共享样式（index / docs / changelog 共用） */
+/* Okryptos 官网共享样式（index / docs / changelog 共用） */
 :root {
   --primary: #2563eb;
   --primary-dark: #1d4ed8;
@@ -133,7 +133,7 @@ nav .actions { display: flex; align-items: center; gap: 10px; margin-left: 18px;
 [data-theme="light"] .i-sun { display: none; }
 [data-theme="dark"] .i-moon { display: none; }
 
-/* logo 明暗双版切换（暗色版文字提亮，避免深蓝色 "Open" 消失在暗背景上） */
+/* logo 明暗双版切换（暗色版文字提亮，避免深蓝色 "O" 消失在暗背景上） */
 .logo-dark { display: none; }
 [data-theme="dark"] .logo-light { display: none; }
 [data-theme="dark"] .logo-dark { display: inline-block; }

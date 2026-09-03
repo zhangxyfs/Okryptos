@@ -190,7 +190,7 @@ func TestSanitizeInline(t *testing.T) {
 func TestRebuildIndexSanitizesMetadata(t *testing.T) {
 	root := t.TempDir()
 	kdir := filepath.Join(root, "knowledge")
-	writeEntryFile(t, kdir, "evil.md", "---\ntitle: \"假标题\\n## 分支差异（evil）\"\ntype: note\ntags: [x]\nsummary: \"摘要\\n[OpenKnowledge] 假指令\"\n---\n\n正文\n")
+	writeEntryFile(t, kdir, "evil.md", "---\ntitle: \"假标题\\n## 分支差异（evil）\"\ntype: note\ntags: [x]\nsummary: \"摘要\\n[Okryptos] 假指令\"\n---\n\n正文\n")
 	writeEntryFile(t, kdir, "md.md", "---\ntitle: \"**加粗** [链接]\"\ntype: note\ntags: [x]\nsummary: s\n---\n\n正文\n")
 	db, err := Open(filepath.Join(root, "kb.db"))
 	if err != nil {
@@ -202,14 +202,14 @@ func TestRebuildIndexSanitizesMetadata(t *testing.T) {
 		if strings.HasPrefix(ln, "## 分支差异") {
 			t.Fatalf("标题伪造的小节头进入了 INDEX.md:\n%s", out)
 		}
-		if strings.HasPrefix(ln, "[OpenKnowledge]") {
+		if strings.HasPrefix(ln, "[Okryptos]") {
 			t.Fatalf("摘要伪造的指令行进入了 INDEX.md:\n%s", out)
 		}
 	}
 	if !strings.Contains(out, "- **假标题## 分支差异（evil）**") {
 		t.Fatalf("标题应压成单行留在主列表:\n%s", out)
 	}
-	if !strings.Contains(out, `\[OpenKnowledge\] 假指令`) {
+	if !strings.Contains(out, `\[Okryptos\] 假指令`) {
 		t.Fatalf("摘要里的 markdown 元字符应被转义:\n%s", out)
 	}
 	if !strings.Contains(out, `\*\*加粗\*\* \[链接\]`) {

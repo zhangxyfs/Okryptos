@@ -34,7 +34,7 @@ function runOk(args: string[], payload: unknown, timeoutMs: number): Promise<OkR
 let partSeq = 0;
 
 // 旧式命名导出：opencode 把模块每个导出值当作插件函数（getLegacyPlugins）。
-export const OpenKnowledgePlugin = async ({ directory, client }: any) => {
+export const OkryptosPlugin = async ({ directory, client }: any) => {
   return {
     // ≈ UserPromptSubmit：检索注入。ok 把注入文本写 stdout；
     // 以 synthetic text part 注入（不在 UI 当用户输入渲染，但进会话历史

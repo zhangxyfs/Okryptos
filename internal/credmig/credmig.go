@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/serverx"
-	"openknowledge/internal/store"
-	"openknowledge/internal/syncx"
+	"okryptos/internal/config"
+	"okryptos/internal/registry"
+	"okryptos/internal/serverx"
+	"okryptos/internal/store"
+	"okryptos/internal/syncx"
 )
 
 const markerFile = "cred-migrated.json"

@@ -9,18 +9,18 @@ import (
 func TestQueryStatus(t *testing.T) {
 	fx := &fakeExec{t: t, steps: []fakeStep{
 		{match: "docker compose", code: 0, stdout: "gitea|Up 2 hours\nokserver|Up 2 hours"},
-		{match: "OKSERVER_IMAGE", code: 0, stdout: "z7dream/openknowledge-okserver:v2.23.0"},
+		{match: "OKSERVER_IMAGE", code: 0, stdout: "z7dream/okryptos-okserver:v2.23.0"},
 		{match: "OKSERVER_PORT", code: 0, stdout: "3100"},
-		{match: "du -sh", code: 0, stdout: "128M\t/home/u/openknowledge"},
+		{match: "du -sh", code: 0, stdout: "128M\t/home/u/okryptos"},
 	}}
-	st, err := QueryStatus(context.Background(), fx, "/home/u/openknowledge")
+	st, err := QueryStatus(context.Background(), fx, "/home/u/okryptos")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(st.Containers) != 2 || st.Containers[0].Name != "gitea" {
 		t.Fatalf("%+v", st)
 	}
-	if st.Image != "z7dream/openknowledge-okserver:v2.23.0" || st.DiskUsage != "128M" || st.OKPort != "3100" {
+	if st.Image != "z7dream/okryptos-okserver:v2.23.0" || st.DiskUsage != "128M" || st.OKPort != "3100" {
 		t.Fatalf("%+v", st)
 	}
 	fx.Done()
@@ -34,7 +34,7 @@ func TestUpgradeTask(t *testing.T) {
 		{match: "up -d", code: 0},
 		{match: "api/v1/meta", code: 0, stdout: "{}"},
 	}}
-	task := BuildUpgradeTask("/home/u/openknowledge", "v9.9.9")
+	task := BuildUpgradeTask("/home/u/okryptos", "v9.9.9")
 	e := &Env{Ex: fx, Hub: NewLogHub(), Vars: map[string]string{}}
 	if err := task.Execute(context.Background(), e); err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestUpgradeTask(t *testing.T) {
 	// 断言 sed 命令含新 tag
 	found := false
 	for _, c := range fx.Cmds {
-		if strings.Contains(c, "z7dream/openknowledge-okserver:v9.9.9") {
+		if strings.Contains(c, "z7dream/okryptos-okserver:v9.9.9") {
 			found = true
 		}
 	}
@@ -56,7 +56,7 @@ func TestUninstallTaskKeepsDataByDefault(t *testing.T) {
 	fx := &fakeExec{t: t, steps: []fakeStep{
 		{match: "down --rmi all", code: 0},
 	}}
-	task := BuildUninstallTask("/home/u/openknowledge", false)
+	task := BuildUninstallTask("/home/u/okryptos", false)
 	if err := task.Execute(context.Background(), &Env{Ex: fx, Hub: NewLogHub(), Vars: map[string]string{}}); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestUninstallTaskDeleteData(t *testing.T) {
 		{match: "down --rmi all", code: 0},
 		{match: "rm -rf", code: 0},
 	}}
-	task := BuildUninstallTask("/home/u/openknowledge", true)
+	task := BuildUninstallTask("/home/u/okryptos", true)
 	if err := task.Execute(context.Background(), &Env{Ex: fx, Hub: NewLogHub(), Vars: map[string]string{}}); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestQueryRemoteLogs(t *testing.T) {
 	fx := &fakeExec{t: t, steps: []fakeStep{
 		{match: "logs --tail=200", code: 0, stdout: "okserver  | 启动完成"},
 	}}
-	logs, err := QueryRemoteLogs(context.Background(), fx, "/home/u/openknowledge", 0)
+	logs, err := QueryRemoteLogs(context.Background(), fx, "/home/u/okryptos", 0)
 	if err != nil || !strings.Contains(logs, "启动完成") {
 		t.Fatalf("logs=%q err=%v", logs, err)
 	}
@@ -121,7 +121,7 @@ func TestResetRootTask(t *testing.T) {
 	fx := &fakeExec{t: t, steps: []fakeStep{
 		{match: "reset-root", code: 0, stdout: "newpw32chars"},
 	}}
-	task := BuildResetRootTask("/home/u/openknowledge")
+	task := BuildResetRootTask("/home/u/okryptos")
 	e := &Env{Ex: fx, Hub: NewLogHub(), Vars: map[string]string{}}
 	if err := task.Execute(context.Background(), e); err != nil {
 		t.Fatal(err)

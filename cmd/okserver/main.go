@@ -1,4 +1,4 @@
-// okserver：OpenKnowledge 服务端管理面（NAS/Docker 部署）。
+// okserver：Okryptos 服务端管理面（NAS/Docker 部署）。
 // 薄 main：env 配置 → 存储 → root 首启 → HTTP 服务。
 package main
 
@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"openknowledge/internal/logx"
-	"openknowledge/internal/oksrv"
-	"openknowledge/internal/version"
+	"okryptos/internal/logx"
+	"okryptos/internal/oksrv"
+	"okryptos/internal/version"
 )
 
 func main() { os.Exit(run()) }

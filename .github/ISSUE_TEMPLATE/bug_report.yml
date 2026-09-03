@@ -31,7 +31,7 @@ body:
   - type: input
     attributes:
       label: Version
-      description: The OpenKnowledge version you're running (see the GUI status card or `ok --version`).
+      description: The Okryptos version you're running (see the GUI status card or `ok --version`).
   - type: textarea
     attributes:
       label: Logs

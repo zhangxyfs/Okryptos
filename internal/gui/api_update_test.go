@@ -38,7 +38,7 @@ func TestUpdateCheckNewVersion(t *testing.T) {
 			"tag_name": "v99.0.0",
 			"body":     "notes",
 			"assets": []map[string]any{
-				{"name": "OpenKnowledge-Setup-99.0.0.exe", "browser_download_url": "https://x/setup.exe"},
+				{"name": "Okryptos-Setup-99.0.0.exe", "browser_download_url": "https://x/setup.exe"},
 				{"name": "openknowledge_99.0.0_amd64.deb", "browser_download_url": "https://x/a.deb"},
 				{"name": "openknowledge_99.0.0_linux_amd64.tar.gz", "browser_download_url": "https://x/a.tar.gz"},
 			},
@@ -319,12 +319,49 @@ func TestUpdateSkipEmptyVersion(t *testing.T) {
 	}
 }
 
-// withUpdateURLPrefix 临时替换包级 updateURLPrefix 并注册恢复。
-func withUpdateURLPrefix(t *testing.T, prefix string) {
+// withUpdateURLPrefix 临时替换包级 updateURLPrefixes 并注册恢复（可变参兼容单前缀旧调用）。
+func withUpdateURLPrefix(t *testing.T, prefixes ...string) {
 	t.Helper()
-	old := updateURLPrefix
-	updateURLPrefix = prefix
-	t.Cleanup(func() { updateURLPrefix = old })
+	old := updateURLPrefixes
+	updateURLPrefixes = prefixes
+	t.Cleanup(func() { updateURLPrefixes = old })
+}
+
+// TestUpdateURLPrefixesDefaultDual 改名过渡契约（2026-09-02-rename-okryptos-design.md
+// Phase -1）：默认白名单必须同时含新旧两个仓的 download 前缀，否则 repo 改名后
+// 旧客户端下载新 release 资产被 400，一键升级全断。
+func TestUpdateURLPrefixesDefaultDual(t *testing.T) {
+	joined := strings.Join(updateURLPrefixes, " ")
+	for _, want := range []string{"zhangxyfs/OpenKnowledge", "zhangxyfs/Okryptos"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("updateURLPrefixes 缺 %s: %v", want, updateURLPrefixes)
+		}
+	}
+}
+
+// TestUpdateDownloadPrefixDualCompat 白名单任一前缀都要过门（旧代码只认单一前缀，
+// 第二个假前缀的 URL 会吃 400 变红）。
+func TestUpdateDownloadPrefixDualCompat(t *testing.T) {
+	h, _ := changelogEnv(t)
+	resetUpdateDownloadJob(t)
+	srv := func() *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Length", "1")
+			_, _ = w.Write([]byte("x"))
+		}))
+	}
+	fakeOld, fakeNew := srv(), srv()
+	defer fakeOld.Close()
+	defer fakeNew.Close()
+	withUpdateURLPrefix(t, fakeOld.URL+"/", fakeNew.URL+"/")
+
+	body := postUpdateDownload(t, h, fakeNew.URL+"/OkryptosSetup-99.0.0.exe", "99.0.0")
+	if body["state"] != "running" {
+		t.Fatalf("第二前缀 URL 未过门: %v", body)
+	}
+	if final := pollUpdateDownload(t, h); final["state"] != "done" {
+		t.Fatalf("final state = %v, want done (err=%v)", final["state"], final["err"])
+	}
 }
 
 // resetUpdateDownloadJob 清空包级下载任务，避免测试间串扰。
@@ -429,7 +466,7 @@ func TestUpdateDownloadJob(t *testing.T) {
 	if path == "" || strings.HasSuffix(path, ".part") {
 		t.Fatalf("path = %q, want final path without .part", path)
 	}
-	if filepath.Base(path) != "OpenKnowledge-Setup-99.0.0.exe" {
+	if filepath.Base(path) != "Okryptos-Setup-99.0.0.exe" {
 		t.Fatalf("path base = %q", filepath.Base(path))
 	}
 	if filepath.Dir(path) != filepath.Join(os.Getenv("OK_HOME"), "update") {
@@ -466,7 +503,7 @@ func TestUpdateDownloadResume(t *testing.T) {
 			content := []byte(strings.Repeat("fake installer;", 128))
 			const offset = 512
 			// 预置半截 .part：完整内容的前 offset 字节
-			dest := filepath.Join(os.Getenv("OK_HOME"), "update", "OpenKnowledge-Setup-99.0.0.exe")
+			dest := filepath.Join(os.Getenv("OK_HOME"), "update", "Okryptos-Setup-99.0.0.exe")
 			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -633,7 +670,7 @@ func TestUpdateApplySequence(t *testing.T) {
 	resetUpdateDownloadJob(t)
 	events, done := withApplyStubs(t)
 
-	installer := filepath.Join(os.Getenv("OK_HOME"), "update", "OpenKnowledge-Setup-99.0.0.exe")
+	installer := filepath.Join(os.Getenv("OK_HOME"), "update", "Okryptos-Setup-99.0.0.exe")
 	if err := os.MkdirAll(filepath.Dir(installer), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -657,7 +694,7 @@ func TestUpdateApplySequence(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("apply goroutine 未走到 exitProcess")
 	}
-	want := []string{"runInstaller:OpenKnowledge-Setup-99.0.0.exe", "stopDaemon", "exit:0"}
+	want := []string{"runInstaller:Okryptos-Setup-99.0.0.exe", "stopDaemon", "exit:0"}
 	if fmt.Sprint(*events) != fmt.Sprint(want) {
 		t.Fatalf("events = %v, want %v", *events, want)
 	}
@@ -677,7 +714,7 @@ func TestUpdateApplyConcurrentGuard(t *testing.T) {
 	resetUpdateDownloadJob(t)
 	events, done := withApplyStubs(t)
 
-	installer := filepath.Join(os.Getenv("OK_HOME"), "update", "OpenKnowledge-Setup-99.0.0.exe")
+	installer := filepath.Join(os.Getenv("OK_HOME"), "update", "Okryptos-Setup-99.0.0.exe")
 	if err := os.MkdirAll(filepath.Dir(installer), 0o755); err != nil {
 		t.Fatal(err)
 	}

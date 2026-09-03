@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/daemonx"
+	"okryptos/internal/daemonx"
 )
 
 // waitHealthy 轮询直到 daemon.json 指向的实例健康或超时。
@@ -39,7 +39,7 @@ func TestRunStopAndSecondInstance(t *testing.T) {
 	done := make(chan int, 1)
 	go func() { done <- Run(webDir, &out1, io.Discard) }()
 	_ = waitHealthy(t, 5*time.Second)
-	if !strings.Contains(out1.String(), "OpenKnowledge daemon:") {
+	if !strings.Contains(out1.String(), "Okryptos daemon:") {
 		t.Fatalf("banner %q", out1.String())
 	}
 

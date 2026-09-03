@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
-	"openknowledge/internal/embedsidecar"
+	"okryptos/internal/config"
+	"okryptos/internal/embed"
+	"okryptos/internal/embedsidecar"
 )
 
 func TestDesiredBuiltinModel(t *testing.T) {

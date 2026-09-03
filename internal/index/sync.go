@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/embed"
-	"openknowledge/internal/entry"
-	"openknowledge/internal/retrieve"
+	"okryptos/internal/embed"
+	"okryptos/internal/entry"
+	"okryptos/internal/retrieve"
 )
 
 // ftsText 将原文切分为空格分隔的词元文本（复用 retrieve.Terms），

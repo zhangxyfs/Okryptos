@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // ZcodeHome 返回 ZCode 配置根目录（OK_ZCODE_HOME 优先——ok 自留的测试隔离口，

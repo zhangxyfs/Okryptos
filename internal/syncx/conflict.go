@@ -71,7 +71,7 @@ func (r *Repo) MergeInProgress() bool {
 func (r *Repo) ContinueRebase() error {
 	_, err := execGit(r.Dir, localTimeout,
 		"-c", "core.editor=true",
-		"-c", "user.name=OpenKnowledge Sync", "-c", "user.email=sync@openknowledge.local",
+		"-c", "user.name=Okryptos Sync", "-c", "user.email=sync@okryptos.local",
 		"rebase", "--continue")
 	return err
 }

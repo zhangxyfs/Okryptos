@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/config"
+	"okryptos/internal/config"
 )
 
 func TestChatOpenAI(t *testing.T) {

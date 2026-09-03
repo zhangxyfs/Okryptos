@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/retrieve"
+	"okryptos/internal/config"
+	"okryptos/internal/retrieve"
 )
 
 // TestQueryRecencyDemotesStale 陈旧条目乘系数后在近似同分时让位：

@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
-	"openknowledge/internal/embedsidecar"
-	"openknowledge/internal/index"
-	"openknowledge/internal/store"
+	"okryptos/internal/config"
+	"okryptos/internal/embed"
+	"okryptos/internal/embedsidecar"
+	"okryptos/internal/index"
+	"okryptos/internal/store"
 )
 
 func newTestHandler(t *testing.T) *Handler {

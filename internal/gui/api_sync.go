@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/llmx"
-	"openknowledge/internal/store"
-	"openknowledge/internal/syncx"
+	"okryptos/internal/config"
+	"okryptos/internal/llmx"
+	"okryptos/internal/store"
+	"okryptos/internal/syncx"
 )
 
 func (h *Handler) registerSyncAPI(api func(string, http.HandlerFunc)) {

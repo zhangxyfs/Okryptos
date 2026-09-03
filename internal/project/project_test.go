@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"openknowledge/internal/registry"
+	"okryptos/internal/registry"
 )
 
 func TestFromCwd(t *testing.T) {

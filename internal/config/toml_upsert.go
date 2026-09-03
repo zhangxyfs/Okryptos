@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // upsertTomlKey 在 config.toml 的指定小节内 upsert 单个键：小节已存在则只

@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title data-i18n="meta.title.d">文档 — OpenKnowledge</title>
-<meta name="description" content="OpenKnowledge 使用文档：安装引导、快速开始、知识条目、草稿流程、常用命令、配置、检索算法与工作原理。">
+<title data-i18n="meta.title.d">文档 — Okryptos</title>
+<meta name="description" content="Okryptos 使用文档：安装引导、快速开始、知识条目、草稿流程、常用命令、配置、检索算法与工作原理。">
 <script>(function(){try{var t=new URLSearchParams(location.search).get('theme')||localStorage.getItem('ok-theme');if(!t)t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;}catch(e){}})();</script>
 <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
 <link rel="stylesheet" href="assets/site.css">
@@ -85,7 +85,7 @@
 
 <nav>
   <div class="wrap">
-    <a class="brand" href="index.html"><img class="logo-light" src="assets/logo.svg" alt="OpenKnowledge"><img class="logo-dark" src="assets/logo-dark.svg" alt="OpenKnowledge"></a>
+    <a class="brand" href="index.html"><img class="logo-light" src="assets/logo.svg" alt="Okryptos"><img class="logo-dark" src="assets/logo-dark.svg" alt="Okryptos"></a>
     <div class="links">
       <a href="index.html" data-i18n="nav.home">首页</a>
       <a href="docs.html" class="active" data-i18n="nav.docs">文档</a>
@@ -99,7 +99,7 @@
         <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
         <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>
       </button>
-      <a class="icon-btn repo-btn" href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener" aria-label="源码仓库 / Repository" title="源码仓库">
+      <a class="icon-btn repo-btn" href="https://z7dream-gitea.iepose.cn/zhangxyfs/Okryptos" target="_blank" rel="noopener" aria-label="源码仓库 / Repository" title="源码仓库">
         <img class="gitea-logo" src="assets/gitea.svg" alt="Gitea"><span>Gitea</span>
       </a>
     </div>
@@ -129,13 +129,13 @@
     <div class="group">
       <div class="group-title" data-i18n="d.g4">更多</div>
       <a href="changelog.html" data-i18n="nav.changelog">更新日志</a>
-      <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/src/branch/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener" data-i18n="d.g4a">架构文档（仓库）</a>
+      <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/Okryptos/src/branch/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener" data-i18n="d.g4a">架构文档（仓库）</a>
     </div>
   </aside>
 
   <main class="doc">
     <h1 data-i18n="d.h1">文档</h1>
-    <p class="lede" data-i18n="d.lede">OpenKnowledge 是为 AI 编程助手提供的项目知识库：知识按项目隔离，通过 hooks/扩展自动注入 AI 上下文，并可强制执行工作流规则。</p>
+    <p class="lede" data-i18n="d.lede">Okryptos 是为 AI 编程助手提供的项目知识库：知识按项目隔离，通过 hooks/扩展自动注入 AI 上下文，并可强制执行工作流规则。</p>
 
     <div class="entry-cards">
       <a class="entry-card" href="#quickstart"><b data-i18n="d.e1b">五分钟上手</b><p data-i18n="d.e1p">从安装到第一次检索注入</p></a>
@@ -149,7 +149,7 @@
     <p><code>ok setup</code> <span data-i18n="d.s1lead">依次完成三件事：</span></p>
     <ol>
       <li data-i18n="d.s1l1"><b>写入 hooks 配置</b>——覆盖全部已检测的 AI 助手：Kimi Code 写 <code>~/.kimi-code/config.toml</code> 的 3 条 hook 标记块（自动备份、幂等覆盖），Pi 写 TypeScript 扩展，ZCode 合并写 <code>config.json</code>，Reasonix 安装 Extension Protocol 插件包，opencode 写 <code>~/.config/opencode/plugins/</code> 的 TypeScript 插件，claude 合并写 <code>~/.claude/settings.json</code> 的 hooks（Claude Code / CodePilot 等兼容宿主共用），codex 合并写 <code>~/.codex/hooks.json</code>（hook 契约兼容 Claude；技能零适配共享技能目录；ok 自动开启特性开关并写入信任记录；桌面端 26.707 与 CLI 0.147+ 均实证可用），qoder 合并写 <code>~/.qoder-cn/settings.json</code> 的 hooks（Qoder CN 终端 CLI；契约兼容 Claude，ok 自动开启 hooksConfig.enabled 开关——默认关闭时装好也静默不派发），qoder-ide 合并写 <code>~/.lingma/settings.json</code> 的 hooks（Qoder CN IDE 灵码内核：知识注入与触碰追踪可用、Stop 不可阻断致强制检查降级）</li>
-      <li data-i18n="d.s1l2"><b>安装六个技能</b>——<code>openknowledge-init / on / off / propose / capture / wiki</code>，写入各 agent 的技能目录</li>
+      <li data-i18n="d.s1l2"><b>安装六个技能</b>——<code>ok-init / on / off / propose / capture / wiki</code>，写入各 agent 的技能目录</li>
       <li data-i18n="d.s1l3"><b>配置 embedding</b>——交互询问 base_url / model / API key，写入全局配置并当场验证连通性；回车跳过则只用关键词检索</li>
     </ol>
     <div class="note" data-i18n="d.s1note"><b>注意</b>hooks 在会话启动时加载：安装或变更配置后，需要<b>新开一个 AI 助手会话</b>才会生效。</div>
@@ -179,7 +179,7 @@ summary: 每次代码修改必须立即记录变更日志
 ---
 
 正文（Markdown 自由格式）</code></pre>
-    <p data-i18n="d.s3tail">数据集中存放在 <code>~/.openknowledge/</code>，不污染项目仓库。条目类型四种：<code>rule</code>（规则）、<code>pitfall</code>（踩坑）、<code>note</code>（笔记）、<code>reference</code>（参考）。</p>
+    <p data-i18n="d.s3tail">数据集中存放在 <code>~/.okryptos/</code>，不污染项目仓库。条目类型四种：<code>rule</code>（规则）、<code>pitfall</code>（踩坑）、<code>note</code>（笔记）、<code>reference</code>（参考）。</p>
 
     <h2 id="drafts" data-i18n="d.s4h">草稿流程（AI 提议，人批准）</h2>
     <p data-i18n="d.s4p">AI 可通过 <code>ok propose</code> 把会话中沉淀的经验记为<b>草稿条目</b>（frontmatter <code>draft: true</code>）——草稿不参与检索与注入，只出现在 <code>ok list</code> 和 GUI 管理页（带「草稿」徽标）。人确认后用 <code>ok approve &lt;文件&gt;</code> 或 GUI 的「采纳」按钮转正。</p>
@@ -217,7 +217,7 @@ summary: 每次代码修改必须立即记录变更日志
     </ul>
 
     <h2 id="config" data-i18n="d.s7h">配置</h2>
-    <p data-i18n="d.s7p">生效配置 = 内置默认 ← 全局 <code>~/.openknowledge/config.toml</code> ← 项目 <code>~/.openknowledge/projects/&lt;名&gt;/config.toml</code>（逐层覆盖）。</p>
+    <p data-i18n="d.s7p">生效配置 = 内置默认 ← 全局 <code>~/.okryptos/config.toml</code> ← 项目 <code>~/.okryptos/projects/&lt;名&gt;/config.toml</code>（逐层覆盖）。</p>
     <pre data-i18n="d.s7pre"><code><span class="c"># 全局配置（ok setup 可交互写入）</span>
 [embedding]
 base_url = "https://api.openai.com/v1"   <span class="c"># 任何 OpenAI 兼容服务</span>
@@ -238,7 +238,7 @@ message = "本次会话修改了代码但未更新变更日志，请先按规范
       <li data-i18n="d.s8l2"><b>语义通道</b>：OpenAI 兼容 embedding + 余弦相似度，召回「问法不同但意思相近」的条目；准入走模型无关的语义门槛（以本次查询余弦分布为参照，头部相对中位数有显著分离才启用，<code>min_gap</code> 默认 0.25 可调）</li>
       <li data-i18n="d.s8l3"><b>草稿条目不进检索通道</b>：FTS 与向量都排除，批准后自动参与</li>
     </ul>
-    <p data-i18n="d.s8tail">1 万条条目下单次查询约 30ms；embedding 服务不可用时自动降级为纯关键词检索，注入永不缺席。实现细节见<a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge/src/branch/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">架构文档第 17 章</a>。</p>
+    <p data-i18n="d.s8tail">1 万条条目下单次查询约 30ms；embedding 服务不可用时自动降级为纯关键词检索，注入永不缺席。实现细节见<a href="https://z7dream-gitea.iepose.cn/zhangxyfs/Okryptos/src/branch/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">架构文档第 17 章</a>。</p>
 
     <h2 id="hooks" data-i18n="d.s9h">工作原理</h2>
     <p data-i18n="d.s9p">以 Kimi Code 为例，AI 助手在三个时机调用 <code>ok</code>（其他 agent 经各自适配器等价触发）：</p>
@@ -250,7 +250,7 @@ message = "本次会话修改了代码但未更新变更日志，请先按规范
       <tr><td><code>Stop</code></td><td>AI 每个回合即将结束时</td><td>改了代码没写日志 → exit 2 阻断（同会话同规则只阻断一次）</td></tr>
     </table>
     </div>
-    <div class="note" data-i18n="d.s9note"><b>说明</b>所有 hook 路径 fail-open：任何内部错误只记日志（<code>~/.openknowledge/ok.log</code>），绝不影响正常会话。</div>
+    <div class="note" data-i18n="d.s9note"><b>说明</b>所有 hook 路径 fail-open：任何内部错误只记日志（<code>~/.okryptos/ok.log</code>），绝不影响正常会话。</div>
   </main>
 </div>
 
@@ -259,7 +259,7 @@ message = "本次会话修改了代码但未更新变更日志，请先按规范
     <div data-i18n="d.foot">
       <a href="index.html">首页</a>·
       <a href="changelog.html">更新日志</a>·
-      <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">源码仓库</a>
+      <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/Okryptos" target="_blank" rel="noopener">源码仓库</a>
     </div>
     <div class="copy">© 2026 ZXY · MIT License</div>
   </div>

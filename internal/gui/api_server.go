@@ -12,12 +12,12 @@ import (
 	"strconv"
 	"strings"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/credmig"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/serverx"
-	"openknowledge/internal/store"
-	"openknowledge/internal/syncx"
+	"okryptos/internal/config"
+	"okryptos/internal/credmig"
+	"okryptos/internal/registry"
+	"okryptos/internal/serverx"
+	"okryptos/internal/store"
+	"okryptos/internal/syncx"
 )
 
 func (h *Handler) registerServerAPI(api func(string, http.HandlerFunc)) {

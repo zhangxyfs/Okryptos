@@ -7,7 +7,7 @@ package main
 import (
 	"io"
 
-	"openknowledge/internal/gui"
+	"okryptos/internal/gui"
 )
 
 func openUI(url string, serveErr chan error, _ io.Writer) int {

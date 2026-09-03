@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"openknowledge/internal/embed"
-	"openknowledge/internal/index"
+	"okryptos/internal/embed"
+	"okryptos/internal/index"
 )
 
 func openTestDB(t *testing.T) *index.DB {

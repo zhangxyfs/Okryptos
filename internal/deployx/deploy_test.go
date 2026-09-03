@@ -24,7 +24,7 @@ func TestDeployTaskFull(t *testing.T) {
 		{match: "INITIAL_ROOT_PASSWORD", code: 0, stdout: "rootpw32chars"},
 		{match: "rm -f", code: 0},
 	}}
-	spec := DeploySpec{Mode: "full", Dir: "/home/u/openknowledge", GiteaPort: 3000, OKPort: 3100, Tag: "v9.9.9", RootURL: "http://nas:3000/"}
+	spec := DeploySpec{Mode: "full", Dir: "/home/u/okryptos", GiteaPort: 3000, OKPort: 3100, Tag: "v9.9.9", RootURL: "http://nas:3000/"}
 	task, err := BuildDeployTask(spec)
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestDeployTaskExternal(t *testing.T) {
 		{match: "INITIAL_ROOT_PASSWORD", code: 0, stdout: "rootpw32chars"},
 		{match: "rm -f", code: 0},
 	}}
-	spec := DeploySpec{Mode: "external", Dir: "/home/u/openknowledge", OKPort: 3100,
+	spec := DeploySpec{Mode: "external", Dir: "/home/u/okryptos", OKPort: 3100,
 		Tag: "v9.9.9", GiteaURL: "http://192.168.1.10:3000", AdminToken: "usertok"}
 	task, err := BuildDeployTask(spec)
 	if err != nil {
@@ -148,7 +148,7 @@ func TestDeployTaskEmptyTokenFails(t *testing.T) {
 		{match: "admin user", code: 0},
 		{match: "generate-access-token", code: 0, stdout: ""}, // 无输出
 	}}
-	spec := DeploySpec{Mode: "full", Dir: "/home/u/openknowledge", GiteaPort: 3000, OKPort: 3100, Tag: "v9.9.9", RootURL: "http://nas:3000/"}
+	spec := DeploySpec{Mode: "full", Dir: "/home/u/okryptos", GiteaPort: 3000, OKPort: 3100, Tag: "v9.9.9", RootURL: "http://nas:3000/"}
 	task, err := BuildDeployTask(spec)
 	if err != nil {
 		t.Fatal(err)

@@ -10,11 +10,11 @@ import (
 	"sync"
 	"testing"
 
-	"openknowledge/internal/hook"
-	"openknowledge/internal/project"
-	"openknowledge/internal/registry"
-	extension "openknowledge/internal/rxext/sdk"
-	"openknowledge/internal/state"
+	"okryptos/internal/hook"
+	"okryptos/internal/project"
+	"okryptos/internal/registry"
+	extension "okryptos/internal/rxext/sdk"
+	"okryptos/internal/state"
 )
 
 // TestMain 隔离十个 agent home：selfHealHooks 会遍历 detected agents 写 hook 集成，

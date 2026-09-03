@@ -39,7 +39,7 @@ func TestOpencodeHomePrecedence(t *testing.T) {
 func TestOpencodePluginPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("OK_OPENCODE_HOME", home)
-	want := filepath.Join(home, "plugins", "openknowledge.ts")
+	want := filepath.Join(home, "plugins", "okryptos.ts")
 	if got := opencodePluginPath(); got != want {
 		t.Fatalf("opencodePluginPath = %q, want %q", got, want)
 	}
@@ -296,5 +296,43 @@ func TestOpencodePluginPartIDPrefix(t *testing.T) {
 	}
 	if !strings.Contains(opencodePluginTemplate, "`prt_") {
 		t.Fatal("插件模板应以 prt_ 前缀生成注入 part id")
+	}
+}
+
+// TestOpencodeLegacyMigration（2.25.0 改名迁移）：旧名插件 openknowledge.ts 在
+// EnsureHooks 窗口迁移为 okryptos.ts 并删除旧件（glob 双加载防护）；
+// 外来旧名文件不动；全新安装不复活。
+func TestOpencodeLegacyMigration(t *testing.T) {
+	setupOpencode(t)
+	a := opencodeAgent{}
+	legacyPath := legacyOpencodePluginPath()
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := legacyOpencodePluginMarker + "\n// fingerprint: 000000000000\n// exe: D:/old/ok.exe\n"
+	if err := os.WriteFile(legacyPath, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnsureHooks(`D:\new\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatal("旧名插件应被迁移清除")
+	}
+	data, err := os.ReadFile(a.HooksTarget())
+	if err != nil {
+		t.Fatalf("新名插件应被迁移创建: %v", err)
+	}
+	if !strings.Contains(string(data), filepath.ToSlash(`D:\new\ok.exe`)) {
+		t.Fatal("迁移创建的新插件应烘焙当前 exe")
+	}
+	if err := os.WriteFile(legacyPath, []byte("// user hand-written\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnsureHooks(`D:\new\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := os.ReadFile(legacyPath); string(d) != "// user hand-written\n" {
+		t.Fatal("外来旧名文件不应被删除/改写")
 	}
 }

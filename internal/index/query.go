@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
+	"okryptos/internal/config"
+	"okryptos/internal/embed"
 )
 
 // MinScoreFloor 计算生效的最低分数阈值。FTS5 bm25 的 idf 在小语料库下趋近于 0

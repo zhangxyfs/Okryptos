@@ -15,25 +15,25 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/agentx"
-	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
-	"openknowledge/internal/embedsidecar"
-	"openknowledge/internal/embedx"
-	"openknowledge/internal/entry"
-	"openknowledge/internal/fsx"
-	"openknowledge/internal/index"
-	"openknowledge/internal/procx"
-	"openknowledge/internal/project"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/retrieve"
-	"openknowledge/internal/store"
-	"openknowledge/internal/syncx"
-	"openknowledge/internal/wiki"
+	"okryptos/internal/agentx"
+	"okryptos/internal/config"
+	"okryptos/internal/embed"
+	"okryptos/internal/embedsidecar"
+	"okryptos/internal/embedx"
+	"okryptos/internal/entry"
+	"okryptos/internal/fsx"
+	"okryptos/internal/index"
+	"okryptos/internal/procx"
+	"okryptos/internal/project"
+	"okryptos/internal/registry"
+	"okryptos/internal/retrieve"
+	"okryptos/internal/store"
+	"okryptos/internal/syncx"
+	"okryptos/internal/wiki"
 )
 
-const defaultProjectConfig = `# OpenKnowledge 项目知识库配置
-# [embedding] / [inject] / [retrieve] 缺省继承全局配置 ~/.openknowledge/config.toml。
+const defaultProjectConfig = `# Okryptos 项目知识库配置
+# [embedding] / [inject] / [retrieve] 缺省继承全局配置 ~/.okryptos/config.toml。
 # 需要按项目覆盖时自行添加对应小节（字段见 ok setup 输出与设计文档）。
 
 # 强制规则（glob 一律小写；同会话同规则只阻断一次）：
@@ -439,7 +439,7 @@ func Search(args []string, stdout, stderr io.Writer) int {
 	}
 	terms := retrieve.Terms(query)
 	if pc.Config.Retrieve.Fusion != "weighted" && (pc.Config.Retrieve.Alpha != 1 || pc.Config.Retrieve.Beta != 1) {
-		fmt.Fprintf(stderr, "[OpenKnowledge] rrf 模式下 alpha/beta 配置被忽略（仅 weighted 生效）\n")
+		fmt.Fprintf(stderr, "[Okryptos] rrf 模式下 alpha/beta 配置被忽略（仅 weighted 生效）\n")
 	}
 	hits, info, err := db.QueryEx(terms, queryVec, pc.Config.Retrieve)
 	if err != nil {
@@ -462,10 +462,10 @@ func Search(args []string, stdout, stderr io.Writer) int {
 	for _, h := range hits {
 		fmt.Fprintf(stdout, "%.4f\t%s (%s)\n", h.Score, h.Title, h.Filename)
 	}
-	// wiki 覆盖兜底提示：无 wiki 条目命中该主题时，提示可经 openknowledge-wiki 补充。
+	// wiki 覆盖兜底提示：无 wiki 条目命中该主题时，提示可经 ok-wiki 补充。
 	// fail-open：检查失败不提示，search 主输出格式不变。
 	if covered, err := db.HasWikiMatch(terms); err == nil && !covered {
-		fmt.Fprintln(stdout, "提示：该主题暂无 wiki 条目覆盖；若内容属于新功能/新模块，建议用 openknowledge-wiki 技能补充 wiki。")
+		fmt.Fprintln(stdout, "提示：该主题暂无 wiki 条目覆盖；若内容属于新功能/新模块，建议用 ok-wiki 技能补充 wiki。")
 	}
 	return 0
 }

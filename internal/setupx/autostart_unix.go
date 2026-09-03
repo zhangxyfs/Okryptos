@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // autostartPath 返回 XDG 自启文件路径（~/.config/autostart/openknowledge.desktop）。

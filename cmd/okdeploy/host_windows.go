@@ -20,8 +20,8 @@ import (
 	edge "github.com/jchv/go-webview2/pkg/edge"
 	"golang.org/x/sys/windows"
 
-	"openknowledge/internal/gui"
-	"openknowledge/internal/registry"
+	"okryptos/internal/gui"
+	"okryptos/internal/registry"
 )
 
 var (
@@ -168,7 +168,7 @@ func registerDeployClass(className *uint16) {
 func openUI(url string, serveErr chan error, stderr io.Writer) int {
 	className, _ := windows.UTF16PtrFromString("OkDeployHost")
 	registerDeployClass(className)
-	title, _ := windows.UTF16PtrFromString("OpenKnowledge 服务端部署")
+	title, _ := windows.UTF16PtrFromString("Okryptos 服务端部署")
 	offscreen := int32(-32000)
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,

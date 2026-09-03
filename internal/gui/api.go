@@ -21,22 +21,22 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"openknowledge/internal/agentx"
-	"openknowledge/internal/daemonx"
-	"openknowledge/internal/backup"
-	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
-	"openknowledge/internal/embedx"
-	"openknowledge/internal/entry"
-	"openknowledge/internal/fsx"
-	"openknowledge/internal/index"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/retrieve"
-	"openknowledge/internal/setupx"
-	"openknowledge/internal/store"
-	"openknowledge/internal/syncx"
-	"openknowledge/internal/version"
-	"openknowledge/internal/wiki"
+	"okryptos/internal/agentx"
+	"okryptos/internal/daemonx"
+	"okryptos/internal/backup"
+	"okryptos/internal/config"
+	"okryptos/internal/embed"
+	"okryptos/internal/embedx"
+	"okryptos/internal/entry"
+	"okryptos/internal/fsx"
+	"okryptos/internal/index"
+	"okryptos/internal/registry"
+	"okryptos/internal/retrieve"
+	"okryptos/internal/setupx"
+	"okryptos/internal/store"
+	"okryptos/internal/syncx"
+	"okryptos/internal/version"
+	"okryptos/internal/wiki"
 )
 
 // Handler 是 GUI 的 HTTP 处理器：/ 与静态资源来自 webDir，/api/* 走令牌鉴权。
@@ -639,7 +639,7 @@ func (h *Handler) apiExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	filename := "openknowledge-backup-" + project + "-" + time.Now().Format("20060102") + ".zip"
+	filename := "okryptos-backup-" + project + "-" + time.Now().Format("20060102") + ".zip"
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	if err := backup.Export(w, project); err != nil {

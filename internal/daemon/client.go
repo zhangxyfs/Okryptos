@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"openknowledge/internal/daemonx"
-	"openknowledge/internal/logx"
-	"openknowledge/internal/registry"
+	"okryptos/internal/daemonx"
+	"okryptos/internal/logx"
+	"okryptos/internal/registry"
 )
 
 // 超时预算：健康检查 200ms；转发 9s（kimi UserPromptSubmit 上限 10s，留 1s 余量）。

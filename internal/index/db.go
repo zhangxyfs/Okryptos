@@ -237,10 +237,10 @@ func (db *DB) migrateVectorsJSON(dbPath string) error {
 		// 损坏的 vectors.json（旧版 O_TRUNC 直写可能留下半截 JSON）不应让 Open
 		// 永久失败：改名隔离后按无向量继续——向量可由条目文件重建
 		if rerr := os.Rename(vj, vj+".bad"); rerr != nil {
-			fmt.Fprintf(os.Stderr, "openknowledge: vectors.json 损坏（%v）且隔离失败: %v\n", err, rerr)
+			fmt.Fprintf(os.Stderr, "okryptos: vectors.json 损坏（%v）且隔离失败: %v\n", err, rerr)
 			return nil
 		}
-		fmt.Fprintf(os.Stderr, "openknowledge: vectors.json 损坏（%v），已改名为 vectors.json.bad，向量将在下次同步时重建\n", err)
+		fmt.Fprintf(os.Stderr, "okryptos: vectors.json 损坏（%v），已改名为 vectors.json.bad，向量将在下次同步时重建\n", err)
 		return nil
 	}
 	tx, err := db.sql.Begin()

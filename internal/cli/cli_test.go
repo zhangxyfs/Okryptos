@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/agentx"
-	"openknowledge/internal/entry"
-	"openknowledge/internal/index"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/wiki"
+	"okryptos/internal/agentx"
+	"okryptos/internal/entry"
+	"okryptos/internal/index"
+	"okryptos/internal/registry"
+	"okryptos/internal/wiki"
 )
 
 // chdir 切换工作目录并在结束时还原。

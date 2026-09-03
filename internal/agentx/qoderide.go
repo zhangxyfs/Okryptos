@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // LingmaHome 返回 Qoder CN IDE（通义灵码内核）配置根目录：OK_QODER_IDE_HOME

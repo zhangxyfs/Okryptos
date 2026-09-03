@@ -21,9 +21,9 @@ import (
 	edge "github.com/jchv/go-webview2/pkg/edge"
 	"golang.org/x/sys/windows"
 
-	"openknowledge/internal/daemon"
-	"openknowledge/internal/gui"
-	"openknowledge/internal/registry"
+	"okryptos/internal/daemon"
+	"okryptos/internal/gui"
+	"okryptos/internal/registry"
 )
 
 // 库的 internal/w32 不可 import（internal 包限制），所需 proc 与结构体在此自行声明。
@@ -192,7 +192,7 @@ const loadingPageHTML = `<!DOCTYPE html>
         <path d="M72 34 V62 M72 50 L86 34 M76 46 L88 62" fill="none" stroke="#f3f4f6" stroke-width="5" stroke-linecap="round"/>
       </g>
     </svg>
-    <div class="t">OpenKnowledge</div>
+    <div class="t">Okryptos</div>
     <div class="d">配置中心 · 正在加载</div>
     <div class="dots"><span></span><span></span><span></span></div>
   </div>

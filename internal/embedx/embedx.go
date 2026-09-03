@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
-	"openknowledge/internal/embedsidecar"
-	"openknowledge/internal/index"
+	"okryptos/internal/config"
+	"okryptos/internal/embed"
+	"okryptos/internal/embedsidecar"
+	"okryptos/internal/index"
 )
 
 // Client 返回使用中（active）profile 的客户端；未配置/暂不可用返回 nil。

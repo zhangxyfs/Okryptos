@@ -10,14 +10,14 @@ import (
 	"sync"
 	"time"
 
-	"openknowledge/internal/agentx"
-	"openknowledge/internal/daemonx"
-	"openknowledge/internal/logx"
-	"openknowledge/internal/project"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/setupx"
-	"openknowledge/internal/state"
-	"openknowledge/internal/wiki"
+	"okryptos/internal/agentx"
+	"okryptos/internal/daemonx"
+	"okryptos/internal/logx"
+	"okryptos/internal/project"
+	"okryptos/internal/registry"
+	"okryptos/internal/setupx"
+	"okryptos/internal/state"
+	"okryptos/internal/wiki"
 )
 
 type Event struct {
@@ -404,16 +404,16 @@ func wikiNudge(pc *project.Context, st *state.Session, s *wiki.Status) string {
 	var msg string
 	switch {
 	case s.BranchState == "gone":
-		msg = "[OpenKnowledge] wiki 游标失效（分支可能被改写），建议在生成 wiki 的分支上重新运行 openknowledge-wiki 技能。"
+		msg = "[Okryptos] wiki 游标失效（分支可能被改写），建议在生成 wiki 的分支上重新运行 ok-wiki 技能。"
 	case s.BranchState == "legacy_orphan":
-		msg = "[OpenKnowledge] wiki 游标与当前分支分叉、无法确认归属；请在生成 wiki 的分支上运行 openknowledge-wiki 技能。"
+		msg = "[Okryptos] wiki 游标与当前分支分叉、无法确认归属；请在生成 wiki 的分支上运行 ok-wiki 技能。"
 	case !s.HasWiki && s.Stale:
-		msg = "[OpenKnowledge] 本项目还没有 wiki，建议用 openknowledge-wiki 技能生成项目 wiki（含架构、模块与演进历史）。"
+		msg = "[Okryptos] 本项目还没有 wiki，建议用 ok-wiki 技能生成项目 wiki（含架构、模块与演进历史）。"
 	case s.HasWiki && s.Stale:
 		if s.BranchState == "inherited" {
 			return "" // 提醒已并入 wikiContextLine 的 inherited 行，避免同语义双行
 		}
-		msg = fmt.Sprintf("[OpenKnowledge] wiki 已落后 %d 个 commit，建议用 openknowledge-wiki 技能增量更新。", s.Behind)
+		msg = fmt.Sprintf("[Okryptos] wiki 已落后 %d 个 commit，建议用 ok-wiki 技能增量更新。", s.Behind)
 	default:
 		return ""
 	}
@@ -429,7 +429,7 @@ func wikiNudgeMerged(pc *project.Context, st *state.Session, base string, merged
 	if st.WikiNudged || len(merged) == 0 || base == "" {
 		return ""
 	}
-	msg := fmt.Sprintf("[OpenKnowledge] 分支 %s 已并入 %s，其差异条目已失效，建议用 openknowledge-wiki 技能清理。", strings.Join(merged, "、"), base)
+	msg := fmt.Sprintf("[Okryptos] 分支 %s 已并入 %s，其差异条目已失效，建议用 ok-wiki 技能清理。", strings.Join(merged, "、"), base)
 	st.WikiNudged = true
 	return "\n" + msg + "\n"
 }
@@ -450,17 +450,17 @@ func wikiContextLine(s *wiki.Status) string {
 		if len(mb) > 7 {
 			mb = mb[:7]
 		}
-		return fmt.Sprintf("[OpenKnowledge] wiki 基于 %s@%s；当前分支 %s（分叉点 %s），结构描述可能与当前分支不符。\n",
+		return fmt.Sprintf("[Okryptos] wiki 基于 %s@%s；当前分支 %s（分叉点 %s），结构描述可能与当前分支不符。\n",
 			s.BaseBranch, short, s.Branch, mb)
 	case "inherited":
 		if s.Stale && s.Behind > 0 {
-			return fmt.Sprintf("[OpenKnowledge] wiki 基于 %s@%s（当前分支 %s 继承，落后 %d commit），结构描述以 %s 为准，建议更新。\n",
+			return fmt.Sprintf("[Okryptos] wiki 基于 %s@%s（当前分支 %s 继承，落后 %d commit），结构描述以 %s 为准，建议更新。\n",
 				s.InheritedFrom, short, s.Branch, s.Behind, s.InheritedFrom)
 		}
-		return fmt.Sprintf("[OpenKnowledge] wiki 基于 %s@%s；当前分支 %s 继承该基线，结构描述以 %s 为准。\n",
+		return fmt.Sprintf("[Okryptos] wiki 基于 %s@%s；当前分支 %s 继承该基线，结构描述以 %s 为准。\n",
 			s.InheritedFrom, short, s.Branch, s.InheritedFrom)
 	case "no_cursor":
-		return fmt.Sprintf("[OpenKnowledge] wiki 基于 %s@%s；当前分支 %s 尚无基线，结构描述以 %s 为准。\n",
+		return fmt.Sprintf("[Okryptos] wiki 基于 %s@%s；当前分支 %s 尚无基线，结构描述以 %s 为准。\n",
 			s.BaseBranch, short, s.Branch, s.BaseBranch)
 	}
 	return ""

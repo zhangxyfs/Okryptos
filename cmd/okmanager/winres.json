@@ -10,15 +10,15 @@
     "#1": {
       "0000": {
         "fixed": {
-          "file_version": "2.24.3.0",
-          "product_version": "2.24.3.0"
+          "file_version": "2.25.0.0",
+          "product_version": "2.25.0.0"
         },
         "info": {
           "0409": {
-            "FileDescription": "OkManager - OpenKnowledge 配置中心",
-            "ProductName": "OpenKnowledge",
-            "CompanyName": "OpenKnowledge",
-            "LegalCopyright": "OpenKnowledge",
+            "FileDescription": "OkManager - Okryptos 配置中心",
+            "ProductName": "Okryptos",
+            "CompanyName": "Okryptos",
+            "LegalCopyright": "Okryptos",
             "OriginalFilename": "OkManager.exe"
           }
         }

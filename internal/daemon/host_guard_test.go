@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"openknowledge/internal/gui"
+	"okryptos/internal/gui"
 )
 
 // TestHostGuard 最外层 Host/Origin 防线（DNS rebinding / 跨站直连）：

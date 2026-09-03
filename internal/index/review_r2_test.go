@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/config"
+	"okryptos/internal/config"
 )
 
 // M-08 回归：语义通道两阶段查询——第一阶段只读 filename+向量算余弦准入，

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"openknowledge/internal/registry"
+	"okryptos/internal/registry"
 )
 
 func TestOffOnToggle(t *testing.T) {

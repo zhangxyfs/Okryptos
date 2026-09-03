@@ -30,7 +30,7 @@ func TestReasonixInstallAndInstalled(t *testing.T) {
 		t.Fatal(err)
 	}
 	// manifest 关键字段
-	data, err := os.ReadFile(filepath.Join(home, "plugins", "openknowledge", "reasonix-plugin.json"))
+	data, err := os.ReadFile(filepath.Join(home, "plugins", "okryptos", "reasonix-plugin.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestReasonixInstallAndInstalled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(st), `"openknowledge"`) {
+	if !strings.Contains(string(st), `"okryptos"`) {
 		t.Errorf("plugin-packages.json 未登记: %s", st)
 	}
 	// 反向断言：manifest 登记的 exe 与当前进程 exe 不一致时必须判定为未安装
@@ -84,11 +84,11 @@ func TestReasonixRemove(t *testing.T) {
 	if err != nil || !removed {
 		t.Fatalf("RemoveHooks: %v %v", removed, err)
 	}
-	if _, err := os.Stat(filepath.Join(home, "plugins", "openknowledge")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, "plugins", "okryptos")); !os.IsNotExist(err) {
 		t.Error("插件目录应删除")
 	}
 	st, _ := os.ReadFile(filepath.Join(home, "plugin-packages.json"))
-	if strings.Contains(string(st), `"openknowledge"`) {
+	if strings.Contains(string(st), `"okryptos"`) {
 		t.Error("state 条目应移除")
 	}
 	if a.HooksInstalled() {
@@ -115,7 +115,7 @@ func TestReasonixEnsureRewritesStaleAndKeepsRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	// JSON 字符串内反斜杠必被转义，不能对原始文本做子串匹配；反序列化后比对。
-	data, _ := os.ReadFile(filepath.Join(home, "plugins", "openknowledge", "reasonix-plugin.json"))
+	data, _ := os.ReadFile(filepath.Join(home, "plugins", "okryptos", "reasonix-plugin.json"))
 	var mf2 map[string]any
 	if err := json.Unmarshal(data, &mf2); err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestReasonixEnsureRewritesStaleAndKeepsRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _ := os.ReadFile(filepath.Join(home, "plugin-packages.json"))
-	if strings.Contains(string(st), `"openknowledge"`) {
+	if strings.Contains(string(st), `"okryptos"`) {
 		t.Error("用户显式移除后 Ensure 不得复活")
 	}
 }
@@ -168,7 +168,7 @@ func TestReasonixInterceptsConsistency(t *testing.T) {
 	if !a.HooksInstalled() {
 		t.Fatal("安装后 HooksInstalled 应为 true")
 	}
-	mp := filepath.Join(ReasonixHome(), "plugins", "openknowledge", "reasonix-plugin.json")
+	mp := filepath.Join(ReasonixHome(), "plugins", "okryptos", "reasonix-plugin.json")
 	data, err := os.ReadFile(mp)
 	if err != nil {
 		t.Fatal(err)

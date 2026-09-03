@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/daemonx"
+	"okryptos/internal/daemonx"
 )
 
 // stubSpawn 替换 SpawnDetached，返回调用次数。
@@ -150,7 +150,7 @@ func TestForwardHookTimeoutHandled(t *testing.T) {
 	}
 }
 
-// 升级熔断：~/.openknowledge/update/.upgrading 存在时 Ensure/EnsureCurrent 一律不
+// 升级熔断：~/.okryptos/update/.upgrading 存在时 Ensure/EnsureCurrent 一律不
 // 拉起——此时旧 daemon 已被 GUI /api/update/apply 停掉、安装器正在覆盖 exe，拉起
 // 只会启动即将被替换的旧二进制并与安装器抢文件锁。
 func TestEnsureUpgradeCircuitBreaker(t *testing.T) {

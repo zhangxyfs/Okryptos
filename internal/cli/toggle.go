@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"openknowledge/internal/setupx"
+	"okryptos/internal/setupx"
 )
 
 // Off: ok off —— 关闭 hooks 全局开关（持续到 ok on）

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/version"
+	"okryptos/internal/version"
 )
 
 // changelogEnv 搭 root/web（webDir）结构，OK_HOME 隔离；返回 handler 与 root。
@@ -191,7 +191,7 @@ func TestGuiStateUpdateFieldsRoundTrip(t *testing.T) {
 			CheckedAt:    time.Now().Unix(),
 			Latest:       "2.25.0",
 			Body:         "release notes",
-			InstallerURL: "https://github.com/.../OpenKnowledge-Setup-2.25.0.exe",
+			InstallerURL: "https://github.com/.../OkryptosSetup-2.25.0.exe",
 			DebURL:       "https://github.com/.../openknowledge_2.25.0_amd64.deb",
 			TarURL:       "https://github.com/.../openknowledge_2.25.0_linux_amd64.tar.gz",
 		},

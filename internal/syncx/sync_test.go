@@ -205,7 +205,7 @@ func TestSyncDuringMergeConflictRefuses(t *testing.T) {
 	// 身份内置：模拟的是"用户已配好 git 身份的机器"——无全局身份的 CI runner 上
 	// git merge 起手就拒绝（留不下 MERGE_HEAD），与产品行为无关。
 	_, _ = execGit(dirB, networkTimeout,
-		"-c", "user.name=OpenKnowledge Sync", "-c", "user.email=sync@openknowledge.local",
+		"-c", "user.name=Okryptos Sync", "-c", "user.email=sync@okryptos.local",
 		"pull", "--no-rebase")
 	if _, err := execGit(dirB, localTimeout, "rev-parse", "--verify", "--quiet", "MERGE_HEAD"); err != nil {
 		t.Fatal("merge should be in progress (MERGE_HEAD)")

@@ -4,10 +4,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
-	"openknowledge/internal/embedsidecar"
-	"openknowledge/internal/registry"
+	"okryptos/internal/config"
+	"okryptos/internal/embed"
+	"okryptos/internal/embedsidecar"
+	"okryptos/internal/registry"
 )
 
 // sidecarJanitorInterval sidecar 调和周期；测试可调小。

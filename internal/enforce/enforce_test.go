@@ -3,8 +3,8 @@ package enforce
 import (
 	"testing"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/state"
+	"okryptos/internal/config"
+	"okryptos/internal/state"
 )
 
 var rule = config.EnforceRule{

@@ -159,7 +159,7 @@ func TestDialSSHBadKeyPath(t *testing.T) {
 }
 
 func TestValidateDir(t *testing.T) {
-	for _, ok := range []string{"~/openknowledge", "$HOME/openknowledge", "/opt/ok", "/home/u/ok-1.2"} {
+	for _, ok := range []string{"~/okryptos", "$HOME/okryptos", "/opt/ok", "/home/u/ok-1.2"} {
 		if err := ValidateDir(ok); err != nil {
 			t.Fatalf("%q 应合法：%v", ok, err)
 		}

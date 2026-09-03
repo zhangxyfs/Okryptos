@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/retrieve"
+	"okryptos/internal/config"
+	"okryptos/internal/retrieve"
 )
 
 // 检索命中必须携带 summary（注入摘要行依赖），FTS 与向量通道都要有。

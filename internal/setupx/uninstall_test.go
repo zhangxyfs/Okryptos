@@ -11,9 +11,9 @@ import (
 	"sync"
 	"testing"
 
-	"openknowledge/internal/agentx"
-	"openknowledge/internal/daemonx"
-	"openknowledge/internal/fsx"
+	"okryptos/internal/agentx"
+	"okryptos/internal/daemonx"
+	"okryptos/internal/fsx"
 )
 
 // setupUninstallEnv 构造 hooks 配置、技能、全局配置齐全的沙盒。

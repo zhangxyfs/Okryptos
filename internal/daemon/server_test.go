@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"openknowledge/internal/gui"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/store"
+	"okryptos/internal/gui"
+	"okryptos/internal/registry"
+	"okryptos/internal/store"
 )
 
 // setupProject 建一个注册项目并写入一个知识条目，返回项目目录。

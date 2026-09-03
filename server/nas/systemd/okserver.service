@@ -1,5 +1,5 @@
 [Unit]
-Description=OpenKnowledge okserver
+Description=Okryptos okserver
 After=network.target
 
 [Service]

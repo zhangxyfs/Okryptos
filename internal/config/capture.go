@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // SetCapture 重写 config.toml 的 [capture] 小节：已存在则整段替换（到下一个

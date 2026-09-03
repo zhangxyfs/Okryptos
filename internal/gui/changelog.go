@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"openknowledge/internal/registry"
-	"openknowledge/internal/version"
+	"okryptos/internal/registry"
+	"okryptos/internal/version"
 )
 
 // changelogEntry 是一个版本号的更新日志（N.N.N.md 全文）。
@@ -106,7 +106,7 @@ type UpdateCheck struct {
 	Error string `json:"error,omitempty"`
 }
 
-// guiState 是 ~/.openknowledge/gui.json 的内容（GUI 侧持久化小状态）。
+// guiState 是 ~/.okryptos/gui.json 的内容（GUI 侧持久化小状态）。
 type guiState struct {
 	LastSeenVersion string       `json:"last_seen_version,omitempty"`
 	SkippedVersion  string       `json:"skipped_version,omitempty"`

@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/store"
-	"openknowledge/internal/syncx"
+	"okryptos/internal/store"
+	"okryptos/internal/syncx"
 )
 
 // mkSyncProject 注册一个已初始化的同步项目（本地仓 + bare 远端 + 首个提交）。

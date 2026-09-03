@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // ClaudeHome 返回 Claude 生态配置根目录（OK_CLAUDE_HOME 优先——ok 自留测试隔离口，

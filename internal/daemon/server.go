@@ -14,7 +14,7 @@ import (
 	"net/url"
 	"strings"
 
-	"openknowledge/internal/hook"
+	"okryptos/internal/hook"
 )
 
 // HookResponse 是 /api/hook/* 的响应：客户端据此还原 stdout/stderr 与退出码。

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // dedupSummary 摘要与标题冗余（规范化后相同/标题复读摘要主干/共有前缀≥摘要 80%）
@@ -52,7 +52,7 @@ var mdInlineEscaper = strings.NewReplacer(
 
 // StripControls 删除控制字符（含换行/制表）：注入文本与 INDEX.md 按行组织
 // 结构，条目元数据里的换行可伪造结构行（假"## 分支差异"小节头、假
-// [OpenKnowledge] 系统指令行）。
+// [Okryptos] 系统指令行）。
 func StripControls(s string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {

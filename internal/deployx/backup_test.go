@@ -7,7 +7,7 @@ import (
 )
 
 func TestBackupCmd(t *testing.T) {
-	cmd := BackupCmd("/home/u/openknowledge")
+	cmd := BackupCmd("/home/u/okryptos")
 	if !strings.Contains(cmd, "tar") || !strings.Contains(cmd, "okserver-data") {
 		t.Fatalf("BackupCmd = %q", cmd)
 	}
@@ -39,7 +39,7 @@ func TestRestoreTask(t *testing.T) {
 		{match: "up -d", code: 0},
 		{match: "api/v1/meta", code: 0, stdout: "{}"},
 	}}
-	task := BuildRestoreTask("/home/u/openknowledge", []byte("fake-tar-bytes"))
+	task := BuildRestoreTask("/home/u/okryptos", []byte("fake-tar-bytes"))
 	e := &Env{Ex: fx, Hub: NewLogHub(), Vars: map[string]string{}}
 	if err := task.Execute(context.Background(), e); err != nil {
 		t.Fatal(err)

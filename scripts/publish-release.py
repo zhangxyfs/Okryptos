@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""OpenKnowledge 双仓 release 发布（Gitea + GitHub）。
+"""Okryptos 双仓 release 发布（Gitea + GitHub）。
 
-版本号从 installer/openknowledge.iss（单一事实源）提取；正文默认取
+版本号从 installer/okryptos.iss（单一事实源）提取；正文默认取
 docs/changelogs/<版本>.md（可用 --body 覆盖）。正文规范（"安装器与发布" wiki）：
 标题=纯版本号、正文不出现 H1、不提当前版本号、固定四节（新功能/改进/修复/说明）；
 正文面向用户——不提"做了什么评审/审查/整改"，不提参考/借鉴外部项目一类
@@ -28,10 +28,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def app_version():
-    text = (ROOT / "installer" / "openknowledge.iss").read_text(encoding="utf-8")
+    text = (ROOT / "installer" / "okryptos.iss").read_text(encoding="utf-8")
     m = re.search(r'^#define AppVersion "([^"]+)"', text, re.MULTILINE)
     if not m:
-        sys.exit("未能从 installer/openknowledge.iss 提取 AppVersion")
+        sys.exit("未能从 installer/okryptos.iss 提取 AppVersion")
     return m.group(1)
 
 
@@ -85,7 +85,7 @@ def sanitize_body(body):
 
 
 def publish(host, api_base, upload_kind, tag, body, assets, dry_run):
-    repo = "zhangxyfs/OpenKnowledge"
+    repo = "zhangxyfs/Okryptos"
     if dry_run:
         print(f"[dry-run] {host}: 建/复用 release {tag}，传 {[a.name for a in assets]}")
         return
@@ -140,7 +140,7 @@ def main():
     body = sanitize_body(body_path.read_text(encoding="utf-8"))
     out = ROOT / "installer" / "output"
     assets = [
-        out / f"OpenKnowledgeSetup-{version}.exe",
+        out / f"OkryptosSetup-{version}.exe",
         out / f"openknowledge_{version}_linux_amd64.tar.gz",
         out / f"openknowledge_{version}_amd64.deb",
     ]

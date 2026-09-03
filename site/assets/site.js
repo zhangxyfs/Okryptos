@@ -1,4 +1,4 @@
-/* OpenKnowledge 官网交互运行时：主题切换 + 中英文切换。
+/* Okryptos 官网交互运行时：主题切换 + 中英文切换。
    中文为页面原始 DOM（无需字典）；英文字典集中在本文件 EN 中。
    首次切到英文时缓存每个 [data-i18n] 元素的中文 innerHTML，切回中文时还原。
    注意：i.hint 内含 Release 直链版本号，发版时由 scripts/sync-version.sh 同步本文件。 */
@@ -19,10 +19,10 @@
     't.note': 'Notes',
 
     /* ── 首页 ── */
-    'meta.title.i': 'OpenKnowledge — Project knowledge base for AI coding assistants',
+    'meta.title.i': 'Okryptos — Project knowledge base for AI coding assistants',
     'i.tagline': 'A <b>project knowledge base</b> for AI coding assistants — knowledge is isolated per project and injected into the AI&#39;s context through each assistant&#39;s hooks/extensions, and it can enforce workflow rules like "no code change without a changelog entry".',
     'i.src': 'Source',
-    'i.hint': 'Auto-detects your OS · <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.24.3/OpenKnowledgeSetup-2.24.3.exe">Windows</a> / <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.24.3/openknowledge_2.24.3_amd64.deb">Linux .deb</a> / <a href="https://github.com/zhangxyfs/OpenKnowledge/releases/download/v2.24.3/openknowledge_2.24.3_linux_amd64.tar.gz">Linux .tar.gz</a> · <a href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">All releases</a>',
+    'i.hint': 'Auto-detects your OS · <a href="https://github.com/zhangxyfs/Okryptos/releases/download/v2.25.0/OkryptosSetup-2.25.0.exe">Windows</a> / <a href="https://github.com/zhangxyfs/Okryptos/releases/download/v2.25.0/openknowledge_2.25.0_amd64.deb">Linux .deb</a> / <a href="https://github.com/zhangxyfs/Okryptos/releases/download/v2.25.0/openknowledge_2.25.0_linux_amd64.tar.gz">Linux .tar.gz</a> · <a href="https://github.com/zhangxyfs/Okryptos/releases" target="_blank" rel="noopener">All releases</a>',
     'i.feat.h': 'Features',
     'i.feat.sub': 'Single-binary Go CLI (ok) with zero runtime dependencies',
     'i.f1t': 'Base injection',
@@ -46,18 +46,18 @@
     'i.inst.sub': 'Windows installer / Linux packages / manual build — pick one',
     'i.w1h': 'Windows installer',
     'i.w1tag': 'Recommended',
-    'i.w1p': 'No Go toolchain needed; installs to <code>%LOCALAPPDATA%\\Programs\\OpenKnowledge</code> (no admin rights). Uninstall keeps your knowledge base by default.',
-    'i.w1pre': '<code><span class="c"># Download from Releases, then run</span>\nOpenKnowledgeSetup-2.24.3.exe</code>',
+    'i.w1p': 'No Go toolchain needed; installs to <code>%LOCALAPPDATA%\\Programs\\Okryptos</code> (no admin rights). Uninstall keeps your knowledge base by default.',
+    'i.w1pre': '<code><span class="c"># Download from Releases, then run</span>\nOkryptosSetup-2.25.0.exe</code>',
     'i.lxh': 'Linux (amd64)',
     'i.lxp': 'Statically compiled, zero dependencies.',
     'i.lxpre': '<code><span class="c"># tar.gz</span>\ntar xzf openknowledge_*_linux_amd64.tar.gz\ncd openknowledge_* &amp;&amp; ./ok setup\n\n<span class="c"># or .deb</span>\nsudo dpkg -i openknowledge_*_amd64.deb\nok setup</code>',
     'i.mbh': 'Manual build',
     'i.mbp': 'Requires Go ≥ 1.25.',
     'i.mbpre': '<code>go build -o ok.exe ./cmd/ok   <span class="c"># Windows</span>\ngo build -o ok ./cmd/ok       <span class="c"># Linux/macOS</span>\n./ok setup                    <span class="c"># first-run wizard (idempotent)</span></code>',
-    'i.foot': '<a href="https://github.com/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">Source</a>· <a href="https://github.com/zhangxyfs/OpenKnowledge/releases" target="_blank" rel="noopener">Releases</a>· <a href="https://github.com/zhangxyfs/OpenKnowledge/blob/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">Architecture</a>',
+    'i.foot': '<a href="https://github.com/zhangxyfs/Okryptos" target="_blank" rel="noopener">Source</a>· <a href="https://github.com/zhangxyfs/Okryptos/releases" target="_blank" rel="noopener">Releases</a>· <a href="https://github.com/zhangxyfs/Okryptos/blob/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">Architecture</a>',
 
     /* ── 文档页 ── */
-    'meta.title.d': 'Docs — OpenKnowledge',
+    'meta.title.d': 'Docs — Okryptos',
     'd.g1': 'Getting started',
     'd.g1a': 'Install & first-run setup',
     'd.g1b': 'Quick start',
@@ -72,7 +72,7 @@
     'd.g4': 'More',
     'd.g4a': 'Architecture (repo)',
     'd.h1': 'Documentation',
-    'd.lede': 'OpenKnowledge is a project knowledge base for AI coding assistants: knowledge is isolated per project, injected into the AI&#39;s context via hooks/extensions, and can enforce workflow rules.',
+    'd.lede': 'Okryptos is a project knowledge base for AI coding assistants: knowledge is isolated per project, injected into the AI&#39;s context via hooks/extensions, and can enforce workflow rules.',
     'd.e1b': 'Five-minute start',
     'd.e1p': 'From install to the first retrieval injection',
     'd.e2b': 'Knowledge capture',
@@ -84,7 +84,7 @@
     'd.s1pre': '<code>ok setup            <span class="c"># or one agent only: ok setup --agent zcode</span></code>',
     'd.s1lead': 'performs three steps, in order:',
     'd.s1l1': '<b>Writes hook configurations</b> — covering every detected AI assistant: Kimi Code gets 3 hook marker blocks in <code>~/.kimi-code/config.toml</code> (backup + idempotent overwrite), Pi gets a TypeScript extension, ZCode gets a merged <code>config.json</code> write, Reasonix gets an Extension Protocol plugin package, opencode gets a TypeScript plugin in <code>~/.config/opencode/plugins/</code>, claude gets a merged hooks write to <code>~/.claude/settings.json</code> (shared by Claude Code, CodePilot and other compatible hosts), codex gets a merged hooks write to <code>~/.codex/hooks.json</code> (Claude-compatible hook contract; zero skill adaptation via the shared skills directory; ok auto-enables the feature flag and writes trust records; verified working on desktop app 26.707 and CLI 0.147+), qoder gets a merged hooks write to <code>~/.qoder-cn/settings.json</code> (Qoder CN terminal CLI; Claude-compatible contract; ok auto-enables the hooksConfig.enabled switch — off by default, hooks silently never dispatch otherwise), qoder-ide gets a merged hooks write to <code>~/.lingma/settings.json</code> (Qoder CN IDE Lingma core: knowledge injection and touch tracking work, Stop is not blockable so enforcement degrades)',
-    'd.s1l2': '<b>Installs six skills</b> — <code>openknowledge-init / on / off / propose / capture / wiki</code>, written into each agent&#39;s skills directory',
+    'd.s1l2': '<b>Installs six skills</b> — <code>ok-init / on / off / propose / capture / wiki</code>, written into each agent&#39;s skills directory',
     'd.s1l3': '<b>Configures embeddings</b> — prompts for base_url / model / API key, writes the global config and verifies connectivity; press Enter to skip and use keyword-only retrieval',
     'd.s1note': '<b>Note</b>Hooks load at session start: after installing or changing configuration, <b>start a new AI assistant session</b> for them to take effect.',
     'd.s2h': 'Quick start',
@@ -96,7 +96,7 @@
     'd.s3h': 'Knowledge entries',
     'd.s3p': 'Each entry is a Markdown file with frontmatter (created via <code>ok add</code>, or handwritten):',
     'd.s3pre': '<code>---\ntitle: Changelog enforcement rule\ntype: rule              <span class="c"># rule | pitfall | note | reference</span>\ntags: [changelog, workflow]\nmandatory: true         <span class="c"># true = full-text injection on the first question of every session</span>\nsummary: Every code change must be accompanied by a changelog entry\n---\n\nBody (free-form Markdown)</code>',
-    'd.s3tail': 'Data lives centrally in <code>~/.openknowledge/</code> — project repositories stay clean. Four entry types: <code>rule</code>, <code>pitfall</code>, <code>note</code>, <code>reference</code>.',
+    'd.s3tail': 'Data lives centrally in <code>~/.okryptos/</code> — project repositories stay clean. Four entry types: <code>rule</code>, <code>pitfall</code>, <code>note</code>, <code>reference</code>.',
     'd.s4h': 'Draft flow (AI proposes, human approves)',
     'd.s4p': 'The AI can record session learnings as <b>draft entries</b> via <code>ok propose</code> (frontmatter <code>draft: true</code>) — drafts are excluded from retrieval and injection, and only appear in <code>ok list</code> and the GUI Manage tab (with a "draft" badge). A human promotes them with <code>ok approve &lt;file&gt;</code> or the GUI&#39;s "Approve" button.',
     'd.s4lead': 'The capture mode is switched with <code>ok capture propose|auto</code>:',
@@ -110,27 +110,31 @@
     'd.s6l3': '<b>Misc</b>: data export/import, changelogs, user guide, delete project knowledge base (triple confirmation)',
     'd.s6l4': '<b>Logs</b>: live ok / daemon / embedding-sidecar logs, multi-select source chips + a "semantic only" toggle + a free-text filter',
     'd.s7h': 'Configuration',
-    'd.s7p': 'Effective config = built-in defaults ← global <code>~/.openknowledge/config.toml</code> ← per-project <code>~/.openknowledge/projects/&lt;name&gt;/config.toml</code> (each layer overrides the previous).',
+    'd.s7p': 'Effective config = built-in defaults ← global <code>~/.okryptos/config.toml</code> ← per-project <code>~/.okryptos/projects/&lt;name&gt;/config.toml</code> (each layer overrides the previous).',
     'd.s7pre': '<code><span class="c"># Global config (ok setup can write this interactively)</span>\n[embedding]\nbase_url = "https://api.openai.com/v1"   <span class="c"># any OpenAI-compatible service</span>\napi_key = "sk-..."                        <span class="c"># or use api_key_env for an environment variable</span>\nmodel = "text-embedding-3-small"\n\n<span class="c"># Project config: enforcement rule example</span>\n[[enforce]]\ntype = "changelog_required"\ncode_globs = ["**/*.go"]                  <span class="c"># touching these = changed code</span>\nchangelog_glob = "docs/changelogs/**"     <span class="c"># touching these = wrote a changelog</span>\nmessage = "Code was changed this session without a changelog update; please add one first."</code>',
     'd.s8h': 'Retrieval algorithm',
     'd.s8p': 'Hybrid retrieval on SQLite + FTS5 — the total score only ranks, <b>admission is decided per channel</b>: better none than noise, top_n is never force-filled:',
     'd.s8l1': '<b>Keyword channel</b>: FTS5 full-text index + BM25 scoring, weighted across title/tags/summary/body; Chinese uses bigram tokenization, zero dependencies; admission requires normalized BM25 ≥ <code>min_score</code> (default 0.5, scaled by corpus size)',
     'd.s8l2': '<b>Semantic channel</b>: OpenAI-compatible embeddings + cosine similarity, recalling entries that "ask differently but mean the same"; admission goes through a model-agnostic gate (judged against the cosine distribution of the current query — active only when the head separates from the median significantly; <code>min_gap</code> default 0.25, configurable)',
     'd.s8l3': '<b>Drafts stay out of both channels</b>: excluded from FTS and vectors until approved',
-    'd.s8tail': '~30ms per query over 10k entries; when the embedding service is down it degrades to keyword-only retrieval and injection never goes missing. Implementation details in <a href="https://github.com/zhangxyfs/OpenKnowledge/blob/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">ARCHITECTURE §17</a>.',
+    'd.s8tail': '~30ms per query over 10k entries; when the embedding service is down it degrades to keyword-only retrieval and injection never goes missing. Implementation details in <a href="https://github.com/zhangxyfs/Okryptos/blob/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">ARCHITECTURE §17</a>.',
     'd.s9h': 'How it works',
     'd.s9p': 'Using Kimi Code as the example, the assistant calls <code>ok</code> at three moments (other agents trigger the equivalents through their own adapters):',
     'd.s9tbl': '<table class="doc"><tr><th>Hook</th><th>When it runs</th><th>Effect</th></tr><tr><td><code>UserPromptSubmit</code></td><td>Every user message, before the model call</td><td>First question: mandatory entries + index; every question: retrieval injection</td></tr><tr><td><code>PostToolUse</code></td><td>After the AI successfully writes/edits a file</td><td>Records the touched file into session state</td></tr><tr><td><code>Stop</code></td><td>When the AI&#39;s turn is about to end</td><td>Code changed without changelog → exit 2 block (at most once per rule per session)</td></tr></table>',
-    'd.s9note': '<b>Note</b>All hook paths are fail-open: any internal error is only logged (<code>~/.openknowledge/ok.log</code>) and never disrupts the session.',
-    'd.foot': '<a href="index.html">Home</a>· <a href="changelog.html">Changelog</a>· <a href="https://github.com/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">Source</a>',
+    'd.s9note': '<b>Note</b>All hook paths are fail-open: any internal error is only logged (<code>~/.okryptos/ok.log</code>) and never disrupts the session.',
+    'd.foot': '<a href="index.html">Home</a>· <a href="changelog.html">Changelog</a>· <a href="https://github.com/zhangxyfs/Okryptos" target="_blank" rel="noopener">Source</a>',
 
     /* ── 更新日志页 ── */
-    'meta.title.c': 'Changelog — OpenKnowledge',
+    'meta.title.c': 'Changelog — Okryptos',
     'c.ledger': 'Release ledger',
     'c.h1': 'Changelog',
-    'c.lede': 'OpenKnowledge release history. Dates are in 2026.',
-    'c.cta': 'Download latest v2.24.3',
+    'c.lede': 'Okryptos release history. Dates are in 2026.',
+    'c.cta': 'Download latest v2.25.0',
     'c.latest': 'Latest',
+    'c.2250.i1': 'Product renamed to Okryptos: repository, installer (<code>OkryptosSetup-&lt;version&gt;.exe</code>), install dir, data dir (<code>~/.okryptos</code>), injection prefix, tray/window titles, site and docs all switch over; the CLI short names ok/okd/okserver/okdeploy/OkManager are unchanged',
+    'c.2250.i2': 'Upgrade migrates automatically: the data root <code>~/.openknowledge</code> is moved to <code>~/.okryptos</code> (idempotent); every AI assistant&#39;s hooks plugin/extension gets the new name and the old files are removed; installed openknowledge-* skill copies are replaced by ok-* ones; the old Windows autorun entry is cleaned up — no manual steps',
+    'c.2250.i3': 'Server image dual-published under the new name: <code>z7dream/okryptos-okserver</code> (GHCR <code>ghcr.io/zhangxyfs/okryptos/okserver</code>), with the old name still published during the transition; existing NAS deployments switch automatically via "Upgrade" in the okdeploy console, data volumes untouched',
+    'c.2250.n1': 'Backward compatibility: existing install dirs, the deb package name and the Linux autostart filename stay unchanged; the one-click upgrade path of old clients keeps working (old repo URLs redirect automatically, and the new build trusts both old and new download prefixes)',
     'c.2101.f1': 'Export/import now covers wiki state: <code>state/wiki.json</code> (base branch + per-branch cursors + merge lineage) travels with the zip backup and is restored verbatim. Previously only entries and config were exported — the "export zip backup" of project deletion therefore lacked the lineage, and re-importing zeroed the GUI lineage rows and lost the wiki cursors, forcing a full rescan',
     'c.2101.n1': 'Backups without wiki.json skip the restore — backward compatible; the entry index is still rebuilt automatically on import',
     'c.2110.n1': 'New opencode adapter (fifth AI assistant integration): <code>ok setup</code> or the GUI Guide tab installs a global TypeScript plugin (<code>~/.config/opencode/plugins/openknowledge.ts</code>) — retrieval injection on every prompt (synthetic part, invisible in the UI), write-tracking across write/edit and apply_patch (gpt-family models), and an SDK-delivered capture reminder when the session goes idle (stop loop); idempotent install, self-healing, clean uninstall',
@@ -223,8 +227,8 @@
     'c.223.f2': 'The installer stops the daemon before copying files, avoiding ok.exe being locked during upgrades',
     'c.223.i1': 'Leaner hook injection: default budget 1500→800, top_n 3→2; retrieval hits inject summary + file path instead of full text (mandatory entries still inject full text)',
     'c.older.t': 'Earlier',
-    'c.older.l': 'v1.x early development logs live as dated files in the repo&#39;s <a href="https://github.com/zhangxyfs/OpenKnowledge/blob/master/docs/changelogs/" target="_blank" rel="noopener">docs/changelogs/</a>',
-    'c.foot': '<a href="index.html">Home</a>· <a href="docs.html">Docs</a>· <a href="https://github.com/zhangxyfs/OpenKnowledge" target="_blank" rel="noopener">Source</a>'
+    'c.older.l': 'v1.x early development logs live as dated files in the repo&#39;s <a href="https://github.com/zhangxyfs/Okryptos/blob/master/docs/changelogs/" target="_blank" rel="noopener">docs/changelogs/</a>',
+    'c.foot': '<a href="index.html">Home</a>· <a href="docs.html">Docs</a>· <a href="https://github.com/zhangxyfs/Okryptos" target="_blank" rel="noopener">Source</a>'
   };
 
   var root = document.documentElement;

@@ -13,15 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/embedx"
-	"openknowledge/internal/enforce"
-	"openknowledge/internal/index"
-	"openknowledge/internal/project"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/retrieve"
-	"openknowledge/internal/state"
-	"openknowledge/internal/store"
-	"openknowledge/internal/wiki"
+	"okryptos/internal/embedx"
+	"okryptos/internal/enforce"
+	"okryptos/internal/index"
+	"okryptos/internal/project"
+	"okryptos/internal/registry"
+	"okryptos/internal/retrieve"
+	"okryptos/internal/state"
+	"okryptos/internal/store"
+	"okryptos/internal/wiki"
 )
 
 // InjectForPrompt 组装 prompt 注入文本：会话首次基础注入（mandatory 全文 + 索引）
@@ -353,7 +353,7 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 			logErr("prompt save state: %v", err)
 		}
 		if emit {
-			out += "\n[OpenKnowledge] 语义检索退化：" + embedWarn + "\n"
+			out += "\n[Okryptos] 语义检索退化：" + embedWarn + "\n"
 		}
 	}
 	// 检索命中块沉底：恒为注入文本末段（段序固定约定，见上方 L4 注释）

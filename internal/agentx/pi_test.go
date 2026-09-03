@@ -23,7 +23,7 @@ func TestPiAgentInstallDetectRemove(t *testing.T) {
 	if err := a.InstallHooks(exe); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(PiHome(), "extensions", "openknowledge.ts")
+	path := filepath.Join(PiHome(), "extensions", "okryptos.ts")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("extension not written: %v", err)
@@ -61,7 +61,7 @@ func TestPiAgentForeignFilePreserved(t *testing.T) {
 	if err := os.MkdirAll(extDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(extDir, "openknowledge.ts")
+	path := filepath.Join(extDir, "okryptos.ts")
 	if err := os.WriteFile(path, []byte("// user hand-written extension\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -111,5 +111,45 @@ func TestPiAgentEnsureHooksStaleRewrite(t *testing.T) {
 	}
 	if _, err := os.Stat(a.HooksTarget()); !os.IsNotExist(err) {
 		t.Fatal("EnsureHooks must not recreate a deleted extension")
+	}
+}
+
+// TestPiAgentLegacyMigration（2.25.0 改名迁移）：旧名扩展 openknowledge.ts 在
+// EnsureHooks 窗口迁移为 okryptos.ts（按当前 exe 重渲染）并删除旧件——
+// legacy 在 = 旧版接入过 hooks，"缺失不复活"在此让位，否则升级后 hooks 被静默摘死。
+// 外来旧名文件（无归属标记）不动；全新安装（无旧件）不复活。
+func TestPiAgentLegacyMigration(t *testing.T) {
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	a := piAgent{}
+	legacyPath := legacyPiExtensionPath()
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := legacyPiExtensionMarker + "\n// fingerprint: 000000000000\n// exe: D:/old/ok.exe\n"
+	if err := os.WriteFile(legacyPath, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnsureHooks(`D:\new\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatal("旧名扩展应被迁移清除")
+	}
+	data, err := os.ReadFile(a.HooksTarget())
+	if err != nil {
+		t.Fatalf("新名扩展应被迁移创建: %v", err)
+	}
+	if !strings.Contains(string(data), filepath.ToSlash(`D:\new\ok.exe`)) {
+		t.Fatal("迁移创建的新扩展应烘焙当前 exe")
+	}
+	// 外来旧名文件不动
+	if err := os.WriteFile(legacyPath, []byte("// user hand-written\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnsureHooks(`D:\new\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := os.ReadFile(legacyPath); string(d) != "// user hand-written\n" {
+		t.Fatal("外来旧名文件不应被删除/改写")
 	}
 }

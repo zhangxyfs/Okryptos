@@ -10,7 +10,7 @@ import (
 // dirStat 单目录的增删文件计数（DiffSummary 聚类用；包级声明以便排序 helper 引用）。
 type dirStat struct{ add, del int }
 
-// DiffSummary 输出当前分支相对基准分叉点的结构变化摘要（供 openknowledge-wiki 技能消化）。
+// DiffSummary 输出当前分支相对基准分叉点的结构变化摘要（供 ok-wiki 技能消化）。
 // base 为空/分叉点不可算/非 git 时返回 ("", nil)——fail-open，由调用方打印说明。
 func DiffSummary(srcDir, base string) (string, error) {
 	branch := CurrentBranch(srcDir)

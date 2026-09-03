@@ -61,10 +61,12 @@ func pullRetry(pullCmd string) string {
 // okserverImageCmd 生成 okserver 镜像获取命令：本地已有（docker load 的离线包）
 // 直接用；没有则 Docker Hub 重试拉取，仍失败回退 GHCR 源并 tag 回主名
 // （国内 NAS 直连 Docker Hub 常被限速到拉不动，GHCR 通常反而通）。
+// 2.25.0 改名：主名切 okryptos-*（过渡期旧名在发布侧继续双发，存量 NAS 升级
+// 经 manage.go 整行重写 .env 静默迁移）；离线包构建侧 tag 名须与本名同步。
 // tag 须先过 tagRe 白名单（BuildDeployTask 已校验）。
 func okserverImageCmd(tag string) string {
-	img := "z7dream/openknowledge-okserver:" + tag
-	ghcr := "ghcr.io/zhangxyfs/openknowledge/okserver:" + tag
+	img := "z7dream/okryptos-okserver:" + tag
+	ghcr := "ghcr.io/zhangxyfs/okryptos/okserver:" + tag
 	return "docker image inspect " + img + " >/dev/null 2>&1 || " +
 		pullRetry("docker pull "+img) + " || " +
 		"{ docker pull " + ghcr + " && docker tag " + ghcr + " " + img + "; }"
@@ -95,7 +97,7 @@ func BuildDeployTask(s DeploySpec) (Task, error) {
 func buildFullTask(s DeploySpec, compose string) Task {
 	giteaHealth := fmt.Sprintf("http://127.0.0.1:%d/api/v1/version", s.GiteaPort)
 	okHealth := fmt.Sprintf("http://127.0.0.1:%d/api/v1/meta", s.OKPort)
-	return Task{Name: "部署 OpenKnowledge 服务端", Steps: []Step{
+	return Task{Name: "部署 Okryptos 服务端", Steps: []Step{
 		{Name: "创建部署目录", Run: func(ctx context.Context, e *Env) error {
 			if _, err := runCmd(ctx, e, "创建部署目录",
 				"mkdir -p "+s.Dir+"/okserver-data "+s.Dir+"/gitea-data"); err != nil {

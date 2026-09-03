@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/agentx"
-	"openknowledge/internal/entry"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/wiki"
+	"okryptos/internal/agentx"
+	"okryptos/internal/entry"
+	"okryptos/internal/registry"
+	"okryptos/internal/wiki"
 )
 
 const testToken = "0123456789abcdef0123456789abcdef"
@@ -675,7 +675,7 @@ func TestSetupHooksAndSkills(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("setup/hooks pi: status = %d, body %s", code, data)
 	}
-	ext, err := os.ReadFile(filepath.Join(agentx.PiHome(), "extensions", "openknowledge.ts"))
+	ext, err := os.ReadFile(filepath.Join(agentx.PiHome(), "extensions", "okryptos.ts"))
 	if err != nil {
 		t.Fatalf("pi extension not written: %v", err)
 	}
@@ -691,11 +691,11 @@ func TestSetupHooksAndSkills(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("setup/skills: status = %d, body %s", code, data)
 	}
-	skill, err := os.ReadFile(filepath.Join(agentx.SkillsHome(), "openknowledge-init", "SKILL.md"))
+	skill, err := os.ReadFile(filepath.Join(agentx.SkillsHome(), "ok-init", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("skill not installed: %v", err)
 	}
-	if !strings.Contains(string(skill), "openknowledge-init") {
+	if !strings.Contains(string(skill), "ok-init") {
 		t.Fatalf("unexpected skill content: %s", skill)
 	}
 }

@@ -10,15 +10,15 @@
     "#1": {
       "0000": {
         "fixed": {
-          "file_version": "2.24.3.0",
-          "product_version": "2.24.3.0"
+          "file_version": "2.25.0.0",
+          "product_version": "2.25.0.0"
         },
         "info": {
           "0409": {
-            "FileDescription": "OpenKnowledge daemon (okd)",
-            "ProductName": "OpenKnowledge",
-            "CompanyName": "OpenKnowledge",
-            "LegalCopyright": "OpenKnowledge",
+            "FileDescription": "Okryptos daemon (okd)",
+            "ProductName": "Okryptos",
+            "CompanyName": "Okryptos",
+            "LegalCopyright": "Okryptos",
             "OriginalFilename": "okd.exe"
           }
         }

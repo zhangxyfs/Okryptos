@@ -1,6 +1,6 @@
-# OpenKnowledge 使用帮助
+# Okryptos 使用帮助
 
-OpenKnowledge 是 AI 编码助手的**本地知识库**：把项目经验、规约、结构文档存下来，在你下次提问时自动注入给 AI——换一次会话、换一个工具，知识都还在。
+Okryptos 是 AI 编码助手的**本地知识库**：把项目经验、规约、结构文档存下来，在你下次提问时自动注入给 AI——换一次会话、换一个工具，知识都还在。
 
 ## 30 秒上手
 
@@ -15,11 +15,11 @@ OpenKnowledge 是 AI 编码助手的**本地知识库**：把项目经验、规�
 - **知识注入是全自动的**：每次你提问，相关知识摘要自动进入上下文，无需任何操作
 - **斜杠技能**（各 agent 均支持，也可用自然语言，如"初始化知识库""把项目沉淀成 wiki"）：
 
-- `/openknowledge-init`——初始化当前项目（等价 `ok init`）
-- `/openknowledge-propose`——把本次会话的经验提议为草稿条目（待你批准）
-- `/openknowledge-wiki`——生成/增量更新项目 wiki（结构文档）
-- `/openknowledge-capture`——查看/切换经验沉淀模式与轮次间隔
-- `/openknowledge-on` / `/openknowledge-off`——全局开启/关闭知识库 hooks
+- `/ok-init`——初始化当前项目（等价 `ok init`）
+- `/ok-propose`——把本次会话的经验提议为草稿条目（待你批准）
+- `/ok-wiki`——生成/增量更新项目 wiki（结构文档）
+- `/ok-capture`——查看/切换经验沉淀模式与轮次间隔
+- `/ok-on` / `/ok-off`——全局开启/关闭知识库 hooks
 
 - **生效时机**：kimi / pi / zcode 的 hook 配置在**新开会话**时加载；reasonix 以插件形式安装，新会话生效（会话中 `/reload` 可重载）
 
@@ -51,7 +51,7 @@ daemon 常驻后台、按需自动拉起，无需手动管理；托盘图标右�
 
 ## 怎么配置
 
-### 全局配置 `~/.openknowledge/config.toml`
+### 全局配置 `~/.okryptos/config.toml`
 
 - `[hooks] timeout_sec`（默认 10）——hook 超时秒数，过短在高负载下会被宿主静默杀死。改法：GUI 设置页"Hook 超时"卡（只写配置、不重装 hooks，下次安装/自愈时生效），或手改后重跑 `ok setup`
 - `[embedding]`（语义检索，可选；不配则纯关键词检索，照样可用）——三套服务配置（profile）存一处、`active` 指定"使用中"，三种形态任选：
@@ -82,12 +82,12 @@ daemon 常驻后台、按需自动拉起，无需手动管理；托盘图标右�
 
 ## 常见问题
 
-- **注入没出现**：①`ok doctor` 看 hooks 是否安装；②agent 必须是**新开会话**（hook 配置在会话启动时加载）；③看日志 `~/.openknowledge/ok.log`
+- **注入没出现**：①`ok doctor` 看 hooks 是否安装；②agent 必须是**新开会话**（hook 配置在会话启动时加载）；③看日志 `~/.okryptos/ok.log`
 - **想临时停用**：`ok off`（全部链路暂停），`ok on` 恢复
-- **数据都在哪**：`~/.openknowledge/`——`registry.toml`（项目注册表）、`projects/<项目>/knowledge/*.md`（条目真源）、`kb.db`（索引，删了会自动重建）、`state/`（会话状态）
+- **数据都在哪**：`~/.okryptos/`——`registry.toml`（项目注册表）、`projects/<项目>/knowledge/*.md`（条目真源）、`kb.db`（索引，删了会自动重建）、`state/`（会话状态）
 - **备份/迁移**：其他页"数据导出"存 zip → 另一台机器"数据导入"（索引自动重建）
-- **切了 git 分支**：wiki 是分支感知的（2.6+）——新分支自动继承可达基线并提示"wiki 基于 <基准分支>；当前分支 X 继承该基线"，落后超阈值照常提醒；长期并行分支用 `/openknowledge-wiki` 在该分支生成差异条目（2.7+），互不影响
-- **卸载**：Windows"应用与功能"里卸载 OpenKnowledge——会清理 hooks/插件登记/技能/embedding 配置并停 daemon；知识库数据保留在 `~/.openknowledge/` 可手动删
+- **切了 git 分支**：wiki 是分支感知的（2.6+）——新分支自动继承可达基线并提示"wiki 基于 <基准分支>；当前分支 X 继承该基线"，落后超阈值照常提醒；长期并行分支用 `/ok-wiki` 在该分支生成差异条目（2.7+），互不影响
+- **卸载**：Windows"应用与功能"里卸载 Okryptos——会清理 hooks/插件登记/技能/embedding 配置并停 daemon；知识库数据保留在 `~/.okryptos/` 可手动删
 - **已知限制**：用 2.7.1 及更早版本执行过 `ok wiki mark/base` 会丢弃 merges 合并谱系（不崩，但谱系清空）；升级后用 `ok wiki status` 可重新检出积累
 
 ## 更多

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"openknowledge/internal/registry"
+	"okryptos/internal/registry"
 )
 
 // TestDefaultModelsDirFrom 默认模型目录决策：

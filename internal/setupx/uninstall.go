@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"openknowledge/internal/agentx"
-	"openknowledge/internal/daemonx"
-	"openknowledge/internal/fsx"
-	"openknowledge/internal/registry"
+	"okryptos/internal/agentx"
+	"okryptos/internal/daemonx"
+	"okryptos/internal/fsx"
+	"okryptos/internal/registry"
 )
 
 // UninstallResult 汇总卸载各步骤的结果（KB 数据始终保留）。
@@ -19,7 +19,7 @@ type UninstallResult struct {
 	EmbeddingRemoved bool // 全局配置中的 [embedding] 小节已移除
 }
 
-// Uninstall 卸载 OpenKnowledge 的集成部分：hooks 配置、技能、全局 embedding 配置。
+// Uninstall 卸载 Okryptos 的集成部分：hooks 配置、技能、全局 embedding 配置。
 // 绝不触碰知识库数据（registry、projects、kb.db、knowledge 条目）。
 func Uninstall() (*UninstallResult, error) {
 	r := &UninstallResult{}

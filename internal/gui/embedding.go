@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
-	"openknowledge/internal/embedsidecar"
-	"openknowledge/internal/index"
-	"openknowledge/internal/setupx"
+	"okryptos/internal/config"
+	"okryptos/internal/embed"
+	"okryptos/internal/embedsidecar"
+	"okryptos/internal/index"
+	"okryptos/internal/setupx"
 )
 
 // dlJob 是一个模型下载任务的状态（GUI 轮询展示）。

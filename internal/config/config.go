@@ -9,7 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // EmbeddingProfile 是一套 embedding 服务配置。Type：openai（OpenAI 兼容线上/自建）、

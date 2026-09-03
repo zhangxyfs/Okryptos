@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"openknowledge/internal/fsx"
-	"openknowledge/internal/version"
+	"okryptos/internal/fsx"
+	"okryptos/internal/version"
 )
 
 // ReasonixHome 返回 Reasonix 配置根目录：OK_REASONIX_HOME（测试口）>
@@ -32,7 +32,23 @@ func ReasonixHome() string {
 	return filepath.Join(home, ".reasonix")
 }
 
-func reasonixPluginDir() string { return filepath.Join(ReasonixHome(), "plugins", "openknowledge") }
+// reasonixPluginName / legacyReasonixPluginName：插件登记名（plugin-packages.json
+// 条目、manifest name、rxext sidecar Name 三处同源）。2.25.0 改名：识别双名
+//（旧条目原位替换成新名），写入只写新名。
+const (
+	reasonixPluginName       = "okryptos"
+	legacyReasonixPluginName = "openknowledge"
+)
+
+func reasonixPluginDir() string {
+	return filepath.Join(ReasonixHome(), "plugins", reasonixPluginName)
+}
+
+// legacyReasonixPluginDir 是改名前插件目录；登记迁移后旧目录须显式删除，
+// 否则宿主按旧条目/旧目录残留加载双 sidecar。
+func legacyReasonixPluginDir() string {
+	return filepath.Join(ReasonixHome(), "plugins", legacyReasonixPluginName)
+}
 func reasonixStatePath() string { return filepath.Join(ReasonixHome(), "plugin-packages.json") }
 func reasonixManifestPath() string {
 	return filepath.Join(reasonixPluginDir(), "reasonix-plugin.json")
@@ -65,9 +81,9 @@ var reasonixIntercepts = []any{"input.receive", "tool.after", "compaction.comple
 func reasonixManifest(exe string) map[string]any {
 	return map[string]any{
 		"apiVersion":  "reasonix.io/plugin/v1",
-		"name":        "openknowledge",
+		"name":        reasonixPluginName,
 		"version":     version.Version,
-		"description": "OpenKnowledge 知识库 sidecar：逐 prompt 检索注入与经验沉淀",
+		"description": "Okryptos 知识库 sidecar：逐 prompt 检索注入与经验沉淀",
 		"contributes": map[string]any{},
 		"runtime": map[string]any{
 			"command":       exe,
@@ -116,10 +132,12 @@ func reasonixStatePlugins(st map[string]any) []any {
 	return plugins
 }
 
-// findOKReasonixEntry 返回 ok 条目下标（无则 -1）：按 name=="openknowledge" 识别。
+// findOKReasonixEntry 返回 ok 条目下标（无则 -1）：按登记名识别，新旧双名
+//（改名迁移：旧名条目被原位替换为新名，不产生重复条目）。
 func findOKReasonixEntry(plugins []any) int {
 	for i, p := range plugins {
-		if pm, _ := p.(map[string]any); pm != nil && pm["name"] == "openknowledge" {
+		if pm, _ := p.(map[string]any); pm != nil &&
+			(pm["name"] == reasonixPluginName || pm["name"] == legacyReasonixPluginName) {
 			return i
 		}
 	}
@@ -130,10 +148,10 @@ func findOKReasonixEntry(plugins []any) int {
 func upsertOKReasonixEntry(st map[string]any) {
 	plugins := reasonixStatePlugins(st)
 	entry := map[string]any{
-		"name":         "openknowledge",
+		"name":         reasonixPluginName,
 		"root":         reasonixPluginDir(),
 		"version":      version.Version,
-		"description":  "OpenKnowledge 知识库 sidecar",
+		"description":  "Okryptos 知识库 sidecar",
 		"manifestKind": "reasonix.io/plugin/v1",
 		"enabled":      true,
 	}
@@ -157,6 +175,21 @@ func removeOKReasonixEntry(st map[string]any) bool {
 	}
 	st["plugins"] = append(plugins[:i], plugins[i+1:]...)
 	return true
+}
+
+// removeLegacyReasonixPlugin 删除旧名插件目录（仅当内含旧名 manifest，防误删
+// 外来同名目录）。返回是否有清除。
+func removeLegacyReasonixPlugin() bool {
+	dir := legacyReasonixPluginDir()
+	data, err := os.ReadFile(filepath.Join(dir, "reasonix-plugin.json"))
+	if err != nil {
+		return false
+	}
+	mf := map[string]any{}
+	if json.Unmarshal(data, &mf) != nil || mf["name"] != legacyReasonixPluginName {
+		return false
+	}
+	return os.RemoveAll(dir) == nil
 }
 
 // writeReasonixManifest 写插件 manifest（目录随建）。
@@ -238,6 +271,7 @@ func (reasonixAgent) InstallHooks(exe string) error {
 			return err
 		}
 		upsertOKReasonixEntry(st)
+		removeLegacyReasonixPlugin() // 改名迁移：旧名插件目录随登记更新清除
 		return writeReasonixState(st)
 	})
 }
@@ -253,14 +287,18 @@ func (reasonixAgent) RemoveHooks() (bool, error) {
 			return err
 		}
 		changed := removeOKReasonixEntry(st)
-		// 插件目录仅当内含 ok manifest 才删（防误删同名外来目录）
+		// 插件目录仅当内含 ok manifest 才删（防误删同名外来目录）；新旧登记名双认
 		if data, err := os.ReadFile(reasonixManifestPath()); err == nil {
 			mf := map[string]any{}
-			if json.Unmarshal(data, &mf) == nil && mf["name"] == "openknowledge" {
+			if json.Unmarshal(data, &mf) == nil &&
+				(mf["name"] == reasonixPluginName || mf["name"] == legacyReasonixPluginName) {
 				if err := os.RemoveAll(reasonixPluginDir()); err == nil {
 					changed = true
 				}
 			}
+		}
+		if removeLegacyReasonixPlugin() { // 改名迁移：卸载窗口同步清旧名目录
+			changed = true
 		}
 		if !changed {
 			return nil
@@ -295,6 +333,7 @@ func (reasonixAgent) EnsureHooks(exe string) error {
 			return err
 		}
 		upsertOKReasonixEntry(st)
+		removeLegacyReasonixPlugin() // 改名迁移：旧名插件目录随登记更新清除
 		return writeReasonixState(st)
 	})
 }

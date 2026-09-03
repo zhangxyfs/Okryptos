@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/config"
+	"okryptos/internal/config"
 )
 
 // Client 单个 profile 的生成客户端。

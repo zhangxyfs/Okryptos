@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"openknowledge/internal/registry"
+	"okryptos/internal/registry"
 )
 
 // TestSafeAppURL 校验应用 URL 判定：仅放行 http/https + 本机回环，拒绝可击穿
@@ -45,7 +45,7 @@ func TestValidProjectName(t *testing.T) {
 		name string
 		want bool
 	}{
-		{"OpenKnowledge", true},
+		{"Okryptos", true},
 		{"my project", true},
 		{"项目A", true},
 		{"a_b-2", true},

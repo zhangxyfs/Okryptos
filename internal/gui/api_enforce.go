@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"openknowledge/internal/config"
+	"okryptos/internal/config"
 )
 
 // enforceRuleJSON 是 [[enforce]] 规则的前端契约形状（字段对应 config.EnforceRule）。

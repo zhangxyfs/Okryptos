@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""从 logo.svg 再生成 OpenKnowledge 图标产物（logo.png 256 + logo.ico 多尺寸 + web/favicon.ico）。
+"""从 logo.svg 再生成 Okryptos 图标产物（logo.png 256 + logo.ico 多尺寸 + web/favicon.ico）。
 
 设计（2026-08-26 方案 B 定稿）：蓝/墨双页书，左页镂空 O、右页镂空 K。
 - logo.svg       主版（笔画 5），用于 48/256 渲染

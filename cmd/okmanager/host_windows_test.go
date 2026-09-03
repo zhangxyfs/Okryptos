@@ -5,7 +5,7 @@ package main
 import (
 	"testing"
 
-	"openknowledge/internal/gui"
+	"okryptos/internal/gui"
 )
 
 func TestPlacementFromStateMaximized(t *testing.T) {

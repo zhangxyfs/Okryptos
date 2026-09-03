@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/syncx"
+	"okryptos/internal/config"
+	"okryptos/internal/registry"
+	"okryptos/internal/syncx"
 )
 
 // fakeOKServer 起假 okserver（meta/login/me/repos/personal，校验 Bearer）。

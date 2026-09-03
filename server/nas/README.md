@@ -1,6 +1,6 @@
-# OpenKnowledge 服务端 NAS 部署（okserver + Gitea）
+# Okryptos 服务端 NAS 部署（okserver + Gitea）
 
-本文档是 OpenKnowledge 服务端部署/运维的**单一事实源**，落地设计文档 §9.5（`docs/superpowers/specs/2026-08-25-personal-sync-p1-design.md`）全文；GUI 部署指引卡与本文同源维护。
+本文档是 Okryptos 服务端部署/运维的**单一事实源**，落地设计文档 §9.5（`docs/superpowers/specs/2026-08-25-personal-sync-p1-design.md`）全文；GUI 部署指引卡与本文同源维护。
 图形化一键部署见 `server/deploy/`（okdeploy），手工路径仍由本文档覆盖。
 
 服务端 = 两个进程：
@@ -152,7 +152,7 @@ docker compose pull && docker compose up -d
 
 ```bash
 cd server/nas
-./backup/backup.sh /volume1/backups/openknowledge   # 建议 cron 每日跑
+./backup/backup.sh /volume1/backups/okryptos   # 建议 cron 每日跑
 ```
 
 > 另记住：**每台成员设备本身就是一份完整 git 副本**——双层防丢的题中之义，服务器重建后任一设备 push 即可恢复历史。
@@ -178,7 +178,7 @@ okserver 镜像多架构（`linux/amd64` + `linux/arm64`——ARM NAS 是常态�
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 \
   --build-arg VERSION=<版本> \
-  -f server/nas/Dockerfile -t z7dream/openknowledge-okserver:<版本> --push .
+  -f server/nas/Dockerfile -t z7dream/okryptos-okserver:<版本> --push .
 ```
 
 随 OK release 流水线双发 **GHCR + Docker Hub**，版本号与 ok/okd 对齐（sync-version 纪律，bump 时同步）。镜像内以非 root 用户 `okserver` 运行，无 CGO（SQLite 用 modernc.org/sqlite 纯 Go 实现）。

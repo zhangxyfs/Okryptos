@@ -2,11 +2,11 @@ name: openknowledge
 arch: amd64
 platform: linux
 version: ${VERSION}
-maintainer: OpenKnowledge
+maintainer: Okryptos
 description: |
   为 AI 编程助手提供的项目知识库：hooks 自动注入 + 混合检索 + 强制工作流规则。
   安装后运行 ok setup 完成首次引导（hooks / 技能 / embedding / 登录自启）。
-homepage: https://z7dream-gitea.iepose.cn/zhangxyfs/OpenKnowledge
+homepage: https://z7dream-gitea.iepose.cn/zhangxyfs/Okryptos
 recommends:
   - xdg-utils
 contents:

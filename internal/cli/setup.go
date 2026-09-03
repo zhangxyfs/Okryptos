@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/agentx"
-	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
-	"openknowledge/internal/embedsidecar"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/setupx"
+	"okryptos/internal/agentx"
+	"okryptos/internal/config"
+	"okryptos/internal/embed"
+	"okryptos/internal/embedsidecar"
+	"okryptos/internal/registry"
+	"okryptos/internal/setupx"
 )
 
 // Setup: ok setup —— 首次引导：写 hooks 配置、装技能、配 embedding、打印引导

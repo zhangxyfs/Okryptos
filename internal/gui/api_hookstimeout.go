@@ -3,8 +3,8 @@ package gui
 import (
 	"net/http"
 
-	"openknowledge/internal/agentx"
-	"openknowledge/internal/setupx"
+	"okryptos/internal/agentx"
+	"okryptos/internal/setupx"
 )
 
 // apiHooksTimeoutSet 只写全局 hook 超时（不重装 hooks——那是 /api/setup/hooks 的职责）；

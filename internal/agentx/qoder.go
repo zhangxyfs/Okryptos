@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // QoderHome 返回 Qoder CN CLI 配置根目录：OK_QODER_HOME（ok 自留测试隔离口，

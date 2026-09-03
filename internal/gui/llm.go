@@ -14,14 +14,14 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/index"
-	"openknowledge/internal/llmx"
-	"openknowledge/internal/logx"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/retrieve"
-	"openknowledge/internal/setupx"
-	"openknowledge/internal/store"
+	"okryptos/internal/config"
+	"okryptos/internal/index"
+	"okryptos/internal/llmx"
+	"okryptos/internal/logx"
+	"okryptos/internal/registry"
+	"okryptos/internal/retrieve"
+	"okryptos/internal/setupx"
+	"okryptos/internal/store"
 )
 
 // ---------- 模型配置（全局 [llm] 段，跨项目共用） ----------
@@ -269,7 +269,7 @@ func clipLog(s string, n int) string {
 
 // optimizeSystemPrompt 条目优化的系统提示词：条目模型语义 + 事实纪律（参照优先、
 // 不杜撰）+ 表达硬约束 + 纯 JSON 输出。type/mandatory 锁死不许模型改。
-const optimizeSystemPrompt = `你是 OpenKnowledge 知识库的条目编辑。知识条目是一文件一条的 Markdown，frontmatter 字段语义：
+const optimizeSystemPrompt = `你是 Okryptos 知识库的条目编辑。知识条目是一文件一条的 Markdown，frontmatter 字段语义：
 - title：标题，检索命中的第一印象
 - type：rule/pitfall/note/reference 四类，不允许改
 - tags：检索与过滤维度，可增删

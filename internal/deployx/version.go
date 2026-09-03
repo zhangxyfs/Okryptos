@@ -11,7 +11,7 @@ import (
 
 // dockerHubTagsURL 是 okserver 镜像的 Docker Hub tag 列表 API（默认拉取源；
 // GHCR 匿名列 tag 要走 token 交换，不做）。离线/被墙时查询失败静默降级为空串。
-const dockerHubTagsURL = "https://hub.docker.com/v2/repositories/z7dream/openknowledge-okserver/tags?page_size=100"
+const dockerHubTagsURL = "https://hub.docker.com/v2/repositories/z7dream/okryptos-okserver/tags?page_size=100"
 
 // metaHTTPClient 管理页版本探测专用：短超时，不跟随重定向到外网。
 var metaHTTPClient = &http.Client{Timeout: 3 * time.Second}

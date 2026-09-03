@@ -90,7 +90,7 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
-// dirRe 是远端部署目录的允许字符集（含 ~ 与 $，供 ~/openknowledge、$HOME 展开）。
+// dirRe 是远端部署目录的允许字符集（含 ~ 与 $，供 ~/okryptos、$HOME 展开）。
 var dirRe = regexp.MustCompile(`^[~$A-Za-z0-9_./-]+$`)
 
 // ValidateDir 校验远端目录：白名单字符集，且不含 ".."。

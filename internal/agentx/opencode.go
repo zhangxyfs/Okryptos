@@ -8,14 +8,25 @@ import (
 	"path/filepath"
 	"strings"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 //go:embed opencode_plugin.ts
 var opencodePluginTemplate string
 
 // opencodePluginMarker 本工具生成的插件文件头标记（RemoveHooks 据此识别归属）。
-const opencodePluginMarker = "// openknowledge hooks (managed by ok.exe; do not edit)"
+// legacyOpencodePluginMarker 是 2.25.0 改名前（OpenKnowledge 时代）的旧标记：
+// 归属识别双认，渲染只写新标记。
+const (
+	opencodePluginMarker       = "// okryptos hooks (managed by ok.exe; do not edit)"
+	legacyOpencodePluginMarker = "// openknowledge hooks (managed by ok.exe; do not edit)"
+)
+
+// ownsOpencodePlugin 报告内容是否本工具生成（新旧标记任一命中）。
+func ownsOpencodePlugin(content string) bool {
+	return strings.Contains(content, opencodePluginMarker) ||
+		strings.Contains(content, legacyOpencodePluginMarker)
+}
 
 // OpencodeHome 返回 opencode 全局配置目录。解析序：OK_OPENCODE_HOME（ok 自留
 // 测试隔离口，OK_ZCODE_HOME 同款）> OPENCODE_CONFIG_DIR（opencode 官方覆盖，
@@ -35,10 +46,27 @@ func OpencodeHome() string {
 	return filepath.Join(home, ".config", "opencode")
 }
 
-// opencodePluginPath 插件写入目标：<配置根>/plugins/openknowledge.ts。
+// opencodePluginPath 插件写入目标：<配置根>/plugins/okryptos.ts。
 // opencode 对每个配置目录 glob {plugin,plugins}/*.{ts,js} 并直接 import 单文件
 // （packages/opencode/src/config/plugin.ts:21-29），免 package.json/tsconfig。
-func opencodePluginPath() string { return filepath.Join(OpencodeHome(), "plugins", "openknowledge.ts") }
+func opencodePluginPath() string { return filepath.Join(OpencodeHome(), "plugins", "okryptos.ts") }
+
+// legacyOpencodePluginPath 是 2.25.0 改名前的插件路径。opencode 按 glob 全量
+// 加载 plugins 目录——旧文件不删则新旧双插件双注入。
+func legacyOpencodePluginPath() string {
+	return filepath.Join(OpencodeHome(), "plugins", "openknowledge.ts")
+}
+
+// removeLegacyOpencodePlugin 删除旧名插件（仅本工具生成的），防 glob 双加载。
+// 返回是否存在并被清除（供迁移判定：legacy 在 = 旧版接入过 hooks）。
+func removeLegacyOpencodePlugin() bool {
+	p := legacyOpencodePluginPath()
+	data, err := os.ReadFile(p)
+	if err != nil || !ownsOpencodePlugin(string(data)) {
+		return false
+	}
+	return os.Remove(p) == nil
+}
 
 // opencodeTemplateFingerprint 模板内容指纹（sha256 前 12 位十六进制），随模板升级变化。
 func opencodeTemplateFingerprint() string {
@@ -75,7 +103,7 @@ func (opencodeAgent) HooksInstalled() bool {
 		return false
 	}
 	content := string(data)
-	if !strings.Contains(content, opencodePluginMarker) ||
+	if !ownsOpencodePlugin(content) ||
 		!strings.Contains(content, "// fingerprint: "+opencodeTemplateFingerprint()) {
 		return false
 	}
@@ -88,9 +116,10 @@ func (opencodeAgent) HooksInstalled() bool {
 }
 
 func (opencodeAgent) InstallHooks(exe string) error {
+	removeLegacyOpencodePlugin() // 改名迁移：旧名插件随安装清除
 	path := opencodePluginPath()
 	if data, err := os.ReadFile(path); err == nil {
-		if !strings.Contains(string(data), opencodePluginMarker) {
+		if !ownsOpencodePlugin(string(data)) {
 			if err := os.WriteFile(path+".bak-openknowledge", data, 0o644); err != nil {
 				return fmt.Errorf("备份既有插件失败: %w", err)
 			}
@@ -105,19 +134,20 @@ func (opencodeAgent) InstallHooks(exe string) error {
 }
 
 func (opencodeAgent) RemoveHooks() (bool, error) {
+	removed := removeLegacyOpencodePlugin()
 	path := opencodePluginPath()
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return false, nil
+		return removed, nil
 	}
 	if err != nil {
-		return false, err
+		return removed, err
 	}
-	if !strings.Contains(string(data), opencodePluginMarker) {
-		return false, nil // 非本工具生成，不删
+	if !ownsOpencodePlugin(string(data)) {
+		return removed, nil // 非本工具生成，不删
 	}
 	if err := os.Remove(path); err != nil {
-		return false, fmt.Errorf("删除 opencode 插件: %w", err)
+		return removed, fmt.Errorf("删除 opencode 插件: %w", err)
 	}
 	return true, nil
 }
@@ -125,13 +155,24 @@ func (opencodeAgent) RemoveHooks() (bool, error) {
 // EnsureHooks 自愈：文件存在且为本工具生成、但内容与当前渲染结果不同（模板升级
 // 或 exe 迁移）时重写；文件不存在为 no-op（opencode 无插件即不会触发 hook；
 // 用户显式移除不复活）。
+// 改名迁移特例（2.25.0）：新名缺失但旧名插件在 = 旧版接入过 hooks——此时
+// "缺失不复活"让位给迁移，按当前 exe 渲染新文件再删旧件，否则自愈会把用户
+// 仍在用的 hooks 静默摘死。
 func (opencodeAgent) EnsureHooks(exe string) error {
 	path := opencodePluginPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
+		// 新名缺失：仅在旧名插件存在时迁移（渲染新件 + 删旧件），否则 no-op
+		if removeLegacyOpencodePlugin() {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return err
+			}
+			return fsx.WriteFile(path, []byte(renderOpencodePlugin(exe)), 0o644)
+		}
 		return nil
 	}
-	if !strings.Contains(string(data), opencodePluginMarker) {
+	removeLegacyOpencodePlugin() // 新名已在：旧件直接清除
+	if !ownsOpencodePlugin(string(data)) {
 		return nil
 	}
 	rendered := renderOpencodePlugin(exe)

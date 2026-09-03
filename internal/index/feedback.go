@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"openknowledge/internal/config"
+	"okryptos/internal/config"
 )
 
 // applyFeedback 对"持续注入但从未被采纳"的条目降权（v1 只降不升——加分会自我

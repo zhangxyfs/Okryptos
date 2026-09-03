@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 type Session struct {

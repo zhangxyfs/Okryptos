@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"openknowledge/internal/fsx"
-	"openknowledge/internal/registry"
+	"okryptos/internal/fsx"
+	"okryptos/internal/registry"
 )
 
 // State 是 embed-sidecar.json 的内容：sidecar 发现与身份。

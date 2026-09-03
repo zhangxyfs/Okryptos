@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/retrieve"
+	"okryptos/internal/config"
+	"okryptos/internal/retrieve"
 )
 
 func TestApplyFeedback(t *testing.T) {

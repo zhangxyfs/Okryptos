@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/procx"
+	"okryptos/internal/procx"
 )
 
 // initRepo 建临时 git 仓库并做 n 个提交；返回目录。

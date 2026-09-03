@@ -96,7 +96,7 @@ func BuildUpgradeTask(dir, newTag string) Task {
 		newReadOKPortStep(dir),
 		{Name: "更新镜像 tag", Run: func(ctx context.Context, e *Env) error {
 			_, err := runCmd(ctx, e, "更新镜像 tag",
-				"sed -i 's|^OKSERVER_IMAGE=.*|OKSERVER_IMAGE=z7dream/openknowledge-okserver:"+newTag+"|' "+dir+"/.env")
+				"sed -i 's|^OKSERVER_IMAGE=.*|OKSERVER_IMAGE=z7dream/okryptos-okserver:"+newTag+"|' "+dir+"/.env")
 			return err
 		}},
 		{Name: "拉取新镜像", Run: func(ctx context.Context, e *Env) error {
@@ -138,7 +138,7 @@ func BuildUninstallTask(dir string, deleteData bool) Task {
 			return nil
 		}})
 	}
-	return Task{Name: "卸载 OpenKnowledge 服务端", Steps: steps}
+	return Task{Name: "卸载 Okryptos 服务端", Steps: steps}
 }
 
 // QueryRemoteLogs 拉取容器日志（排障查看，同步快查询）。

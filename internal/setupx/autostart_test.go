@@ -10,7 +10,7 @@ func TestAutostartDesktop(t *testing.T) {
 	for _, want := range []string{
 		"[Desktop Entry]",
 		"Type=Application",
-		"Name=OpenKnowledge",
+		"Name=Okryptos",
 		"Exec=/usr/lib/openknowledge/ok daemon",
 		"X-GNOME-Autostart-enabled=true",
 	} {

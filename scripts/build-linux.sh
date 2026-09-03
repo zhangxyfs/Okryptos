@@ -4,22 +4,22 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION=$(sed -n 's/^#define AppVersion "\(.*\)"/\1/p' installer/openknowledge.iss)
-: "${VERSION:?无法从 installer/openknowledge.iss 提取 AppVersion}"
+VERSION=$(sed -n 's/^#define AppVersion "\(.*\)"/\1/p' installer/okryptos.iss)
+: "${VERSION:?无法从 installer/okryptos.iss 提取 AppVersion}"
 
 STAGE=dist/linux-amd64
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 GOOS=linux GOARCH=amd64 go build \
-  -ldflags "-s -w -X openknowledge/internal/version.Version=$VERSION" \
+  -ldflags "-s -w -X okryptos/internal/version.Version=$VERSION" \
   -o "$STAGE/ok" ./cmd/ok
 GOOS=linux GOARCH=amd64 go build \
-  -ldflags "-s -w -X openknowledge/internal/version.Version=$VERSION" \
+  -ldflags "-s -w -X okryptos/internal/version.Version=$VERSION" \
   -o "$STAGE/okd" ./cmd/okd
 # okdeploy 一键部署器：独立 artifact（dist/deploy/），不进 $STAGE（deb/tar 客户端包不含）
 mkdir -p dist/deploy
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
-  -ldflags "-s -w -X openknowledge/internal/version.Version=$VERSION" \
+  -ldflags "-s -w -X okryptos/internal/version.Version=$VERSION" \
   -o dist/deploy/okdeploy-linux-amd64 ./cmd/okdeploy
 # Windows 宿主落盘为 0644，须钉权限位；Git Bash 挂载 noacl 时本行是静默 no-op，
 # 此时由下方 tar --mode 与 nfpm file_info 兜底（Linux/macOS 宿主本行生效）

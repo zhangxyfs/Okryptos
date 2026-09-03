@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""OpenKnowledge 一键构建：编译 dist/（含 exe 图标嵌入）+ 打包安装程序。
+"""Okryptos 一键构建：编译 dist/（含 exe 图标嵌入）+ 打包安装程序。
 
 用法:
   python scripts/build.py                  # 完整流程（dist + 安装程序）
-  python scripts/build.py --test           # 测试安装包：版本号追加 _test（OpenKnowledgeSetup-<ver>_test.exe），不改 iss 文件
+  python scripts/build.py --test           # 测试安装包：版本号追加 _test（OkryptosSetup-<ver>_test.exe），不改 iss 文件
   python scripts/build.py --skip-installer # 只构建 dist/
   python scripts/build.py --skip-winres    # 跳过 exe 图标/版本信息嵌入
 
@@ -25,12 +25,12 @@ LLAMA_BASE_DEFAULT = "https://github.com/ggml-org/llama.cpp/releases/download"
 
 
 def app_version(test=False):
-    """从 installer/openknowledge.iss 提取 #define AppVersion，提取不到则报错退出。
+    """从 installer/okryptos.iss 提取 #define AppVersion，提取不到则报错退出。
     test=True 时追加 _test 后缀（测试包与正式包可同机区分，幂等不叠加）。"""
-    text = (ROOT / "installer" / "openknowledge.iss").read_text(encoding="utf-8")
+    text = (ROOT / "installer" / "okryptos.iss").read_text(encoding="utf-8")
     m = re.search(r'^#define AppVersion "([^"]+)"', text, re.MULTILINE)
     if not m:
-        sys.exit("未能从 installer/openknowledge.iss 提取 AppVersion")
+        sys.exit("未能从 installer/okryptos.iss 提取 AppVersion")
     v = m.group(1)
     if test and not v.endswith("_test"):
         v += "_test"
@@ -73,7 +73,7 @@ def prepare_runtime():
 
 
 def main():
-    ap = argparse.ArgumentParser(description="OpenKnowledge 一键构建")
+    ap = argparse.ArgumentParser(description="Okryptos 一键构建")
     ap.add_argument("--skip-installer", action="store_true", help="只构建 dist/，不打包安装程序")
     ap.add_argument("--skip-winres", action="store_true", help="跳过 exe 图标/版本信息嵌入")
     ap.add_argument("--test", action="store_true", help="测试安装包：版本号追加 _test，不改 iss 文件")
@@ -92,7 +92,7 @@ def main():
             run([winres, "make", "--in", "winres.json"], cwd=ROOT / "cmd" / pkg)
 
     # 2. 编译 dist/ 三 exe + 拷贝 web/（注入版本号，与 build-dist.sh 一致）
-    ldflags = f"{LDFLAGS} -X openknowledge/internal/version.Version={version}"
+    ldflags = f"{LDFLAGS} -X okryptos/internal/version.Version={version}"
     (ROOT / "dist").mkdir(exist_ok=True)
     run(["go", "build", "-ldflags", ldflags, "-o", "dist/ok.exe", "./cmd/ok"])
     run(["go", "build", "-ldflags", ldflags, "-o", "dist/okd.exe", "./cmd/okd"])
@@ -101,7 +101,7 @@ def main():
     # linux 交叉用独立 ldflags（去掉 -H windowsgui，那是 Windows 子系统参数）
     (ROOT / "dist" / "deploy").mkdir(exist_ok=True)
     run(["go", "build", "-ldflags", ldflags, "-o", "dist/deploy/okdeploy-windows-amd64.exe", "./cmd/okdeploy"])
-    linux_ldflags = f"-s -w -X openknowledge/internal/version.Version={version}"
+    linux_ldflags = f"-s -w -X okryptos/internal/version.Version={version}"
     env = {**os.environ, "GOOS": "linux", "GOARCH": "amd64", "CGO_ENABLED": "0"}
     run(["go", "build", "-ldflags", linux_ldflags, "-o", "dist/deploy/okdeploy-linux-amd64", "./cmd/okdeploy"], env=env)
     web_dist = ROOT / "dist" / "web"
@@ -123,10 +123,10 @@ def main():
             sys.exit(f"未找到 ISCC: {ISCC}（可用环境变量 ISCC 覆盖，或 --skip-installer）")
         (ROOT / "installer" / "output").mkdir(parents=True, exist_ok=True)
         if args.test:
-            # 测试包不改 openknowledge.iss：生成同目录临时脚本（相对 Source 路径按
+            # 测试包不改 okryptos.iss：生成同目录临时脚本（相对 Source 路径按
             # 脚本所在目录解析，必须同目录），替换 AppVersion 后编译，编完即删。
-            src = (ROOT / "installer" / "openknowledge.iss").read_text(encoding="utf-8")
-            tmp_iss = ROOT / "installer" / ".openknowledge-test.iss"
+            src = (ROOT / "installer" / "okryptos.iss").read_text(encoding="utf-8")
+            tmp_iss = ROOT / "installer" / ".okryptos-test.iss"
             tmp_iss.write_text(re.sub(r'^#define AppVersion "[^"]+"',
                                       f'#define AppVersion "{version}"',
                                       src, count=1, flags=re.MULTILINE), encoding="utf-8")
@@ -135,7 +135,7 @@ def main():
             finally:
                 tmp_iss.unlink(missing_ok=True)
         else:
-            run([ISCC, "/Q", "installer/openknowledge.iss"])
+            run([ISCC, "/Q", "installer/okryptos.iss"])
         for f in sorted((ROOT / "installer" / "output").glob("*.exe")):
             print(f"安装程序: {f}  ({f.stat().st_size / 1024 / 1024:.1f} MB)")
 

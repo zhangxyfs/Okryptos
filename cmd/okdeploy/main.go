@@ -1,4 +1,4 @@
-// okdeploy：OpenKnowledge 服务端一键部署器（独立程序，不进客户端安装包）。
+// okdeploy：Okryptos 服务端一键部署器（独立程序，不进客户端安装包）。
 // 双击启动 → 监听 127.0.0.1 随机端口 → 自动开浏览器（同 ok gui 模式）。
 // 设计文档：docs/superpowers/specs/2026-08-28-okdeploy-design.md
 package main
@@ -12,10 +12,10 @@ import (
 	"net/http"
 	"os"
 
-	"openknowledge/internal/deployx"
-	"openknowledge/internal/deployx/webui"
-	"openknowledge/internal/gui"
-	"openknowledge/internal/version"
+	"okryptos/internal/deployx"
+	"okryptos/internal/deployx/webui"
+	"okryptos/internal/gui"
+	"okryptos/internal/version"
 )
 
 func main() {
@@ -46,7 +46,7 @@ func run(stderr *os.File) int {
 
 // browserOpts 是回退浏览器路径（WebView2 不可用时）的窗口形态：
 // 空 WindowSize = 默认最大化（与内嵌窗口"打开即最大化"一致），标题匹配部署页 <title>。
-var browserOpts = gui.BrowserOptions{WindowTitle: "OpenKnowledge 服务端部署"}
+var browserOpts = gui.BrowserOptions{WindowTitle: "Okryptos 服务端部署"}
 
 // waitServe 回退路径：浏览器打开后驻留 HTTP 服务直至出错或进程被杀。
 func waitServe(serveErr chan error, stderr io.Writer) int {

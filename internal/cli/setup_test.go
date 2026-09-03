@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
-	"openknowledge/internal/embedsidecar"
+	"okryptos/internal/config"
+	"okryptos/internal/embed"
+	"okryptos/internal/embedsidecar"
 )
 
 func TestSetupWithEmbeddingFlags(t *testing.T) {
@@ -153,7 +153,7 @@ func TestSetupAgentKimiOnly(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(kimiHome, "config.toml")); err != nil {
 		t.Fatal("kimi hooks should be written")
 	}
-	if _, err := os.Stat(filepath.Join(piHome, "extensions", "openknowledge.ts")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(piHome, "extensions", "okryptos.ts")); !os.IsNotExist(err) {
 		t.Fatal("pi extension should NOT be written with --agent kimi")
 	}
 }
@@ -182,7 +182,7 @@ func TestSetupAllDetectedAgents(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(kimiHome, "config.toml")); err != nil {
 		t.Fatal("kimi hooks should be written")
 	}
-	if _, err := os.Stat(filepath.Join(piHome, "extensions", "openknowledge.ts")); err != nil {
+	if _, err := os.Stat(filepath.Join(piHome, "extensions", "okryptos.ts")); err != nil {
 		t.Fatal("pi extension should be written")
 	}
 }
@@ -210,7 +210,7 @@ func TestSetupAgentUndetectedStillWrites(t *testing.T) {
 	if !strings.Contains(errBuf.String(), "未检测到") {
 		t.Fatalf("stderr should warn about undetected agent: %q", errBuf.String())
 	}
-	if _, err := os.Stat(filepath.Join(piHome, "extensions", "openknowledge.ts")); err != nil {
+	if _, err := os.Stat(filepath.Join(piHome, "extensions", "okryptos.ts")); err != nil {
 		t.Fatal("pi extension should be written even when undetected")
 	}
 	if _, err := os.Stat(filepath.Join(os.Getenv("KIMI_CODE_HOME"), "config.toml")); !os.IsNotExist(err) {

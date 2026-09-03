@@ -35,10 +35,10 @@ func TestEnsureSkillsRewritesStaleExe(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 模拟用户删除一个技能（缺失不复活）与外来文件（内容非本项目技能）
-	if err := os.RemoveAll(filepath.Join(dir, "openknowledge-on")); err != nil {
+	if err := os.RemoveAll(filepath.Join(dir, "ok-on")); err != nil {
 		t.Fatal(err)
 	}
-	foreign := filepath.Join(dir, "openknowledge-off", "SKILL.md")
+	foreign := filepath.Join(dir, "ok-off", "SKILL.md")
 	if err := os.WriteFile(foreign, []byte("# 用户自己的笔记\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestEnsureSkillsRewritesStaleExe(t *testing.T) {
 	}
 
 	// 仍在的技能：烘焙路径换新
-	data, err := os.ReadFile(filepath.Join(dir, "openknowledge-init", "SKILL.md"))
+	data, err := os.ReadFile(filepath.Join(dir, "ok-init", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestEnsureSkillsRewritesStaleExe(t *testing.T) {
 		t.Fatalf("过期 exe 应被重写为新路径: %q", data)
 	}
 	// 缺失的不复活
-	if _, err := os.Stat(filepath.Join(dir, "openknowledge-on", "SKILL.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "ok-on", "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatal("缺失技能不应被自愈复活")
 	}
 	// 外来内容不动
@@ -67,7 +67,7 @@ func TestEnsureSkillsRewritesStaleExe(t *testing.T) {
 
 	// SkillsInstalled 口径：全目录全技能且烘焙当前 exe 才算已接入
 	if SkillsInstalled(`D:\new\ok.exe`) {
-		t.Fatal("openknowledge-on 缺失 + openknowledge-off 外来，应判未接入")
+		t.Fatal("ok-on 缺失 + ok-off 外来，应判未接入")
 	}
 	// 补齐后（InstallSkills 幂等）应判已接入
 	if err := InstallSkills(`D:\new\ok.exe`); err != nil {
@@ -78,5 +78,43 @@ func TestEnsureSkillsRewritesStaleExe(t *testing.T) {
 	}
 	if SkillsInstalled(`D:\other\ok.exe`) {
 		t.Fatal("exe 不一致应判未接入（只查存在性会把死路径误报为已接入）")
+	}
+}
+
+// TestRemoveLegacySkills（2.25.0 改名迁移）：openknowledge-* 旧技能副本在
+// InstallSkills/EnsureSkills 同窗口被清除；同名但内容不是本项目旧技能的
+// 外来目录不动；旧名目录不存在时幂等。
+func TestRemoveLegacySkills(t *testing.T) {
+	dir := isolateSkills(t)
+	// 旧版安装的技能副本（front matter name 匹配 openknowledge-*）
+	legacy := filepath.Join(dir, "openknowledge-wiki")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := "---\nname: openknowledge-wiki\ndescription: 旧版技能\n---\n\n# openknowledge-wiki\n\n    \"D:/old/ok.exe\" wiki\n"
+	if err := os.WriteFile(filepath.Join(legacy, "SKILL.md"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 同名前缀的外来目录（不是本项目技能）必须保留
+	alien := filepath.Join(dir, "openknowledge-notes")
+	if err := os.MkdirAll(alien, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(alien, "SKILL.md"), []byte("# 用户自己的 openknowledge 笔记\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InstallSkills(`D:\new\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatal("旧技能副本 openknowledge-wiki 应被清除")
+	}
+	if _, err := os.Stat(filepath.Join(alien, "SKILL.md")); err != nil {
+		t.Fatal("外来目录不应被误删")
+	}
+	// 新技能已就位
+	if _, err := os.Stat(filepath.Join(dir, "ok-wiki", "SKILL.md")); err != nil {
+		t.Fatal("新技能 ok-wiki 应已安装")
 	}
 }

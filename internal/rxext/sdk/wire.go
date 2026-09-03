@@ -143,7 +143,7 @@ type conn struct {
 	handlerSlots chan struct{}
 	notifyQueue  chan []byte
 
-	// notifyMu/notifyClosed guard notifyQueue close-vs-send (openknowledge local
+	// notifyMu/notifyClosed guard notifyQueue close-vs-send (okryptos local
 	// deviation from the upstream snapshot, review item L-17): the read loop
 	// closes notifyQueue on exit while notify() does a non-atomic check-then-send
 	// on c.closed, so an in-flight send could panic with "send on closed

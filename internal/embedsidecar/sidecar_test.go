@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/embed"
+	"okryptos/internal/embed"
 )
 
 // TestMain 模式：helper 进程伪装 llama-server（/health + 常驻）。

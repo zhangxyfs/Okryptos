@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // LayerStatus 是一层（personal/team）的同步状态——从第一天就按层建模（设计文档 §8）。

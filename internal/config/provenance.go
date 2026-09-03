@@ -5,7 +5,7 @@ import (
 	"os"
 	"strconv"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // SetCaptureAndAutoBorn 在一次锁内读-改-写中同时重写 [capture] 小节与

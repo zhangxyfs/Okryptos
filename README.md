@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" alt="OpenKnowledge" width="580">
+  <img src="docs/assets/logo.svg" alt="Okryptos" width="415">
 </p>
 
 <p align="center">
@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.24.3-2563eb">
+  <img alt="version" src="https://img.shields.io/badge/version-2.25.0-2563eb">
   <img alt="go" src="https://img.shields.io/badge/go-%3E%3D1.25-00ADD8">
   <img alt="platform" src="https://img.shields.io/badge/platform-windows%20%7C%20linux-0078d6">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
@@ -26,7 +26,7 @@
 
 | 平台 | 方式 |
 |------|------|
-| Windows | 运行 `OpenKnowledgeSetup-<版本>.exe`（免管理员，装到 `%LOCALAPPDATA%\Programs\OpenKnowledge`，卸载默认保留知识库数据） |
+| Windows | 运行 `OkryptosSetup-<版本>.exe`（免管理员，装到 `%LOCALAPPDATA%\Programs\Okryptos`，卸载默认保留知识库数据） |
 | Linux | `openknowledge_<版本>_linux_amd64.tar.gz` 解压后 `./ok setup`，或 `sudo dpkg -i openknowledge_<版本>_amd64.deb` |
 
 > 安装包约 50MB，内含 llama.cpp CPU runtime（本地 embedding 用）；模型首次启用时按需下载。
@@ -36,7 +36,7 @@
 **双击 `ok.exe`（或执行 `ok gui`）**，浏览器自动打开管理界面 `http://127.0.0.1:17888`。首次使用会落在**引导页**，按卡片顺序点完即可：
 
 1. **写 hooks**——给你机器上所有已检测的 AI 助手写入集成：Kimi Code、Pi、ZCode、Reasonix、opencode、Claude Code/CodePilot、Codex、Qoder CN（CLI + IDE）、DeepSeek Harness
-2. **装技能**——`openknowledge-init / on / off / propose / capture / wiki` 六个技能写入各 agent 的技能目录
+2. **装技能**——`ok-init / on / off / propose / capture / wiki` 六个技能写入各 agent 的技能目录
 3. **配 embedding**——语义检索三选一：线上 OpenAI 兼容服务 / 本机 Ollama（免 key）/ 内置本地模型（完全离线，知识不出本机）；跳过则只用关键词检索，之后随时可补配
 
 <p align="center">
@@ -65,7 +65,7 @@ GUI 由全系统唯一的常驻 daemon 托管，关页面不退进程；`ok daem
 
 打开你的 AI 助手，**在需要知识库的项目目录里新开一个会话**（hooks 在会话启动时加载），然后依次用两个技能：
 
-1. **初始化**——输入 `/openknowledge-init`（或直接说"初始化知识库"）。技能会把当前项目注册进知识库，名字自动取目录名，不用填任何参数
+1. **初始化**——输入 `/ok-init`（或直接说"初始化知识库"）。技能会把当前项目注册进知识库，名字自动取目录名，不用填任何参数
 2. **生成 wiki**——再说 **"生成项目 wiki"**。wiki 技能扫描代码结构与 git 历史，把项目沉淀成一批 reference 条目（自动建索引与向量）；之后新功能、新模块定稿时说 **"更新 wiki"** 即可增量维护
 
 > 高阶用法：这两个技能背后是 `ok init` 和 wiki 相关 CLI——技能就是命令的会话内封装，日常用自然语言即可，命令行留给脚本与排障（见[常用命令](#常用命令)）。
@@ -106,7 +106,7 @@ ok search 提交规范    # 命令行预览检索效果
 
 ## 知识条目
 
-每条知识是一个带 frontmatter 的 Markdown 文件（`ok add` 创建，也可手写），集中存放在 `~/.openknowledge/`，不污染项目仓库：
+每条知识是一个带 frontmatter 的 Markdown 文件（`ok add` 创建，也可手写），集中存放在 `~/.okryptos/`，不污染项目仓库：
 
 ```markdown
 ---
@@ -138,7 +138,7 @@ summary: 每次代码修改必须立即记录变更日志
 | Windows | `okdeploy-windows-amd64.exe` |
 | Linux | `okdeploy-linux-amd64` |
 
-> 下载地址：[GitHub Releases](https://github.com/zhangxyfs/OpenKnowledge/releases)（与安装包同页）。已部署的服务器后续可直接在 okdeploy 管理页一键升级。
+> 下载地址：[GitHub Releases](https://github.com/zhangxyfs/Okryptos/releases)（与安装包同页）。已部署的服务器后续可直接在 okdeploy 管理页一键升级。
 
 ## 常用命令
 
@@ -170,7 +170,7 @@ summary: 每次代码修改必须立即记录变更日志
 <details>
 <summary>配置：全局 / 项目两层 TOML 与 embedding profiles</summary>
 
-生效配置 = 内置默认 ← 全局 `~/.openknowledge/config.toml` ← 项目 `~/.openknowledge/projects/<名>/config.toml`（逐层覆盖）。
+生效配置 = 内置默认 ← 全局 `~/.okryptos/config.toml` ← 项目 `~/.okryptos/projects/<名>/config.toml`（逐层覆盖）。
 
 ```toml
 # 全局配置（ok setup 可交互写入；GUI 引导页"配置…"弹窗可管理多套）
@@ -223,7 +223,7 @@ message = "本次会话修改了代码但未更新变更日志，请先按规范
 | `PostToolUse`（Write/Edit） | 把 AI 改过的文件记入会话状态 |
 | `Stop` | 改了代码没写日志 → exit 2 阻断（同会话同规则只阻断一次） |
 
-所有 hook 路径 fail-open：任何内部错误只记日志（`~/.openknowledge/ok.log`），绝不影响正常会话。详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+所有 hook 路径 fail-open：任何内部错误只记日志（`~/.okryptos/ok.log`），绝不影响正常会话。详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 </details>
 

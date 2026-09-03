@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"openknowledge/internal/retrieve"
+	"okryptos/internal/retrieve"
 )
 
 // HasWikiMatch 只在"非草稿且 tags 含 wiki 的条目"命中检索词时返回 true。

@@ -10,7 +10,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"openknowledge/internal/entry"
+	"okryptos/internal/entry"
 )
 
 // setupProject 在临时 OK_HOME 下初始化 demo 项目并 chdir 进去。
@@ -178,7 +178,7 @@ func TestCapturePrintAndSet(t *testing.T) {
 		t.Fatalf("config should contain capture section: %q", data)
 	}
 	// 原有注释保留
-	if !strings.Contains(string(data), "OpenKnowledge 项目知识库配置") {
+	if !strings.Contains(string(data), "Okryptos 项目知识库配置") {
 		t.Fatalf("config comments should be preserved: %q", data)
 	}
 	// 打印反映新模式

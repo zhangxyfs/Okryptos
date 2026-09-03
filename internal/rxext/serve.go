@@ -13,23 +13,24 @@ import (
 	"sync"
 	"time"
 
-	"openknowledge/internal/agentx"
-	"openknowledge/internal/daemonx"
-	"openknowledge/internal/hook"
-	"openknowledge/internal/logx"
-	"openknowledge/internal/project"
-	"openknowledge/internal/registry"
-	extension "openknowledge/internal/rxext/sdk"
-	"openknowledge/internal/setupx"
-	"openknowledge/internal/state"
-	"openknowledge/internal/version"
+	"okryptos/internal/agentx"
+	"okryptos/internal/daemonx"
+	"okryptos/internal/hook"
+	"okryptos/internal/logx"
+	"okryptos/internal/project"
+	"okryptos/internal/registry"
+	extension "okryptos/internal/rxext/sdk"
+	"okryptos/internal/setupx"
+	"okryptos/internal/state"
+	"okryptos/internal/version"
 )
 
 // Serve 是 `ok extension-serve` 的入口：跑 SDK 的 stdio 服务循环直到宿主关闭。
 func Serve(ctx context.Context) error {
 	h := &handler{}
 	return extension.Serve(ctx, h, extension.Options{
-		Name:    "openknowledge",
+		// Name 与 agentx reasonix manifest/登记名同源（2.25.0 改名：okryptos）
+		Name:    "okryptos",
 		Version: version.Version,
 		Interceptors: map[string]extension.InterceptorFunc{
 			"input.receive":      h.onInput,

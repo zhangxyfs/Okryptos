@@ -7,7 +7,7 @@ import (
 
 func TestCleanQueryStripsKnownBlocks(t *testing.T) {
 	prompt := "真正的查询 RetrievalQuirk\n" +
-		"[OpenKnowledge] wiki 已落后 3 个 commit，建议更新。\n" +
+		"[Okryptos] wiki 已落后 3 个 commit，建议更新。\n" +
 		"## 必守规约（全文见文件，必要时读取）\n\n- **架构规约** (rule)（/kb/规约.md）\n\n" +
 		"## 相关知识（需要全文时读取对应文件）\n\n- **干扰条目** (note) — DistractionQuirk（/kb/干扰.md）\n"
 	got := CleanQuery(prompt)
@@ -17,7 +17,7 @@ func TestCleanQueryStripsKnownBlocks(t *testing.T) {
 	if strings.Contains(got, "必守规约") || strings.Contains(got, "架构规约") {
 		t.Errorf("粘性指针块应剥离，got: %q", got)
 	}
-	if strings.Contains(got, "[OpenKnowledge]") {
+	if strings.Contains(got, "[Okryptos]") {
 		t.Errorf("提示行应剥离，got: %q", got)
 	}
 	if !strings.Contains(got, "RetrievalQuirk") {

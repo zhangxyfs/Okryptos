@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/retrieve"
+	"okryptos/internal/config"
+	"okryptos/internal/retrieve"
 )
 
 const e1 = `---

@@ -5,12 +5,12 @@
 /* ================= i18n（仅界面文案；后端返回的错误消息与日志行原文透传，不翻译） ================= */
 const I18N = {
   zh: {
-    pageTitle: "OpenKnowledge 服务端部署",
+    pageTitle: "Okryptos 服务端部署",
     badgeConnected: "已连接 ", badgeDisconnected: "未连接",
     downloadLog: "下载日志",
     onceOnly: "（只显示这一次）", copy: "复制", copied: "已复制", copyFail: "复制失败，请手动选择",
     pickDirTitle: "选择部署目录", currentPrefix: "当前：", pickThisDir: "选此目录", cancel: "取消", noSubdirs: "（无子目录）",
-    connectTitle: "连接到 NAS", connectSub: "通过 SSH 部署 OpenKnowledge 服务端",
+    connectTitle: "连接到 NAS", connectSub: "通过 SSH 部署 Okryptos 服务端",
     connectedGo: "已连接 {c}，直接进入环境探测 →",
     hostPh: "<user>@<ip> 或 <ip>", sshAddr: "SSH 地址", port: "端口",
     username: "用户名", userPh: "地址里写了 user@ 可留空",
@@ -95,12 +95,12 @@ const I18N = {
     foldClose: "（点击收起）", foldOpen: "（点击展开）", noLogs: "（无日志）",
   },
   en: {
-    pageTitle: "OpenKnowledge Server Deployment",
+    pageTitle: "Okryptos Server Deployment",
     badgeConnected: "Connected to ", badgeDisconnected: "Disconnected",
     downloadLog: "Download log",
     onceOnly: " (shown only once)", copy: "Copy", copied: "Copied", copyFail: "Copy failed; select it manually",
     pickDirTitle: "Choose deploy directory", currentPrefix: "Current: ", pickThisDir: "Use this directory", cancel: "Cancel", noSubdirs: "(no subdirectories)",
-    connectTitle: "Connect to NAS", connectSub: "Deploy the OpenKnowledge server over SSH",
+    connectTitle: "Connect to NAS", connectSub: "Deploy the Okryptos server over SSH",
     connectedGo: "Connected to {c}, go straight to environment probe →",
     hostPh: "<user>@<ip> or <ip>", sshAddr: "SSH address", port: "Port",
     username: "Username", userPh: "Optional if the address includes user@",
@@ -392,7 +392,7 @@ function openDirPicker(input) {
     const foot = el("div");
     foot.style.cssText = "display:flex;gap:10px;justify-content:flex-end";
     const pick = el("button", "btn btn-primary", t("pickThisDir"));
-    pick.onclick = () => { input.value = path || "~/openknowledge"; mask.remove(); };
+    pick.onclick = () => { input.value = path || "~/okryptos"; mask.remove(); };
     const cancel = el("button", "btn", t("cancel"));
     cancel.onclick = () => mask.remove();
     foot.append(cancel, pick);
@@ -738,7 +738,7 @@ function pageDeploy(content, query) {
   content.append(errSlot);
   const card = el("div", "pcard");
   // 部署目录（原样传给远端，~ 由远端 sh 展开，前端不做本地展开）
-  const dirI = pinput("mono", "~/openknowledge", "230px");
+  const dirI = pinput("mono", "~/okryptos", "230px");
   const browse = el("button", "btn", t("browse"));
   browse.onclick = () => openDirPicker(dirI);
   card.append(prow(t("deployDir"), [dirI, browse]));
@@ -760,7 +760,7 @@ function pageDeploy(content, query) {
     card.append(w);
   }
   const tagI = pinput("mono", "latest", "140px");
-  card.append(prow(t("imageTag"), [tagI, el("span", "muted small", "z7dream/openknowledge-okserver:latest")]));
+  card.append(prow(t("imageTag"), [tagI, el("span", "muted small", "z7dream/okryptos-okserver:latest")]));
   let giteaUrlI = null, tokenI = null, smokeFb = null;
   if (mode === "external") {
     giteaUrlI = pinput("mono", S.connHost ? "http://" + S.connHost + ":3000" : "", "230px");

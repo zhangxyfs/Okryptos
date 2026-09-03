@@ -8,13 +8,18 @@ import (
 	"regexp"
 	"strings"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/fsx"
-	"openknowledge/internal/registry"
+	"okryptos/internal/config"
+	"okryptos/internal/fsx"
+	"okryptos/internal/registry"
 )
 
-const MarkerBegin = "# >>> openknowledge hooks >>>"
-const MarkerEnd = "# <<< openknowledge hooks <<<"
+const MarkerBegin = "# >>> okryptos hooks >>>"
+const MarkerEnd = "# <<< okryptos hooks <<<"
+
+// LegacyMarkerBegin/LegacyMarkerEnd 是 2.25.0 改名前（OpenKnowledge 时代）的标记：
+// 识别/剥离双认（不认则旧块成孤儿 + 新块追加 = 双派发），写入只写新标记。
+const LegacyMarkerBegin = "# >>> openknowledge hooks >>>"
+const LegacyMarkerEnd = "# <<< openknowledge hooks <<<"
 
 // KimiHome 返回 kimi-code 配置目录（KIMI_CODE_HOME 优先）。
 func KimiHome() string {
@@ -104,11 +109,15 @@ func StripLegacyOKHooks(content string) string {
 		for k := j; k < len(lines) && strings.TrimSpace(lines[k]) == ""; k++ {
 			removed[k] = true
 		}
-		// 连同删除紧邻其前的 OpenKnowledge 注释行（init 曾打印的引导注释）
+		// 连同删除紧邻其前的品牌注释行（init 曾打印的引导注释；2.25.0 改名后
+		// 新旧两个品牌名都要认，否则旧注释成孤儿）
 		if i > 0 && !removed[i-1] {
 			t := strings.TrimSpace(lines[i-1])
-			if strings.HasPrefix(t, "#") && strings.Contains(strings.ToLower(t), "openknowledge") {
-				removed[i-1] = true
+			if strings.HasPrefix(t, "#") {
+				low := strings.ToLower(t)
+				if strings.Contains(low, "openknowledge") || strings.Contains(low, "okryptos") {
+					removed[i-1] = true
+				}
 			}
 		}
 	}
@@ -121,22 +130,32 @@ func StripLegacyOKHooks(content string) string {
 	return strings.Join(out, "\n")
 }
 
-// stripMarkerBlocks 移除 content 中全部标记块（含标记行），供 UpsertHooksBlock
-// 在 upsert 前清理重复旧块——只原位替换第一个会让其余旧块残留，hook 双派发。
-// 有头无尾（损坏块）报错，不覆盖原文件。
+// stripMarkerBlocks 移除 content 中全部标记块（含标记行，新旧品牌双认），供
+// UpsertHooksBlock 在 upsert 前清理重复旧块——只原位替换第一个会让其余旧块残留，
+// hook 双派发。有头无尾（损坏块）报错，不覆盖原文件。
 func stripMarkerBlocks(content, configPath string) (string, error) {
+	var err error
+	if content, err = stripMarkerBlocksBy(content, configPath, MarkerBegin, MarkerEnd); err != nil {
+		return "", err
+	}
+	return stripMarkerBlocksBy(content, configPath, LegacyMarkerBegin, LegacyMarkerEnd)
+}
+
+// stripMarkerBlocksBy 移除指定标记对的全部标记块（2.25.0 改名：旧品牌块单独剥，
+// 供 upsert 前置清理——不剥则旧块孤儿残留、与新块并存双派发）。
+func stripMarkerBlocksBy(content, configPath, begin, end string) (string, error) {
 	for {
-		i := strings.Index(content, MarkerBegin)
+		i := strings.Index(content, begin)
 		if i < 0 {
 			return content, nil
 		}
-		j := strings.Index(content[i:], MarkerEnd)
+		j := strings.Index(content[i:], end)
 		if j < 0 {
 			return "", fmt.Errorf("hooks 标记块损坏（缺少结束标记）: %s", configPath)
 		}
 		j += i
 		head := strings.TrimRight(content[:i], "\n")
-		tail := strings.TrimPrefix(content[j+len(MarkerEnd):], "\n")
+		tail := strings.TrimPrefix(content[j+len(end):], "\n")
 		if head == "" {
 			content = tail
 		} else {
@@ -160,6 +179,11 @@ func upsertHooksBlockLocked(configPath, block string) error {
 		return err
 	}
 	content := string(data)
+	// 2.25.0 改名迁移：旧品牌标记块整段剥除（块内旧 exe 表随之移除），再按新
+	// 标记走原位替换/追加；不剥则旧块孤儿残留、与新块并存双派发。
+	if content, err = stripMarkerBlocksBy(content, configPath, LegacyMarkerBegin, LegacyMarkerEnd); err != nil {
+		return err
+	}
 	// 存量 ok hooks 只清理标记块之外的区域；块内内容交给原位替换/损坏报错逻辑。
 	// 若对整个 content 调用 StripLegacyOKHooks，标记块自身的 ok hook 表会被删掉，
 	// 连带着吃掉两个标记行，导致原位替换退化为尾部追加、损坏标记检测失效。
@@ -216,8 +240,15 @@ func EnsureHooksBlock(configPath, exe string) error {
 			return err
 		}
 		content := string(data)
-		if strings.Contains(content, MarkerBegin) {
+		hasNew := strings.Contains(content, MarkerBegin)
+		hasLegacy := strings.Contains(content, LegacyMarkerBegin)
+		if hasNew && !hasLegacy {
 			return nil
+		}
+		if hasLegacy {
+			// 改名迁移：旧标记块在（不论新块是否在）→ 重 upsert，剥旧写新
+			_ = os.WriteFile(configPath+".bak-openknowledge", data, 0o644)
+			return upsertHooksBlockLocked(configPath, HooksBlockFor(exe, HookTimeoutSec()))
 		}
 		hasOKHook := false
 		for _, l := range strings.Split(content, "\n") {
@@ -288,12 +319,17 @@ func (kimiAgent) RemoveHooks() (bool, error) {
 		}
 		content := string(data)
 		orig := content
-		i := strings.Index(content, MarkerBegin)
-		j := strings.Index(content, MarkerEnd)
-		if i >= 0 && j > i {
-			tail := strings.TrimPrefix(content[j+len(MarkerEnd):], "\n")
-			head := strings.TrimRight(content[:i], "\n")
-			content = head + "\n" + tail
+		// 新旧品牌标记块全部剥除（卸载清干净）；损坏块退回单块移除不阻塞卸载
+		if stripped, serr := stripMarkerBlocks(content, cfgPath); serr == nil {
+			content = stripped
+		} else {
+			i := strings.Index(content, MarkerBegin)
+			j := strings.Index(content, MarkerEnd)
+			if i >= 0 && j > i {
+				tail := strings.TrimPrefix(content[j+len(MarkerEnd):], "\n")
+				head := strings.TrimRight(content[:i], "\n")
+				content = head + "\n" + tail
+			}
 		}
 		content = StripLegacyOKHooks(content)
 		if content == orig {

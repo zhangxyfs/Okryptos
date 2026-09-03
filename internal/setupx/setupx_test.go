@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/config"
+	"okryptos/internal/config"
 )
 
 func TestInstallSkills(t *testing.T) {
@@ -28,7 +28,7 @@ func TestInstallSkills(t *testing.T) {
 	if err := InstallSkills(`D:\bin\ok.exe`); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"openknowledge-init", "openknowledge-on", "openknowledge-off", "openknowledge-propose", "openknowledge-capture", "openknowledge-wiki"} {
+	for _, name := range []string{"ok-init", "ok-on", "ok-off", "ok-propose", "ok-capture", "ok-wiki"} {
 		data, err := os.ReadFile(filepath.Join(dir, name, "SKILL.md"))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -54,12 +54,12 @@ func TestInstallWikiSkillContent(t *testing.T) {
 	if err := InstallSkills(`D:\bin\ok.exe`); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "openknowledge-wiki", "SKILL.md"))
+	data, err := os.ReadFile(filepath.Join(dir, "ok-wiki", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := string(data)
-	for _, want := range []string{"name: openknowledge-wiki", "wiki status", "wiki mark", filepath.ToSlash(`D:\bin\ok.exe`), "--type reference", "wiki"} {
+	for _, want := range []string{"name: ok-wiki", "wiki status", "wiki mark", filepath.ToSlash(`D:\bin\ok.exe`), "--type reference", "wiki"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("skill missing %q", want)
 		}
@@ -104,8 +104,8 @@ func TestReasonixEnforceMode(t *testing.T) {
 
 // propose 技能模板必须包含"先分类"指引与 wiki 覆盖提示的联动说明。
 func TestProposeSkillTemplateHasClassification(t *testing.T) {
-	tpl := skillTemplates["openknowledge-propose"]
-	for _, want := range []string{"先分类", "结构型", "openknowledge-wiki", "暂无 wiki 条目覆盖"} {
+	tpl := skillTemplates["ok-propose"]
+	for _, want := range []string{"先分类", "结构型", "ok-wiki", "暂无 wiki 条目覆盖"} {
 		if !strings.Contains(tpl, want) {
 			t.Fatalf("propose skill template missing %q", want)
 		}
@@ -268,9 +268,9 @@ func TestConcurrentSaveEmbeddingProfile(t *testing.T) {
 // （外部调研借鉴：第三人称/作用域/查重路由/琐碎门控——见
 // docs/2026-08-23-memory-systems-synthesis.md §2.1）。
 func TestProposeSkillTemplateDiscipline(t *testing.T) {
-	tpl, ok := skillTemplates["openknowledge-propose"]
+	tpl, ok := skillTemplates["ok-propose"]
 	if !ok {
-		t.Fatal("skillTemplates 缺 openknowledge-propose")
+		t.Fatal("skillTemplates 缺 ok-propose")
 	}
 	for _, kw := range []string{"第三人称", "作用域", "查重", "琐碎"} {
 		if !strings.Contains(tpl, kw) {

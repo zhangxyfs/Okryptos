@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/retrieve"
+	"okryptos/internal/config"
+	"okryptos/internal/retrieve"
 )
 
 // 强负余弦不得否决已过关键词门槛的命中：准入按通道独立判定，语义分只影响排序。

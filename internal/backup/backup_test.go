@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"openknowledge/internal/registry"
+	"okryptos/internal/registry"
 )
 
 // setupHome 建隔离 OK_HOME，注册两个项目并各写条目/config。

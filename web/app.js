@@ -146,7 +146,7 @@ const I18N = {
     uVerLinuxHint:"请下载对应包手动升级",
     uSrvNewer:"服务端版本 {v} 高于客户端，建议升级客户端",
     mgNew:"+ 新建", mgLoading:"加载中…", mgTreeErr:"条目加载失败：",
-    readmeEmpty:"该项目没有 README，也没有 wiki 概述条目。可在项目根目录添加 README.md，或用 ok wiki / openknowledge-wiki 技能生成项目概述。",
+    readmeEmpty:"该项目没有 README，也没有 wiki 概述条目。可在项目根目录添加 README.md，或用 ok wiki / ok-wiki 技能生成项目概述。",
     readmeSrcReadme:"项目 README · {p}", readmeSrcWiki:"项目 wiki 概述 · {p}",
     readmeLoadFail:"README 加载失败：", lazyMore:"还有 {n} 条…",
     opEdit:"编辑", opApprove:"批准", opArchive:"归档", opUnarchive:"取消归档", opDelete:"删除",
@@ -368,7 +368,7 @@ const I18N = {
     uVerLinuxHint:"Download the package to upgrade manually",
     uSrvNewer:"Server version {v} is newer, consider upgrading the client",
     mgNew:"+ New", mgLoading:"Loading…", mgTreeErr:"Failed to load entries: ",
-    readmeEmpty:"This project has no README and no wiki overview entry. Add a README.md to the project root, or generate an overview with ok wiki / the openknowledge-wiki skill.",
+    readmeEmpty:"This project has no README and no wiki overview entry. Add a README.md to the project root, or generate an overview with ok wiki / the ok-wiki skill.",
     readmeSrcReadme:"Project README · {p}", readmeSrcWiki:"Project wiki overview · {p}",
     readmeLoadFail:"Failed to load README: ", lazyMore:"{n} more…",
     opEdit:"Edit", opApprove:"Approve", opArchive:"Archive", opUnarchive:"Unarchive", opDelete:"Delete",
@@ -574,11 +574,11 @@ const AGENT_META = {
     desc:"灵码内核 IDE 的 hooks 接入。",
     descEn:"Hooks integration for the Lingma-kernel IDE." },
   opencode:  { kind:"plugin", color:"#7c3aed", abbr:"oc",
-    target:"~/.config/opencode/plugins/openknowledge.ts",
+    target:"~/.config/opencode/plugins/okryptos.ts",
     desc:"TS 插件：仓库上下文 + 会话同步。",
     descEn:"TS plugin: repo context + session sync." },
   pi:        { kind:"plugin", color:"#db2777", abbr:"Pi",
-    target:"~/.pi/agent/extensions/openknowledge.ts",
+    target:"~/.pi/agent/extensions/okryptos.ts",
     desc:"Pi 扩展方式接入。",
     descEn:"Integrated as a Pi extension." },
   zcode:     { kind:"hook",   color:"#ea580c", abbr:"Zc",
@@ -586,12 +586,12 @@ const AGENT_META = {
     desc:"hooks 注入（claude 协议），技能目录独立。",
     descEn:"Hooks injection (claude protocol) with its own skills dir." },
   reasonix:  { kind:"hook",   color:"#4f46e5", abbr:"Rx",
-    target:"%APPDATA%\\reasonix\\plugins\\openknowledge\\（含 extensions 注册）",
-    targetEn:"%APPDATA%\\reasonix\\plugins\\openknowledge\\ (incl. extensions registry)",
+    target:"%APPDATA%\\reasonix\\plugins\\okryptos\\（含 extensions 注册）",
+    targetEn:"%APPDATA%\\reasonix\\plugins\\okryptos\\ (incl. extensions registry)",
     desc:"sidecar 扩展接入，强制检查走拦截器。",
     descEn:"Sidecar extension; enforce checks run through the interceptor." },
   dsh:       { kind:"plugin", color:"#0284c7", abbr:"DS",
-    target:"<DSH home>/plugins/openknowledge/ + cordis.patch.yml",
+    target:"<DSH home>/plugins/okryptos/ + cordis.patch.yml",
     desc:"file-URL 挂载的本地 JS 插件。",
     descEn:"Local JS plugin mounted via file:// URL." },
 };
@@ -5029,7 +5029,7 @@ async function downloadZip(project){
   const m = cd.match(/filename="?([^";]+)"?/);
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = m ? m[1] : "openknowledge-backup-"+project+".zip";
+  a.download = m ? m[1] : "okryptos-backup-"+project+".zip";
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -6646,7 +6646,7 @@ function deployCard(){
   d.textContent = "okserver + Gitea 双容器一个 compose；完整步骤见仓库 server/nas/README.md。";
   det.appendChild(d);
   const pre = el("pre","pre");
-  pre.textContent = 'services:\n  gitea:\n    image: gitea/gitea:1.22\n    volumes: [./gitea-data:/data]\n    ports: ["3000:3000", "2222:22"]\n  okserver:\n    image: z7dream/openknowledge-okserver:latest\n    volumes: [./okserver-data:/data]\n    environment:\n      OKSERVER_GITEA_URL: http://gitea:3000\n      OKSERVER_GITEA_ADMIN_TOKEN: <部署时从 Gitea 生成一次（带 user/admin scope）>\n    ports: ["3100:3100"]';
+  pre.textContent = 'services:\n  gitea:\n    image: gitea/gitea:1.22\n    volumes: [./gitea-data:/data]\n    ports: ["3000:3000", "2222:22"]\n  okserver:\n    image: z7dream/okryptos-okserver:latest\n    volumes: [./okserver-data:/data]\n    environment:\n      OKSERVER_GITEA_URL: http://gitea:3000\n      OKSERVER_GITEA_ADMIN_TOKEN: <部署时从 Gitea 生成一次（带 user/admin scope）>\n    ports: ["3100:3100"]';
   det.appendChild(pre);
   const ol = el("ol","small");
   ol.style.margin = "10px 0 0"; ol.style.paddingLeft = "20px";

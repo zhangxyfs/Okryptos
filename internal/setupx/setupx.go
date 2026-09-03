@@ -16,13 +16,13 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"openknowledge/internal/agentx"
-	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
-	"openknowledge/internal/embedsidecar"
-	"openknowledge/internal/embedx"
-	"openknowledge/internal/fsx"
-	"openknowledge/internal/registry"
+	"okryptos/internal/agentx"
+	"okryptos/internal/config"
+	"okryptos/internal/embed"
+	"okryptos/internal/embedsidecar"
+	"okryptos/internal/embedx"
+	"okryptos/internal/fsx"
+	"okryptos/internal/registry"
 )
 
 // SkillNames 返回登记的技能名（供状态检测遍历）。
@@ -73,8 +73,36 @@ func renderSkill(name, exe string) string {
 	return strings.ReplaceAll(skillTemplates[name], "{{EXE}}", filepath.ToSlash(exe))
 }
 
+// legacySkillPrefix 是 2.25.0 改名前的技能名前缀（ok-init 等六个 → ok-*）。
+const legacySkillPrefix = "openknowledge-"
+
+// RemoveLegacySkills 删除全部 agent 技能目录下的 openknowledge-* 旧技能副本
+//（2.25.0 改名迁移：旧副本不删会被 agent 照常扫描发现成幽灵技能，且新版卸载
+// 只认 ok-* 删不掉它们）。用 AllSkillDirs（不问是否检测到 hooks 接入）不留死角。
+// 幂等；只在目录名确实是本项目旧技能（含 SKILL.md 且 front matter name 匹配
+// openknowledge-*）时删除，同名外来目录不动。
+func RemoveLegacySkills() {
+	for _, home := range AllSkillDirs() {
+		matches, err := filepath.Glob(filepath.Join(home, legacySkillPrefix+"*"))
+		if err != nil {
+			continue
+		}
+		for _, dir := range matches {
+			data, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+			if err != nil {
+				continue
+			}
+			name := filepath.Base(dir)
+			if strings.Contains(string(data), "name: "+name+"\n") {
+				_ = os.RemoveAll(dir)
+			}
+		}
+	}
+}
+
 // InstallSkills 把技能模板（烘焙 exe 路径）写入 SkillDirs() 的每个目录。
 func InstallSkills(exe string) error {
+	RemoveLegacySkills()
 	for _, home := range SkillDirs() {
 		for name := range skillTemplates {
 			dir := filepath.Join(home, name)
@@ -96,6 +124,7 @@ func InstallSkills(exe string) error {
 // agent 执行报错，而状态页只查存在性会误报正常——故须随 selfHealHooks
 // 同窗口自愈。
 func EnsureSkills(exe string) error {
+	RemoveLegacySkills()
 	cur := `"` + filepath.ToSlash(exe) + `"`
 	for _, home := range SkillDirs() {
 		for name := range skillTemplates {
@@ -424,20 +453,20 @@ func Enable() error {
 	return nil
 }
 
-//go:embed skills/openknowledge-wiki/SKILL.md
+//go:embed skills/ok-wiki/SKILL.md
 var wikiSkillTemplate string
 
-//go:embed skills/openknowledge-propose/SKILL.md
+//go:embed skills/ok-propose/SKILL.md
 var proposeSkillTemplate string
 
 func init() {
-	skillTemplates["openknowledge-wiki"] = wikiSkillTemplate
-	skillTemplates["openknowledge-propose"] = proposeSkillTemplate
+	skillTemplates["ok-wiki"] = wikiSkillTemplate
+	skillTemplates["ok-propose"] = proposeSkillTemplate
 }
 
 var skillTemplates = map[string]string{
-	"openknowledge-init": "---\nname: openknowledge-init\ndescription: 在当前项目目录初始化 OpenKnowledge 知识库（ok init，自动以当前目录名注册，无需用户提供项目名）。当用户要求\"初始化知识库\"或\"把本项目注册到知识库\"时使用。\n---\n\n# openknowledge-init\n\n用 Bash 工具在当前工作目录直接执行（无参数，自动取当前目录名，不要向用户询问项目名）：\n\n    \"{{EXE}}\" init\n\n把输出的知识库路径汇报给用户；若提示重复注册，告知用户该项目已初始化过。\n",
-	"openknowledge-on":   "---\nname: openknowledge-on\ndescription: 开启 OpenKnowledge 知识库 hooks 全局开关。当用户要求\"开启知识库\"\"启用知识库 hooks\"时使用。\n---\n\n# openknowledge-on\n\n用 Bash 工具执行：\n\n    \"{{EXE}}\" on\n\n把输出汇报给用户。\n",
-	"openknowledge-off":  "---\nname: openknowledge-off\ndescription: 关闭 OpenKnowledge 知识库 hooks 全局开关（持续到手动开启）。当用户要求\"关闭知识库\"\"停用知识库 hooks\"时使用。\n---\n\n# openknowledge-off\n\n用 Bash 工具执行：\n\n    \"{{EXE}}\" off\n\n把输出汇报给用户，并说明：关闭后所有项目的知识库注入与强制检查都会暂停，直到执行 ok on。\n",
-	"openknowledge-capture": "---\nname: openknowledge-capture\ndescription: 查看或切换 OpenKnowledge 知识库的经验沉淀模式与轮次间隔（ok capture propose|auto|interval）。当用户要求\"切换沉淀模式\"\"开启自动提取\"\"关闭自动提取\"\"调整提取频率\"时使用。\n---\n\n# openknowledge-capture\n\n查看当前模式与轮次间隔，用 Bash 工具执行：\n\n    \"{{EXE}}\" capture\n\n切换模式，用 Bash 工具执行（二选一）：\n\n    \"{{EXE}}\" capture propose\n    \"{{EXE}}\" capture auto\n\n设置轮次间隔（n ≥ 1，仅 auto 模式生效），用 Bash 工具执行：\n\n    \"{{EXE}}\" capture interval <n>\n\n## 两种模式\n\n- **propose（默认）**：AI 主动提议——AI 觉得值得记录时用 ok propose 记为草稿条目，无轮次限制，由人批准后转正入库。\n- **auto（Stop 自动提取）**：每 turn_interval 轮对话结束时，Stop hook 阻断一次并强制 AI 自省本轮是否有值得沉淀的经验，有则当场 propose 草稿。\n\n把切换结果汇报给用户。\n",
+	"ok-init": "---\nname: ok-init\ndescription: 在当前项目目录初始化 Okryptos 知识库（ok init，自动以当前目录名注册，无需用户提供项目名）。当用户要求\"初始化知识库\"或\"把本项目注册到知识库\"时使用。\n---\n\n# ok-init\n\n用 Bash 工具在当前工作目录直接执行（无参数，自动取当前目录名，不要向用户询问项目名）：\n\n    \"{{EXE}}\" init\n\n把输出的知识库路径汇报给用户；若提示重复注册，告知用户该项目已初始化过。\n",
+	"ok-on":   "---\nname: ok-on\ndescription: 开启 Okryptos 知识库 hooks 全局开关。当用户要求\"开启知识库\"\"启用知识库 hooks\"时使用。\n---\n\n# ok-on\n\n用 Bash 工具执行：\n\n    \"{{EXE}}\" on\n\n把输出汇报给用户。\n",
+	"ok-off":  "---\nname: ok-off\ndescription: 关闭 Okryptos 知识库 hooks 全局开关（持续到手动开启）。当用户要求\"关闭知识库\"\"停用知识库 hooks\"时使用。\n---\n\n# ok-off\n\n用 Bash 工具执行：\n\n    \"{{EXE}}\" off\n\n把输出汇报给用户，并说明：关闭后所有项目的知识库注入与强制检查都会暂停，直到执行 ok on。\n",
+	"ok-capture": "---\nname: ok-capture\ndescription: 查看或切换 Okryptos 知识库的经验沉淀模式与轮次间隔（ok capture propose|auto|interval）。当用户要求\"切换沉淀模式\"\"开启自动提取\"\"关闭自动提取\"\"调整提取频率\"时使用。\n---\n\n# ok-capture\n\n查看当前模式与轮次间隔，用 Bash 工具执行：\n\n    \"{{EXE}}\" capture\n\n切换模式，用 Bash 工具执行（二选一）：\n\n    \"{{EXE}}\" capture propose\n    \"{{EXE}}\" capture auto\n\n设置轮次间隔（n ≥ 1，仅 auto 模式生效），用 Bash 工具执行：\n\n    \"{{EXE}}\" capture interval <n>\n\n## 两种模式\n\n- **propose（默认）**：AI 主动提议——AI 觉得值得记录时用 ok propose 记为草稿条目，无轮次限制，由人批准后转正入库。\n- **auto（Stop 自动提取）**：每 turn_interval 轮对话结束时，Stop hook 阻断一次并强制 AI 自省本轮是否有值得沉淀的经验，有则当场 propose 草稿。\n\n把切换结果汇报给用户。\n",
 }

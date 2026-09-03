@@ -8,14 +8,25 @@ import (
 	"path/filepath"
 	"strings"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 //go:embed pi_extension.ts
 var piExtensionTemplate string
 
 // piExtensionMarker 本工具生成的扩展文件头标记（RemoveHooks 据此识别归属）。
-const piExtensionMarker = "// openknowledge hooks (managed by ok.exe; do not edit)"
+// legacyPiExtensionMarker 是 2.25.0 改名前（OpenKnowledge 时代）的旧标记：
+// 归属识别双认，渲染只写新标记。
+const (
+	piExtensionMarker       = "// okryptos hooks (managed by ok.exe; do not edit)"
+	legacyPiExtensionMarker = "// openknowledge hooks (managed by ok.exe; do not edit)"
+)
+
+// ownsPiExtension 报告内容是否本工具生成（新旧标记任一命中）。
+func ownsPiExtension(content string) bool {
+	return strings.Contains(content, piExtensionMarker) ||
+		strings.Contains(content, legacyPiExtensionMarker)
+}
 
 // PiHome 返回 pi 配置根目录（PI_CODING_AGENT_DIR 优先）。
 func PiHome() string {
@@ -36,7 +47,22 @@ func (piAgent) DisplayName() string { return "Pi" }
 func (piAgent) SkillsDir() string   { return SkillsHome() }
 func (piAgent) HooksTarget() string { return piExtensionPath() }
 
-func piExtensionPath() string { return filepath.Join(PiHome(), "extensions", "openknowledge.ts") }
+func piExtensionPath() string { return filepath.Join(PiHome(), "extensions", "okryptos.ts") }
+
+// legacyPiExtensionPath 是 2.25.0 改名前的扩展路径。pi 自动加载 extensions
+// 目录——旧文件不删则双扩展双注入。
+func legacyPiExtensionPath() string { return filepath.Join(PiHome(), "extensions", "openknowledge.ts") }
+
+// removeLegacyPiExtension 删除旧名扩展（仅本工具生成的），防自动加载双注入。
+// 返回是否存在并被清除（供迁移判定：legacy 在 = 旧版接入过 hooks）。
+func removeLegacyPiExtension() bool {
+	p := legacyPiExtensionPath()
+	data, err := os.ReadFile(p)
+	if err != nil || !ownsPiExtension(string(data)) {
+		return false
+	}
+	return os.Remove(p) == nil
+}
 
 func (piAgent) Detect() bool {
 	info, err := os.Stat(PiHome())
@@ -61,7 +87,7 @@ func (piAgent) HooksInstalled() bool {
 		return false
 	}
 	content := string(data)
-	if !strings.Contains(content, piExtensionMarker) ||
+	if !ownsPiExtension(content) ||
 		!strings.Contains(content, "// fingerprint: "+piTemplateFingerprint()) {
 		return false
 	}
@@ -74,9 +100,10 @@ func (piAgent) HooksInstalled() bool {
 }
 
 func (piAgent) InstallHooks(exe string) error {
+	removeLegacyPiExtension() // 改名迁移：旧名扩展随安装清除
 	path := piExtensionPath()
 	if data, err := os.ReadFile(path); err == nil {
-		if !strings.Contains(string(data), piExtensionMarker) {
+		if !ownsPiExtension(string(data)) {
 			if err := os.WriteFile(path+".bak-openknowledge", data, 0o644); err != nil {
 				return fmt.Errorf("备份既有扩展失败: %w", err)
 			}
@@ -91,32 +118,42 @@ func (piAgent) InstallHooks(exe string) error {
 }
 
 func (piAgent) RemoveHooks() (bool, error) {
+	removed := removeLegacyPiExtension()
 	path := piExtensionPath()
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return false, nil
+		return removed, nil
 	}
 	if err != nil {
-		return false, err
+		return removed, err
 	}
-	if !strings.Contains(string(data), piExtensionMarker) {
-		return false, nil // 非本工具生成，不删
+	if !ownsPiExtension(string(data)) {
+		return removed, nil // 非本工具生成，不删
 	}
 	if err := os.Remove(path); err != nil {
-		return false, fmt.Errorf("删除 pi 扩展: %w", err)
+		return removed, fmt.Errorf("删除 pi 扩展: %w", err)
 	}
 	return true, nil
 }
 
 // EnsureHooks 自愈：文件存在且为本工具生成、但内容过期（模板升级或 exe 迁移）
 // 时重写；文件不存在时为 no-op（pi 无扩展即不会触发 hook，无需修复）。
+// 改名迁移特例（2.25.0）：新名缺失但旧名扩展在 = 旧版接入过 hooks——此时
+// "缺失不复活"让位给迁移，按当前 exe 渲染新文件再删旧件（同 opencode 适配器）。
 func (piAgent) EnsureHooks(exe string) error {
 	path := piExtensionPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if removeLegacyPiExtension() {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return err
+			}
+			return fsx.WriteFile(path, []byte(renderPiExtension(exe)), 0o644)
+		}
 		return nil
 	}
-	if !strings.Contains(string(data), piExtensionMarker) {
+	removeLegacyPiExtension() // 新名已在：旧件直接清除
+	if !ownsPiExtension(string(data)) {
 		return nil
 	}
 	rendered := renderPiExtension(exe)

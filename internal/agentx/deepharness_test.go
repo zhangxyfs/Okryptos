@@ -319,3 +319,46 @@ func TestDSHPatchBlockQuoteRoundTrip(t *testing.T) {
 		t.Errorf("YAML 还原后 name = %q, want %q", got, want)
 	}
 }
+
+// TestDSHLegacyMigration（2.25.0 改名迁移）：旧插件目录 plugins/openknowledge/
+// + 旧品牌 patch 标记块，在 EnsureHooks 窗口整体迁移——插件写新目录
+// plugins/okryptos/、patch 块换为新标记与新 file URL、旧目录删除。
+func TestDSHLegacyMigration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_DSH_HOME", home)
+	// 旧版遗留：插件目录 + patch 旧标记块
+	legacyDir := filepath.Join(home, "plugins", "openknowledge")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "index.js"),
+		[]byte(legacyDSHPluginMarker+"\n// fingerprint: 000000000000\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := filepath.Join(home, "cordis.patch.yml")
+	legacyPatch := "# 别的内容: 1\n" + LegacyMarkerBegin + "\n- insert:\n    - id: ok-hooks\n      name: 'file:///D:/old/plugins/openknowledge/index.js'\n" + LegacyMarkerEnd + "\n"
+	if err := os.WriteFile(patch, []byte(legacyPatch), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := (dshAgent{}).EnsureHooks(`D:\new\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
+		t.Fatal("旧插件目录应被清除")
+	}
+	if _, err := os.Stat(filepath.Join(home, "plugins", "okryptos", "index.js")); err != nil {
+		t.Fatalf("新插件应就位: %v", err)
+	}
+	data, _ := os.ReadFile(patch)
+	s := string(data)
+	if strings.Contains(s, "openknowledge") {
+		t.Fatalf("patch 不应残留旧品牌引用: %q", s)
+	}
+	if !strings.Contains(s, MarkerBegin) || !strings.Contains(s, "plugins/okryptos/index.js") {
+		t.Fatalf("patch 应含新标记块与新 file URL: %q", s)
+	}
+	if !strings.Contains(s, "# 别的内容: 1") {
+		t.Fatal("块外内容不应受损")
+	}
+}

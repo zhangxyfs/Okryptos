@@ -6,7 +6,7 @@ import "fmt"
 func AutostartDesktop(exe string) string {
 	return fmt.Sprintf(`[Desktop Entry]
 Type=Application
-Name=OpenKnowledge
+Name=Okryptos
 Exec=%s daemon
 X-GNOME-Autostart-enabled=true
 `, exe)

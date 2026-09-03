@@ -366,3 +366,32 @@ command = "echo done"
 		t.Errorf("第三方 hooks 表被误删:\n%s", got)
 	}
 }
+
+// TestEnsureHooksBlockMigratesLegacyMarkers（2.25.0 改名迁移）：旧品牌标记块
+//（# >>> openknowledge hooks >>>）在 Ensure 窗口被剥除并原位换成新标记块，
+// 不留孤儿旧块（否则双派发）；卸载 RemoveHooks 也认旧块。
+func TestEnsureHooksBlockMigratesLegacyMarkers(t *testing.T) {
+	t.Setenv("KIMI_CODE_HOME", t.TempDir())
+	cfg := kimiConfigPath()
+	legacy := "# 其它配置\n\n" + LegacyMarkerBegin + "\n" + HooksBlockFor(`D:\old\ok.exe`, 10) + LegacyMarkerEnd + "\n"
+	if err := os.WriteFile(cfg, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureHooksBlock(cfg, `D:\new\ok.exe`); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	if strings.Contains(s, LegacyMarkerBegin) || strings.Contains(s, "openknowledge hooks") {
+		t.Fatalf("旧标记块应被剥除: %q", s)
+	}
+	if !strings.Contains(s, MarkerBegin) || !strings.Contains(s, filepath.ToSlash(`D:\new\ok.exe`)) {
+		t.Fatalf("新标记块应就位且烘焙当前 exe: %q", s)
+	}
+	if !strings.Contains(s, "# 其它配置") {
+		t.Fatal("块外内容不应受损")
+	}
+}

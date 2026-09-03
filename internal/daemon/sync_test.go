@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/credmig"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/store"
-	"openknowledge/internal/syncx"
+	"okryptos/internal/config"
+	"okryptos/internal/credmig"
+	"okryptos/internal/registry"
+	"okryptos/internal/store"
+	"okryptos/internal/syncx"
 )
 
 // TestRunSyncCycle 起两个隔离 OK_HOME 项目：一个启用同步、一个未启用，

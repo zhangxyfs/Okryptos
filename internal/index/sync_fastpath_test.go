@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/retrieve"
+	"okryptos/internal/config"
+	"okryptos/internal/retrieve"
 )
 
 // 未变化条目（filename+mtime+size 全同）在增量同步中不得被读取/解析：

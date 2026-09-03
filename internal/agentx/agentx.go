@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"openknowledge/internal/daemonx"
+	"okryptos/internal/daemonx"
 )
 
 // Agent 一个 AI 编码 agent 的集成适配器。

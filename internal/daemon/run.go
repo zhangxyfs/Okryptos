@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
-	"openknowledge/internal/daemonx"
-	"openknowledge/internal/embedsidecar"
-	"openknowledge/internal/gui"
-	"openknowledge/internal/logx"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/tray"
-	"openknowledge/internal/version"
+	"okryptos/internal/daemonx"
+	"okryptos/internal/embedsidecar"
+	"okryptos/internal/gui"
+	"okryptos/internal/logx"
+	"okryptos/internal/registry"
+	"okryptos/internal/tray"
+	"okryptos/internal/version"
 )
 
 // OpenBrowserFunc 打开 GUI 首选路径（Windows 内嵌窗口优先、浏览器回退）并返回
@@ -150,7 +150,7 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 	go sidecarJanitor(sidecarMgr)
 	// 同步 ticker：每分钟检查一轮，启用同步且到点的项目跑 SyncOnce（失败仅记日志）
 	startSyncJanitor(stdout)
-	fmt.Fprintf(stdout, "OpenKnowledge daemon: %s\n", info.URL())
+	fmt.Fprintf(stdout, "Okryptos daemon: %s\n", info.URL())
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -158,7 +158,7 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// clearUpgradeMark 启动自愈：升级熔断标记（~/.openknowledge/update/.upgrading）
+// clearUpgradeMark 启动自愈：升级熔断标记（~/.okryptos/update/.upgrading）
 // 残留则删除并记日志。正常升级收尾：安装器 [Run] 段拉起的新 okd 走到这里删标记；
 // 异常残留（安装中断/断电）同样在此清理——否则 Ensure/EnsureCurrent 会永久拒拉 daemon。
 func clearUpgradeMark(stderr io.Writer) {

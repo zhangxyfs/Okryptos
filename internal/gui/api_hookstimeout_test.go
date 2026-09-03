@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"openknowledge/internal/agentx"
-	"openknowledge/internal/config"
+	"okryptos/internal/agentx"
+	"okryptos/internal/config"
 )
 
 // TestHooksTimeoutSet 独立写全局 hook 超时：只落 [hooks] timeout_sec，

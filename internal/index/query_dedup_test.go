@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/retrieve"
+	"okryptos/internal/config"
+	"okryptos/internal/retrieve"
 )
 
 // 冷却排除必须发生在 top_n 截断之前：排除第 1 名后第 3 名应补位进入 top_n=2，

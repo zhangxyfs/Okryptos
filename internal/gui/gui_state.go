@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"openknowledge/internal/fsx"
-	"openknowledge/internal/registry"
+	"okryptos/internal/fsx"
+	"okryptos/internal/registry"
 )
 
 type WindowState struct {

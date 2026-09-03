@@ -16,11 +16,11 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
-	"openknowledge/internal/procx"
+	"okryptos/internal/procx"
 )
 
 // WindowTitle 内嵌窗口标题；托盘聚焦与 OkManager 拉起后的找窗都用它。
-const WindowTitle = "OpenKnowledge 配置中心"
+const WindowTitle = "Okryptos 配置中心"
 
 // 包级变量以便测试替换。
 var (

@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/credmig"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/store"
-	"openknowledge/internal/syncx"
+	"okryptos/internal/config"
+	"okryptos/internal/credmig"
+	"okryptos/internal/registry"
+	"okryptos/internal/store"
+	"okryptos/internal/syncx"
 )
 
 var syncCheckInterval = time.Minute // 检查周期（包级 var 供测试调小）

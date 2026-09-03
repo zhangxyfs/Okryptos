@@ -1,4 +1,4 @@
-# OpenKnowledge 项目架构与技术说明
+# Okryptos 项目架构与技术说明
 
 ## 目录
 
@@ -25,7 +25,7 @@
 
 ## 1. 项目概述
 
-**OpenKnowledge** 是一个为 AI 编程助手提供项目知识库的命令行工具，客户端编译产物为 `ok`（+ 常驻 `okd`、GUI 拉起器 `OkManager`）。知识按项目隔离存储，通过 **Kimi Code 的 hooks 机制**在 AI 会话中自动注入项目约定与踩坑经验，并能对"必须写变更日志"这类强制工作流做机制级检查。v2.23 起另有服务端面：`okserver`（NAS/Docker 部署的多端同步与管理服务端）与 `okdeploy`（一键部署器，独立分发）。
+**Okryptos** 是一个为 AI 编程助手提供项目知识库的命令行工具，客户端编译产物为 `ok`（+ 常驻 `okd`、GUI 拉起器 `OkManager`）。知识按项目隔离存储，通过 **Kimi Code 的 hooks 机制**在 AI 会话中自动注入项目约定与踩坑经验，并能对"必须写变更日志"这类强制工作流做机制级检查。v2.23 起另有服务端面：`okserver`（NAS/Docker 部署的多端同步与管理服务端）与 `okdeploy`（一键部署器，独立分发）。
 
 | 功能 | 说明 |
 |------|------|
@@ -38,7 +38,7 @@
 | **多端同步** | `ok sync`/`ok sync init` + okd 自动触发（ticker/写入防抖），知识库即 git 仓，GUI 冲突解决页 |
 | **服务端** | okserver 管理面（账号/仓库/凭证/强制改密）+ okdeploy 一键部署到 NAS（docker compose） |
 
-**模块名**: `openknowledge`
+**模块名**: `okryptos`
 **二进制名**: `ok`（Windows 为 `ok.exe`）
 **设计文档**: `docs/superpowers/specs/2026-07-22-openknowledge-design.md`
 
@@ -72,7 +72,7 @@
 
 ## 3. 模块架构
 
-单 module（`openknowledge`），internal/ 下 34 个包（含 `rxext/sdk`、`deployx/webui` 子包）+ `cmd/` 五入口（ok/okd/okmanager/okserver/okdeploy），严格单向依赖、无环：
+单 module（`okryptos`），internal/ 下 34 个包（含 `rxext/sdk`、`deployx/webui` 子包）+ `cmd/` 五入口（ok/okd/okmanager/okserver/okdeploy），严格单向依赖、无环：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -123,7 +123,7 @@
 ## 4. 目录结构
 
 ```
-OpenKnowledge/
+Okryptos/
 ├── go.mod / go.sum                # 模块定义（4 个第三方依赖）
 ├── cmd/ok/
 │   ├── main.go                    # 入口：子命令调度，hook 路径 panic-recover 兜底
@@ -257,7 +257,7 @@ OpenKnowledge/
 
 ### 5.1 registry — 项目注册表与路由（registry.go + home_windows.go + home_other.go）
 
-知识库的全局定位层。`Home()` 返回 KB 根目录：`OK_HOME` 环境变量优先（全仓测试隔离依赖），否则真实用户目录下的 `~/.openknowledge`——真实目录解析对 `HOME`/`USERPROFILE` 重定向**免疫**（Windows 走 `windows.KnownFolderPath(FOLDERID_Profile)`，其他平台 `os/user.Current()` 解析，失败回退 `os.UserHomeDir()`）：CodePilot 等宿主以 DB provider 运行时会把子进程 HOME 重定向到 shadow 临时目录做 provider 隔离，跟随重定向会看到空数据根，hook 注入静默失效（v2.11.1 修复）。`Registry` 持久化在 `registry.toml`，核心是 **最长前缀匹配** 的项目路由：
+知识库的全局定位层。`Home()` 返回 KB 根目录：`OK_HOME` 环境变量优先（全仓测试隔离依赖），否则真实用户目录下的 `~/.okryptos`（v2.25.0 改名版：`Home()` 按存在性在新根 `~/.okryptos` 与旧根 `~/.openknowledge` 间选择，三入口启动早期 `MigrateLegacyHome` 把旧根整体 rename 为新根并修 config 内旧根绝对路径，幂等）——真实目录解析对 `HOME`/`USERPROFILE` 重定向**免疫**（Windows 走 `windows.KnownFolderPath(FOLDERID_Profile)`，其他平台 `os/user.Current()` 解析，失败回退 `os.UserHomeDir()`）：CodePilot 等宿主以 DB provider 运行时会把子进程 HOME 重定向到 shadow 临时目录做 provider 隔离，跟随重定向会看到空数据根，hook 注入静默失效（v2.11.1 修复）。`Registry` 持久化在 `registry.toml`，核心是 **最长前缀匹配** 的项目路由：
 
 ```go
 func (r *Registry) FindByCwd(cwd string) *Project  // 规范化后最长前缀匹配
@@ -282,7 +282,7 @@ Windows 下大小写不敏感与分隔符混乱问题全部收敛到 `NormalizeP
 func LoadMerged(projectPath, globalPath string) (Config, error)
 ```
 
-生效配置 = **内置默认 ← 全局 `~/.openknowledge/config.toml` ← 项目 `config.toml`**，后者覆盖前者（TOML 依次解码到同一 struct 实现）。两个数组例外：`embedding.profiles` 按 name 合并；`[[enforce]]` 全局与项目追加合并（全局在前）——GUI 规则卡写全局层，用户手改项目层补的规则同样生效。配置解析失败（如手改写坏 toml）整条 hook 链路 fail-open：规则不生效、不阻断，错误记 `ok.log`。API key 解析收敛在一处：
+生效配置 = **内置默认 ← 全局 `~/.okryptos/config.toml` ← 项目 `config.toml`**，后者覆盖前者（TOML 依次解码到同一 struct 实现）。两个数组例外：`embedding.profiles` 按 name 合并；`[[enforce]]` 全局与项目追加合并（全局在前）——GUI 规则卡写全局层，用户手改项目层补的规则同样生效。配置解析失败（如手改写坏 toml）整条 hook 链路 fail-open：规则不生效、不阻断，错误记 `ok.log`。API key 解析收敛在一处：
 
 ```go
 func (e Embedding) ResolvedAPIKey() string  // api_key 字段 > api_key_env 环境变量 > ""
@@ -330,7 +330,7 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 - `cli.go`：`Init`（项目名缺省取目录基名；**同名项目幂等补挂工作目录**——服务器拉取/备份恢复产生的空壳项目（无 paths）`ok init` 同名时经 `registry.AddPath` 补挂，防串库收窄）、`Add`（重复条目拒绝；后接索引库同步）、`Propose`（AI 面向的草稿写入：`draft:true`、只同步 INDEX 不算向量）、`Approve`（草稿转正，同步 INDEX 并补算向量；同一秒内 mtime 不变时手动推进一秒防 diff 漏判）、`CaptureCmd`（打印或设置项目 `[capture]` 模式，整段替换幂等写入）、`Search`（检索预览，走 `index.Query`；克隆/拉取后索引滞后时先按需增量同步再检索）、`Index`（索引库增量同步并打印条目数）、`List`（文件扫描，人用命令开销可忽略）、`Doctor`（注册表/配置/embedding 连通性/hooks 安装状态/开关状态）
 - `Sync`：`ok sync`（一次执行 = commit → pull --rebase → push，编排与守卫全在 syncx；冲突时列文件并指引到 GUI 冲突解决页）与 `ok sync init [remote-url]`（三情形：无远端仅本地历史 / 本地无内容克隆远端 / 本地有内容首推；远端已有内容报 `ErrRemoteNotEmpty` 不自动合并）
 - `setup.go`：见第 6.4 节
-- `toggle.go`：`On`/`Off` 即删除/创建 `~/.openknowledge/hooks-disabled` 标志文件
+- `toggle.go`：`On`/`Off` 即删除/创建 `~/.okryptos/hooks-disabled` 标志文件
 
 ### 5.11 gui — 配置中心 Web UI（api.go + api_sync/api_server/api_update/graph 等专题文件 + browser/window/open 平台件）
 
@@ -351,7 +351,7 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 | 服务器 | `GET/PUT /api/server/config`（全局 `[server]` 段读写，token 空串保留旧值；空 URL 整段清空即 logout）、`POST /api/server/test`、`POST /api/server/login`、`GET /api/server/me`、`POST /api/server/change-password`、`POST /api/server/repos`（建仓一条龙）、`POST /api/server/pull`（新机器注册空壳项目 + clone 服务器仓）、`POST /api/server/credential/ensure`（本机 git 凭证 ensure）、管理类透传（users/orgs/repos/audit/tokens 列删，serverx 转发 okserver） |
 | 更新 | `GET /api/update/check`（GitHub 最新版本，gui.json 缓存 6h fail-open；`?force=1` 绕过）、`POST /api/update/skip`（记录跳过版本）、`POST/GET /api/update/download`（安装器下载任务，.part 断点续传 + 轮询快照）、`POST /api/update/apply`（Windows 静默安装 + 升级熔断标记） |
 | 日志 | `GET /api/logs?tail=&sig=`（ok/daemon/sidecar 三来源，行带 `src`/`semantic` 标记；sig 命中返回 `unchanged` 前端跳过重绘） |
-| 其他 | `GET /api/export?project=`（zip）、`POST /api/import`（multipart 32MB，`Report{imported,skipped,projects}`）、`GET /api/changelog`（`current/pending/all`，pending 只算严格大于 last_seen 且不超过 current 的版本）、`POST /api/changelog/seen`（仅升级首弹关闭才标已读，写 `~/.openknowledge/gui.json`）、`DELETE /api/project`、`GET /help.md`（静态） |
+| 其他 | `GET /api/export?project=`（zip）、`POST /api/import`（multipart 32MB，`Report{imported,skipped,projects}`）、`GET /api/changelog`（`current/pending/all`，pending 只算严格大于 last_seen 且不超过 current 的版本）、`POST /api/changelog/seen`（仅升级首弹关闭才标已读，写 `~/.okryptos/gui.json`）、`DELETE /api/project`、`GET /help.md`（静态） |
 | 横切 | `POST /api/heartbeat?project=`（返回该项目 kb.db mtime 作 `version`；beats 通道生产传 nil——存活感知由 daemon.json 自省 + 托盘承担，新前端不再 5s 轮询）、`POST /api/shutdown`、`POST /api/uninstall`、`GET/POST /api/inject`（注入预算） |
 
 前端 `web/`（零依赖原生 HTML/JS/CSS，无构建链；index.html 骨架 + app.js + style.css）：左右栏七菜单 + `location.hash` 路由（刷新恢复当前菜单）+ 中英切换（只翻界面 chrome 不翻数据）+ 昼夜 CSS 变量双主题 + 整页重渲保持各滚动容器 scrollTop。「管理」=项目→条目两级树（类型徽标/mandatory★/draft/归档置灰 + 标题过滤 + 计数）+ markdown 详情 + 右上操作组（编辑/批准/归档/删除）+ 行内同步状态点（五态：dirty 黄/syncing 黄闪/冲突红/落后/同步）与同步按钮 + 新建/编辑弹窗内 ✨优化（loading→对照预览→逐字段回填，409 弹「尚未配置模型」）；「图谱」=项目知识图谱（自绘 SVG 力导向引擎：中心双锚辐射布局、拖拽缩放、悬停邻居淡化、双击关联条目跳管理页定位；>400 条目自动分层模式——骨架（is_dir 或 deg≥6）常显 + 类目下钻，叶子不进 DOM 不参与物理；收敛后自动二次取景）；「引导」=agent 卡片（品牌字形 data-URI、未检测不渲染、安装/卸载双态、明细展开）+ Reasonix 强制检查三档卡 + Codex 信任门说明卡；「服务器」=okserver 连接三步向导（地址/登录/建仓）+ 管理/成员双视图（账号/仓库/凭证管理）+ 强制改密弹窗（全局 403 `must_change_password` 钩子）+ 服务器仓拉取（单拉/全部拉取/登录自动提示未注册仓）；「设置」=八卡（全局开关/语义检索/模型配置/Hook 超时/跨轮注入冷却/经验沉淀/泛化门控/规则配置；后四卡为全局配置，不带 project、无项目也可用），开关即存、简单输入行内保存改回原值变灰、弹窗确定生效闪 ✓；「日志」=深色控制台（来源 chips+仅语义+过滤，贴底滚动，2s 轮询 + sig 跳过重绘）；「其他」=导出/导入/更新日志/使用帮助/版本升级卡（检查/进度下载/一键安装/跳过版本）/删除项目知识库（备份+ack+输名三重解锁）/关于。冲突解决页（hash 路由子页）=卡片流 + 顶部钉住操作条 + 三向合并编辑器（marker 块采纳三栏）+ AI 合并。启动横切：升级后首次打开自动弹更新日志（pending 非空 → body 级弹窗，不进 render 周期）；新版本启动弹窗（升级/跳过/知道了）+ 侧栏红点；`/api/projects` 为空时落「引导」页（旧 GUI"无项目隐藏管理 tab"语义的等价形态）。daemon 被替换致 token 过期 401 时自动刷新一次页面取新 token（sessionStorage 标志防循环）。
@@ -366,15 +366,15 @@ GUI「其他」tab 背后的备份包（叶子包：stdlib zip + registry/entry/
 
 ### 5.13 version — 构建期注入的应用版本号（6 行）
 
-`var Version = "dev"`；`scripts/build-dist.sh` 用 sed 从 `installer/openknowledge.iss` 的 `#define AppVersion` 提取版本，经 `-ldflags -X openknowledge/internal/version.Version=` 注入——版本事实源只有 .iss 一处，裸 `go build` 为 `dev`。经 `/api/status` 的 `app_version` 暴露给前端。四个 exe（ok/okd/okmanager/okdeploy）与 okserver 镜像共用同一注入机制。
+`var Version = "dev"`；`scripts/build-dist.sh` 用 sed 从 `installer/okryptos.iss` 的 `#define AppVersion` 提取版本，经 `-ldflags -X okryptos/internal/version.Version=` 注入——版本事实源只有 .iss 一处，裸 `go build` 为 `dev`。经 `/api/status` 的 `app_version` 暴露给前端。四个 exe（ok/okd/okmanager/okdeploy）与 okserver 镜像共用同一注入机制。
 
 ### 5.14 syncx — 个人多端同步引擎（v2.23，git.go + repo.go + sync.go + status.go + conflict.go + init.go + credential.go，约 760 行）
 
-在项目数据目录（`~/.openknowledge/projects/<名>/`）里直接执行系统 git 的单机引擎——知识库即 git 仓，同步 = 普通 git 工作流，无自建协议。叶子包（仅 fsx + procx），cli/gui/daemon 三方共用：
+在项目数据目录（`~/.okryptos/projects/<名>/`）里直接执行系统 git 的单机引擎——知识库即 git 仓，同步 = 普通 git 工作流，无自建协议。叶子包（仅 fsx + procx），cli/gui/daemon 三方共用：
 
 - **git 执行器（git.go）**：参数数组调 `git -C dir`，不走 shell；env 固定 `GIT_TERMINAL_PROMPT=0`（防凭据提示挂起）、`LC_ALL=C`（防本地化输出影响解析）、`GIT_EDITOR=true`（防唤起编辑器）；`-c core.quotepath=false` 保中文路径可读。错误三分类：`ErrGitNotFound`（未装 git，同步禁用但本地功能不受影响）/ `ErrTimeout`（本地 10s、网络 60s）/ `*ExitError`（退出码 + 合并输出）
 - **Repo 原语（repo.go）**：`IsRepo` 纯文件系统判断（.git 目录或 worktree gitfile 指针，不起子进程——/api/projects 对每项目都调，Windows 进程创建是管理页加载主要开销）；Status/CommitAll/Push/CloneToDir（同卷临时目录、仓级 autocrlf=false）
-- **Sync 编排（sync.go）**：一次执行 = `add -A` → 有变更则 commit（身份内置 `-c user.name=OpenKnowledge Sync`，无全局 git 身份的环境可跑）→（有远端先 fetch）`pull --rebase` → push。**冲突守卫**：rebase/merge 进行中（上次冲突未解决）直接报告未决冲突返回，不做任何提交/拉取——否则 `add -A` 会把冲突标记提交进历史；MERGE_HEAD 同样拦（init 情形 3 的手工 merge 中途）；pull 冲突 = 结构化结果（`Outcome.Conflicts`，err=nil）而非错误，停在半途等人解决并停止 push。`SyncOnce` 为 single-flight：同 dir 并发合并为一次执行，后到者拿同一结果（计数归执行者）
+- **Sync 编排（sync.go）**：一次执行 = `add -A` → 有变更则 commit（身份内置 `-c user.name=Okryptos Sync`，无全局 git 身份的环境可跑）→（有远端先 fetch）`pull --rebase` → push。**冲突守卫**：rebase/merge 进行中（上次冲突未解决）直接报告未决冲突返回，不做任何提交/拉取——否则 `add -A` 会把冲突标记提交进历史；MERGE_HEAD 同样拦（init 情形 3 的手工 merge 中途）；pull 冲突 = 结构化结果（`Outcome.Conflicts`，err=nil）而非错误，停在半途等人解决并停止 push。`SyncOnce` 为 single-flight：同 dir 并发合并为一次执行，后到者拿同一结果（计数归执行者）
 - **分层状态文件（status.go）**：`state/sync-status.json`（`layers.personal` = last_sync/ahead/behind/conflict/last_error，从第一天按层建模，团队层演进时平移）、`state/sync-conflict.json`（GUI 冲突页数据源，syncx 独占写）、`state/syncing`（同步进行中标记，stale 5 分钟守卫防进程死亡残留）
 - **冲突解决原语（conflict.go，供 GUI 冲突页）**：pull --rebase 期间 stage 语义反转——`:1:`=base、`:2:`=远端、`:3:`=本地；对外只暴露用户语义（local=本机改动/remote=远端改动），严禁直译 git ours/theirs；ResolveFile 写解决结果并 add，Continue/Abort 走 rebase --continue/--abort
 - **init 三情形（init.go，cli 与 gui 共用）**：无远端 = 仅本地历史；本地无内容 = 克隆远端；本地有内容 = init+commit+关联 remote+首推。两边各自初始化过且均有内容报 `ErrRemoteNotEmpty`（不自动合并，指引手工 `merge --allow-unrelated-histories` 一次）
@@ -389,7 +389,7 @@ okserver 是独立的**服务端程序**（cmd/okserver，NAS/Docker 部署，Li
 - **认证（auth.go）**：bcrypt + 会话 token + 登录限流
 - **GitBackend（gitbackend.go + gitea.go + gitbackend_fake.go）**：接口隔离 Gitea admin API（建用户/建仓/发 token；建 token 带 `write:repository` scope，失败回滚不留半截），fake 实现供测试不碰真实 Gitea
 - **HTTP API（http.go）**：`Bearer` 鉴权 + `admin` 角色门控 + **强制改密 gate**（带标记的会话只放行 me/change-password 白名单，其余 403 `must_change_password`）+ 审计随事实落盘。端点：login/me/change-password、`POST /api/v1/repos/personal`（建仓）、`POST /api/v1/git-token`（自助重发 git token——按机器分名 `ok-sync-r-<hostname>`，删本机同名旧 token 再建，多端互不吊销）、tokens 列删（自助 + 管理员任意用户）、users/orgs/repos/audit 管理面。无 cookie/静态页 → CSRF 结构免疫（LAN 服务不做 Origin/Host 白名单）
-- **凭证统一（v2.24.2）**：git 凭证唯一发放通道 = `apiGitToken` 自助重发（建仓/建用户不再下发 token）；**每台机器一条** `ok-sync-r-<hostname>`。`internal/credmig` 负责本机迁移：daemon 同步周期发现已配服务器且未迁移（`~/.openknowledge/cred-migrated.json` 标记）时先 ensure 本机新凭证、覆盖所有已绑定项目 remote 再同步（失败仅记日志下轮重试）；GUI 凭证页「清理旧版凭证」按钮同走此包
+- **凭证统一（v2.24.2）**：git 凭证唯一发放通道 = `apiGitToken` 自助重发（建仓/建用户不再下发 token）；**每台机器一条** `ok-sync-r-<hostname>`。`internal/credmig` 负责本机迁移：daemon 同步周期发现已配服务器且未迁移（`~/.okryptos/cred-migrated.json` 标记）时先 ensure 本机新凭证、覆盖所有已绑定项目 remote 再同步（失败仅记日志下轮重试）；GUI 凭证页「清理旧版凭证」按钮同走此包
 - **serverx（客户端，338 行叶子包）**：ok/okd/GUI 侧打 okserver 管理 API 的薄 Bearer 客户端（15s 超时，`Error{Code,Msg}` 透传状态码；`GitToken` 回显 token_name）；GUI `/api/server/*` 端点大部分为其转发 + 本地编排（建仓一条龙、拉取注册空壳项目 + clone、绑定管线共用 serveBindRepo）
 
 ### 5.16 deployx / okdeploy — 一键部署器（v2.24，okdeploy 独占）
@@ -399,7 +399,7 @@ okserver 是独立的**服务端程序**（cmd/okserver，NAS/Docker 部署，Li
 - **Executor 接口（executor.go + ssh.go）**：流式执行/上传/下载三原语；`SSHClient` 用 `x/crypto/ssh` 实现（go.mod 已有依赖，零新增）；`LogHub` 收集日志并向订阅者广播（保留全量历史，迟到订阅者先补历史）
 - **任务编排（task.go）**：Task = 步骤序列，掩码步骤的失败可附 stdout 尾（gitea CLI 日志走 stdout）；前端经本地 HTTP API + SSE 实时日志（api.go，token 鉴权）
 - **探测/部署/管理（probe/deploy/manage/backup.go）**：远端环境探测（docker/compose 分两档、端口、已有 Gitea/已有部署，sudo 自动回退）；compose 模板 + .env 渲染双模式——`full`（全新部署：Gitea + okserver 两容器，Gitea 无人值守初始化，root 密码安全读取）/ `external`（接入已有 Gitea）；管理页任务 = 状态/升级（新版本检测 + 重拉当前版本）/容器日志/备份/恢复（停机一致性语义）/重置 root（`okserver reset-root`）/卸载（默认保留数据）
-- **发布线**：`.github/workflows/docker.yml` 打 v* tag 构建 okserver 多架构镜像，GHCR + Docker Hub（`z7dream/openknowledge-okserver`）双发；部署侧默认拉 Docker Hub，不可达时 `.env` 的 `OKSERVER_IMAGE` 可切 GHCR 全名；registry 未发布前优先用本地 `docker load` 的镜像（tag 白名单防线）；拉镜像 3 次重试 + 60min 超时（NAS 直连 Docker Hub 限速）
+- **发布线**：`.github/workflows/docker.yml` 打 v* tag 构建 okserver 多架构镜像，GHCR + Docker Hub（`z7dream/okryptos-okserver`）双发；部署侧默认拉 Docker Hub，不可达时 `.env` 的 `OKSERVER_IMAGE` 可切 GHCR 全名；registry 未发布前优先用本地 `docker load` 的镜像（tag 白名单防线）；拉镜像 3 次重试 + 60min 超时（NAS 直连 Docker Hub 限速）
 
 ---
 
@@ -453,10 +453,10 @@ ok setup [--agent <id>]
     --agent 指定单个（未知 id 报错并列出可用 id；未检测到该 agent 也写入并提示）；
     一个都未检测到时跳过 hooks 写入继续后续步骤
       kimi：备份 ~/.kimi-code/config.toml → 标记块幂等写入 3 条 hook
-      pi：渲染 TS 扩展写入 ~/.pi/agent/extensions/openknowledge.ts（既有非本工具文件先备份）
-  → 安装 openknowledge-propose / openknowledge-wiki 两个技能到各 agent 技能目录（烧入 exe 路径）
+      pi：渲染 TS 扩展写入 ~/.pi/agent/extensions/okryptos.ts（既有非本工具文件先备份）
+  → 安装 ok-propose / ok-wiki 两个技能到各 agent 技能目录（烧入 exe 路径）
   → 交互（或 flags）收集 embedding：三选一（线上 OpenAI 兼容 / Ollama / 内置本地模型，
-      内置含清单选择与镜像下载进度）→ 写全局 ~/.openknowledge/config.toml（0600）→ 立即连通性验证
+      内置含清单选择与镜像下载进度）→ 写全局 ~/.okryptos/config.toml（0600）→ 立即连通性验证
   → 打印引导
 ```
 
@@ -477,12 +477,12 @@ ok setup [--agent <id>]
 - 系统托盘（internal/tray）内嵌 daemon 进程：右下角图标，单击弹菜单（版本号 + 检查更新 + 退出）、双击打开/聚焦唯一 GUI 窗口；"检查更新"打开 GUI 直达版本卡（内含窗口长轮询，异步派发避免卡死消息线程）；菜单"退出"与 `ok daemon stop` 同走 /api/shutdown 链路
 - embedding sidecar janitor（10s 周期调和）：active=内置且模型就绪 → 拉起/保持 llama-server；空闲 10 分钟回收、崩溃有界重启 ×3、切换/停用即回收、daemon 退出兜底回收（实现见 5.5/17.4）
 - 同步 janitor（internal/daemon/sync.go）：每分钟 ticker 遍历注册项目，启用 `[sync]` 且到点（`auto_interval_min`）的跑 `syncx.SyncOnce`（`auto_interval_min=0` 关闭全部自动触发）；条目写入（approve、GUI 编辑保存等）经 `NotifyWrite` 30s 防抖后对启用同步的项目 force 跑一轮——未同步窗口压到分钟级。两路并发经 syncCycleMu 串行化（RecordOutcome 对状态文件的读-改-写不加锁存在 lost-update 窗口）。每轮先做凭证统一迁移（credmig，已配服务器且未迁移时换新 `ok-sync-r-<hostname>` 凭证，失败仅记日志下轮重试）。失败仅记 daemon 日志，绝不影响本地链路
-- 升级熔断：`~/.openknowledge/update/.upgrading` 存在期间 `daemon.Ensure/EnsureCurrent` 一律不拉起 daemon（升级安装期间 hook/托盘的拉起被挡住）；okd 启动时自愈删除残留标记（升级收尾/异常中断兜底，见 6.9）
+- 升级熔断：`~/.okryptos/update/.upgrading` 存在期间 `daemon.Ensure/EnsureCurrent` 一律不拉起 daemon（升级安装期间 hook/托盘的拉起被挡住）；okd 启动时自愈删除残留标记（升级收尾/异常中断兜底，见 6.9）
 
 ### 6.6 wiki（项目 wiki 的生成驱动与落后提醒）
 
 ```
-openknowledge-wiki 技能（AI 驱动）
+ok-wiki 技能（AI 驱动）
   → 扫描项目，ok add --type reference --tags wiki 写 wiki 条目（直接转正，参与检索）
   → ok wiki mark：游标按当前分支写入 state/wiki.json（cursors[branch] = last_commit + generated_at + entry_count）
 
@@ -502,7 +502,7 @@ hook prompt（基础注入之后）
   → wikiContextLine：非基准分支且有 wiki 注入时，输出开头附一行 wiki 出处上下文
     （"wiki 基于 master@…；当前分支 dev"，分叉时另附分叉点）
   → wikiNudge：stale 且本会话未提示过（session.WikiNudged）→ 输出末尾追加 nudge
-  → 从未生成：建议用 openknowledge-wiki 技能生成 wiki；已生成：提示落后 N 个 commit
+  → 从未生成：建议用 ok-wiki 技能生成 wiki；已生成：提示落后 N 个 commit
   → 游标失效（gone）/旧游标归属存疑（legacy_orphan）显式提示，不受 stale_commits 阈值门控
   → 每会话最多一次；非 git 项目/git 不可用 fail-open 静默
 ```
@@ -568,7 +568,7 @@ GUI 服务器页（三步向导：地址 → 登录 → 建仓）
 下载：POST /api/update/download 任务化（.part 断点续传，Range/206，200 降级整下），
       前端轮询 GET 快照进度
 安装：POST /api/update/apply（Windows）
-      → 先写升级熔断 ~/.openknowledge/update/.upgrading（200 之前写好，写失败 500 中止）
+      → 先写升级熔断 ~/.okryptos/update/.upgrading（200 之前写好，写失败 500 中止）
       → goroutine detached 拉起安装器 /VERYSILENT /SUPPRESSMSGBOXES /NORESTART 后 okd 自退
       → 安装期间 hook/托盘的 daemon 拉起全被熔断挡住（daemon.Ensure 检查标记）
       → 安装器 [Run] 段收尾拉起新 okd；okd 启动自愈删除残留熔断标记
@@ -616,10 +616,10 @@ apply 序列刻意移出 okd 进程（安装器收尾 + 自愈兜底），并发
 
 ## 8. 存储层
 
-集中存储于 `~/.openknowledge/`（`OK_HOME` 可覆盖，测试靠它隔离）：
+集中存储于 `~/.okryptos/`（`OK_HOME` 可覆盖，测试靠它隔离）：
 
 ```
-~/.openknowledge/
+~/.okryptos/
 ├── ok.log                  # hook/CLI/GUI 侧错误与优化日志（fail-open 的唯一痕迹）
 ├── daemon.log              # daemon（okd）输出日志
 ├── logs/                   # 大小轮替归档（R3 接入）：ok/daemon/sidecar 日志超 8MB 时在
@@ -692,20 +692,20 @@ type Agent interface {
 
 | agent | 注入形态 | 写入目标 | "已安装且为当前版本"判定 |
 |-------|----------|----------|--------------------------|
-| kimi | TOML 标记块（3 条 `[[hooks]]`） | `~/.kimi-code/config.toml`（`KIMI_CODE_HOME` 优先） | 标记块 `# >>> openknowledge hooks >>>` 存在 |
-| pi | TypeScript 扩展（三事件回调） | `~/.pi/agent/extensions/openknowledge.ts`（`PI_CODING_AGENT_DIR` 优先） | 头标记 + `// fingerprint:` 行与当前模板指纹一致 |
+| kimi | TOML 标记块（3 条 `[[hooks]]`） | `~/.kimi-code/config.toml`（`KIMI_CODE_HOME` 优先） | 标记块 `# >>> okryptos hooks >>>` 存在 |
+| pi | TypeScript 扩展（三事件回调） | `~/.pi/agent/extensions/okryptos.ts`（`PI_CODING_AGENT_DIR` 优先） | 头标记 + `// fingerprint:` 行与当前模板指纹一致 |
 | zcode | 合并写 JSON 配置（`hooks.events` 三事件，`type:"process"`） | `~/.zcode/cli/config.json`（`OK_ZCODE_HOME` 优先，ok 自留测试口） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeoutMs |
-| reasonix | Extension Protocol 插件包（manifest v1 + 信任门登记） | `<reasonix home>/plugins/openknowledge/reasonix-plugin.json` + `<reasonix home>/plugin-packages.json`（`OK_REASONIX_HOME`/`REASONIX_HOME` 优先） | 登记条目 enabled/root 正确且 manifest command/args 为当前 exe |
-| opencode | TypeScript 插件（三钩子：`chat.message` / `tool.execute.after` / `event: session.idle`） | `~/.config/opencode/plugins/openknowledge.ts`（`OK_OPENCODE_HOME` 优先，ok 自留测试口；`OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` 次之） | 头标记 + `// fingerprint:` 行与当前模板指纹一致 |
+| reasonix | Extension Protocol 插件包（manifest v1 + 信任门登记） | `<reasonix home>/plugins/okryptos/reasonix-plugin.json` + `<reasonix home>/plugin-packages.json`（`OK_REASONIX_HOME`/`REASONIX_HOME` 优先） | 登记条目 enabled/root 正确且 manifest command/args 为当前 exe |
+| opencode | TypeScript 插件（三钩子：`chat.message` / `tool.execute.after` / `event: session.idle`） | `~/.config/opencode/plugins/okryptos.ts`（`OK_OPENCODE_HOME` 优先，ok 自留测试口；`OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` 次之） | 头标记 + `// fingerprint:` 行与当前模板指纹一致 |
 | claude | 合并写 JSON 配置（`hooks` 三事件组，`type:"command"` shell 串） | `~/.claude/settings.json`（`OK_CLAUDE_HOME` 优先，ok 自留测试口） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeout（秒） |
 | codex | 合并写 JSON 配置（hooks.json 三事件组，Windows 为 .cmd 包装裸路径，其他平台 quoted shell 串）+ config.toml 特性开关与信任记录 | `~/.codex/hooks.json`（`OK_CODEX_HOME` 优先，ok 自留测试口；`CODEX_HOME` 次之） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeout（秒） |
 | qoder | 合并写 JSON 配置（settings.json `hooks` 三事件组，Windows 为 .cmd 包装裸路径，其他平台 quoted shell 串）+ 顶层 `hooksConfig.enabled` 开关 | `~/.qoder-cn/settings.json`（`OK_QODER_HOME` 优先，ok 自留测试口；`QODERCN_CONFIG_DIR` 次之） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeout（秒）+ `hooksConfig.enabled` 为 true |
 | qoder-ide | 合并写 JSON 配置（settings.json `hooks` 三事件组，Windows 为 .cmd 包装裸路径，其他平台 quoted shell 串；无 enabled 门） | `~/.lingma/settings.json`（`OK_QODER_IDE_HOME` 优先，ok 自留测试口） | 三事件的 ok hook 均为当前 exe + `claude` 参数 + 当前 timeout（秒） |
-| dsh | 本地 JS 插件（家目录 `cordis.patch.yml` 绝对路径挂载） | `<dsh home>/plugins/openknowledge/index.js` + `<dsh home>/cordis.patch.yml` 标记块（`OK_DSH_HOME` 优先，ok 自留测试口；`DSH_HOME` 次之） | 插件头标记 + `// fingerprint:` 行与当前模板指纹一致、内容等于当前 exe 渲染，且 patch 含 `id: ok-hooks` |
+| dsh | 本地 JS 插件（家目录 `cordis.patch.yml` 绝对路径挂载） | `<dsh home>/plugins/okryptos/index.js` + `<dsh home>/cordis.patch.yml` 标记块（`OK_DSH_HOME` 优先，ok 自留测试口；`DSH_HOME` 次之） | 插件头标记 + `// fingerprint:` 行与当前模板指纹一致、内容等于当前 exe 渲染，且 patch 含 `id: ok-hooks` |
 
 zcode 适配器（`zcode.go`）：ZCode 的 hook 输入契约是 Claude 风格 snake_case，与 `hook.ParseEvent` 天然兼容；但**输出侧要求 stdout 为协议 JSON**（纯文本只当诊断不进上下文），故 hook 命令带第三参数 `claude`——`HandlePrompt` 把注入包成 `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":...}}`，`HandleStop` 阻断改写 stdout `{"decision":"block","reason":...}` + exit 0（kimi/pi 的 stderr + exit 2 语义不变）；daemon 转发经 `?format=` query 透传。配置合并写保留未知字段与用户自有 hook（ok 条目按 `args:["hook",<事件>,...]` 识别，与 exe 路径无关），写前备份 `.bak-openknowledge`；`hooks.enabled` 置 true（ZCode 要求显式开启）。自愈语义：曾装过且内容过期才重写，从未安装不复活。技能进 `~/.zcode/skills`（ZCode 不自动读 `~/.agents/skills`）。
 
-pi 扩展由内嵌模板 `pi_extension.ts`（`go:embed`）渲染：`{{EXE}}` 占位替换为 ok 绝对路径，文件头写头标记（`// openknowledge hooks (managed by ok.exe; do not edit)`）与指纹行（指纹 = 模板内容 sha256 前 12 位十六进制，随模板升级变化）。安装时若目标已存在**非本工具生成**的同名文件，先备份为 `.bak-openknowledge`（备份失败则中止安装）；`RemoveHooks` 只删本工具生成的文件，非本工具文件不动。扩展对 ok 的调用全部 fail-open（超时/异常静默），不拖累 pi 会话。
+pi 扩展由内嵌模板 `pi_extension.ts`（`go:embed`）渲染：`{{EXE}}` 占位替换为 ok 绝对路径，文件头写头标记（`// okryptos hooks (managed by ok.exe; do not edit)`）与指纹行（指纹 = 模板内容 sha256 前 12 位十六进制，随模板升级变化）。安装时若目标已存在**非本工具生成**的同名文件，先备份为 `.bak-openknowledge`（备份失败则中止安装）；`RemoveHooks` 只删本工具生成的文件，非本工具文件不动。扩展对 ok 的调用全部 fail-open（超时/异常静默），不拖累 pi 会话。
 
 claude 适配器（`claude.go`）：覆盖 Claude Code 本体与 CodePilot 等 claude-agent-sdk 兼容宿主——它们经 `settingSources` user 层加载 `~/.claude/settings.json`（CodePilot 实测 UserPromptSubmit/Stop 原生执行；其 provider 隔离的 shadow HOME 只剥 `ANTHROPIC_*` env 键，hooks 原样继承）。配置为 Claude Code 原生结构（`hooks.<事件>` 组数组，无 enabled 开关），hook 命令是 **shell 字符串**（正斜杠 exe + 双引号包裹，cmd.exe 与 bash 均可执行）而非 zcode 的 process+args；输出协议与 zcode 相同（args 末尾 `claude`，hook.go 零改动）。ok 条目按**命令串后缀**（` hook <prompt|post-tool|stop> claude`）识别，不看 exe basename；合并写纪律同 zcode（写前 `.bak-openknowledge` 备份、第三方条目保留、损坏文件不覆盖、map 合并写 key 重排代价可接受）。`Detect()` 看 `~/.claude` 或 `~/.codepilot`（`OK_CODEPILOT_HOME` 测试口，`CLAUDE_GUI_DATA_DIR` 次之）——后者覆盖只装 CodePilot 的机器。自愈语义不变：曾装过且过期才重写，从未安装不复活。注意 hook 子进程在 shadow HOME 下运行时 `ClaudeHome()` 跟随重定向（自愈最坏只写 shadow 副本，被宿主清理，真实配置无风险），而数据根解析是免疫的（见 §5.1 `registry.Home()`）。
 
@@ -723,7 +723,7 @@ pi 事件 → ok hook 映射：
 | `tool_result`（toolName = `write`/`edit`） | `ok hook post-tool` | `PostToolUse`（matcher `Write\|Edit`） | 无 |
 | `agent_settled` | `ok hook stop` | `Stop` | pi 无法阻断已结束的回合：ok 以 exit 2 + stderr 表达"阻断"时，扩展改为 `sendMessage({content: stderr}, {triggerTurn: true})` 把提示注入会话，驱动 agent 当场完成自省/补日志 |
 
-reasonix 适配器（`reasonix.go`）：不写 settings.json hook（其 UserPromptSubmit 不注入 stdout），改为安装 Extension Protocol 插件包——`plugins/openknowledge/reasonix-plugin.json`（runtime.command 直指 ok.exe，`args=["extension-serve"]`，`required=false`，sidecar 崩溃宿主降级不阻断）+ `plugin-packages.json` 信任门登记（备份 + temp+rename 原子写）。sidecar（`ok extension-serve`，`internal/rxext`）拦截 input.receive（检索注入 + enforce 三档：mixed 默认 = auto 自省软提醒/规则硬阻断，soft = 全软提示，hard = 全硬阻断；软路径把提醒与注入合并为一个 `<ok-context>` 块，block 优先于注入）与 tool.after（写工具成功执行才记 touched）；注入/检查核心与 hook 子命令共用 `internal/hook/core.go`（`InjectForPrompt`/`TrackTouched`/`CheckStop`），各 hook 子命令系 agent 语义一致。拦截器 fail-open：panic/错误一律 Continue。技能目录共享 SkillsHome（机制零改动）。SDK 为 `internal/rxext/sdk` vendor 快照。自愈语义同 zcode：曾登记且内容过期才重写，从未登记不复活；卸载清理插件目录与信任门登记两点位。
+reasonix 适配器（`reasonix.go`）：不写 settings.json hook（其 UserPromptSubmit 不注入 stdout），改为安装 Extension Protocol 插件包——`plugins/okryptos/reasonix-plugin.json`（runtime.command 直指 ok.exe，`args=["extension-serve"]`，`required=false`，sidecar 崩溃宿主降级不阻断）+ `plugin-packages.json` 信任门登记（备份 + temp+rename 原子写）。sidecar（`ok extension-serve`，`internal/rxext`）拦截 input.receive（检索注入 + enforce 三档：mixed 默认 = auto 自省软提醒/规则硬阻断，soft = 全软提示，hard = 全硬阻断；软路径把提醒与注入合并为一个 `<ok-context>` 块，block 优先于注入）与 tool.after（写工具成功执行才记 touched）；注入/检查核心与 hook 子命令共用 `internal/hook/core.go`（`InjectForPrompt`/`TrackTouched`/`CheckStop`），各 hook 子命令系 agent 语义一致。拦截器 fail-open：panic/错误一律 Continue。技能目录共享 SkillsHome（机制零改动）。SDK 为 `internal/rxext/sdk` vendor 快照。自愈语义同 zcode：曾登记且内容过期才重写，从未登记不复活；卸载清理插件目录与信任门登记两点位。
 
 opencode 适配器（`opencode.go` + 内嵌模板 `opencode_plugin.ts`）：opencode 无 hooks 配置字段，其 hooks 形态是"插件文件返回 hooks 对象"——对每个配置目录 glob `{plugin,plugins}/*.{ts,js}` 单文件直接 import（Bun 原生跑 TS，免 package.json）。安装/幂等/自愈机制与 pi 同款（头标记 + 模板 sha256 前 12 位指纹 + 外部文件先备份 `.bak-openknowledge`；曾安装且过期才重写，显式移除不复活）。插件三钩子：`chat.message` ≈ UserPromptSubmit（`ok hook prompt` 纯文本 stdout 以 `synthetic:true` text part push 进 `output.parts` 注入——parts 按引用传入且 hook 后继续使用并持久化；自建 part 的 id 必须 `prt` 前缀，PartID schema 强制，否则 prompt_async 校验 Die 卡死会话）；`tool.execute.after` ≈ PostToolUse（`write`/`edit` 取 `args.filePath`，`apply_patch` 从 `patchText` 解析 `*** Add/Update/Delete File:` 行——gpt 系新模型 apply_patch 与 write/edit 互斥，必须覆盖；相对路径按 directory 绝对化后逐路径调 `ok hook post-tool`）；`event: session.idle` ≈ Stop（exit 2 + stderr 时经 SDK `client.session.promptAsync` 把 reason 作为用户消息补发回该会话，驱动当场自省——idle 无法拒绝停止，与 pi 的 `sendMessage(triggerTurn)` 同构；防重靠 ok 侧 `CheckStop` 的 LastExtractReminder/MarkBlocked 语义，插件侧与 pi 一致不计数）。子进程走 `node:child_process` execFile（内建 timeout 10s/5s/5s + windowsHide；Node/Bun 双运行时兼容——桌面端服务器跑在 Electron/Node 里，`"bun"` 模块导入会让插件整个加载失败，v2.11.0 修复实报），全程 fail-open。技能共享 SkillsHome（opencode 原生扫描 `~/.agents/skills`，机制零改动）。
 
@@ -817,13 +817,13 @@ python scripts/build.py       # 一键构建：dist/（ok.exe + web/ + changelog
 bash scripts/build-linux.sh   # Linux 发布：tar + deb（含 runtime/）
 ```
 
-无构建标签、无代码生成；前端资源仅 deployx/webui 内嵌（go:embed），客户端 GUI 的 web 资源不内嵌、由 `dist/web/` 随二进制分发。应用版本号由 build-dist.sh 用 sed 从 `installer/openknowledge.iss` 的 `#define AppVersion` 提取，经 `-ldflags -X openknowledge/internal/version.Version=<版本>` 注入 `internal/version.Version`（事实源只有 .iss 一处；裸 `go build` 为 `dev`）。**版本 bump 三处同步**：`scripts/sync-version.sh` 统一改写 README 徽标、官网（site/ 的 VER 变量/直链/文案）与四个 `cmd/*/winres.json` 的 exe 版本资源（ok/okd/okmanager/okdeploy，四段式 = 三段版本号 + ".0"；v2.9.0 起曾漏改 winres.json 漂移停在 2.8.0.0，v2.16.0 起脚本兜底，pre-push 钩子也会跑）。
+无构建标签、无代码生成；前端资源仅 deployx/webui 内嵌（go:embed），客户端 GUI 的 web 资源不内嵌、由 `dist/web/` 随二进制分发。应用版本号由 build-dist.sh 用 sed 从 `installer/okryptos.iss` 的 `#define AppVersion` 提取，经 `-ldflags -X okryptos/internal/version.Version=<版本>` 注入 `internal/version.Version`（事实源只有 .iss 一处；裸 `go build` 为 `dev`）。**版本 bump 三处同步**：`scripts/sync-version.sh` 统一改写 README 徽标、官网（site/ 的 VER 变量/直链/文案）与四个 `cmd/*/winres.json` 的 exe 版本资源（ok/okd/okmanager/okdeploy，四段式 = 三段版本号 + ".0"；v2.9.0 起曾漏改 winres.json 漂移停在 2.8.0.0，v2.16.0 起脚本兜底，pre-push 钩子也会跑）。
 
 **okdeploy 独立分发**：构建进 `dist/deploy/`（windows + linux 双平台），**不进客户端安装包**（iss 不打 dist/deploy）。
 
 **安装器收尾（iss）**：`[Run]` 段静默覆盖安装后拉起新 okd（`nowait runhidden`，不带 skipifsilent——配合升级熔断的收尾，见 6.9），交互安装另给「打开配置中心」勾选项拉起 OkManager。
 
-**okserver 镜像发布（CI）**：`.github/workflows/docker.yml` 打 `v*` tag（或 workflow_dispatch 手动单发）构建 okserver 多架构镜像，GHCR + Docker Hub（`z7dream/openknowledge-okserver`）双发；NAS 侧默认拉 Docker Hub，`OKSERVER_IMAGE` 可切 GHCR。
+**okserver 镜像发布（CI）**：`.github/workflows/docker.yml` 打 `v*` tag（或 workflow_dispatch 手动单发）构建 okserver 多架构镜像，GHCR + Docker Hub（`z7dream/okryptos-okserver`）双发；NAS 侧默认拉 Docker Hub，`OKSERVER_IMAGE` 可切 GHCR。
 
 **runtime 随包分发（内置 embedding 推理运行时）**：`build.py`/`build-linux.sh` 从 llama.cpp release 下载预编译 `llama-server`（版本钉死 b10405 CPU 版，win `bin-win-cpu-x64` zip / linux `bin-ubuntu-x64` tar；`LLAMA_CPP_BASE_URL` 可换源）到 `dist/runtime/`，iss 装到 `{app}\runtime`、linux 包装进 tar/deb 同目录——安装包体积因此约 50MB 级。运行时定位 `<exe 所在目录>/runtime/llama-server`，缺失则内置形态不可用（裸 exe 便携形态）并在 GUI/CLI/doctor 明确提示。**模型不随包分发**：首次启用内置形态时按清单从镜像源下载（默认 hf-mirror，约 146MB–639MB/档，断点续传 + sha256 校验）默认下载到 `<安装目录>/models/`（`[embedding] models_dir` 可改；GUI 配置弹窗可直接修改并打开文件夹，已有模型文件不随迁）。
 
@@ -895,9 +895,9 @@ go build ./...         # 编译检查
 
 检查：
 - `ok doctor` 看"hooks 已安装"与开关状态
-- `~/.openknowledge/hooks-disabled` 是否存在（存在即全静默，`ok on` 恢复）
+- `~/.okryptos/hooks-disabled` 是否存在（存在即全静默，`ok on` 恢复）
 - 当前目录是否已注册（`ok list`）；hooks 只在注册项目内生效
-- `~/.openknowledge/ok.log` 是否有报错（如条目 YAML 损坏）
+- `~/.okryptos/ok.log` 是否有报错（如条目 YAML 损坏）
 
 ### 15.2 有注入但检索不到该命中的条目
 
@@ -909,7 +909,7 @@ go build ./...         # 编译检查
 ### 15.3 语义检索不生效
 
 检查：
-- 全局 `~/.openknowledge/config.toml` 的 `[embedding]` 是否配置了 `active` 指向的 profile（旧平铺字段会自动迁移）
+- 全局 `~/.okryptos/config.toml` 的 `[embedding]` 是否配置了 `active` 指向的 profile（旧平铺字段会自动迁移）
 - 项目 config.toml 是否覆盖了全局（项目级配置优先级最高，旧模板可能有写死的 embedding 段）
 - 切换 embedding 模型/服务后：身份不符时语义通道显式跳过并在 search/doctor 提示——`ok index` 检测切换自动清向量全量重建（无需再手删 kb.db）
 - 内置形态：`ok doctor` 看 sidecar 状态（daemon 是否在跑、模型是否已下载、runtime 是否随安装包存在）
@@ -926,7 +926,7 @@ go build ./...         # 编译检查
 
 检查：
 - 是否新开了会话（hooks 配置在会话启动时加载）
-- config.toml 里标记块是否完整（`# >>> openknowledge hooks >>>` 成对）
+- config.toml 里标记块是否完整（`# >>> okryptos hooks >>>` 成对）
 - hooks command 指向的 ok.exe 路径是否还存在（移动过 exe 需重跑 `ok setup`）
 
 ### 15.6 同步不工作 / 冲突卡住
@@ -1068,7 +1068,7 @@ WHERE entries_fts MATCH ? AND e.mandatory = 0
 `SemanticRejected` + 分布统计（样本数/max/median/relGap）——hook 记
 `prompt semantic` 日志（GUI「日志」页可按"仅语义"过滤）、`ok search` 打
 stderr 并附 `min_gap` 调节指引；语义退化（模型身份缺失/切换，见 17.4）时注入
-末尾每会话一次附 `[OpenKnowledge] 语义检索退化：…` 提示。
+末尾每会话一次附 `[Okryptos] 语义检索退化：…` 提示。
 
 **打分实例**（提问"git 提交规范"，条目《Git 提交规范》tags:[git]）：
 
@@ -1144,7 +1144,7 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 
 所有可调参数一览。合并规则：**内置默认 ← 全局 ← 项目**（后者覆盖前者）。
 
-### 18.1 全局配置 `~/.openknowledge/config.toml`
+### 18.1 全局配置 `~/.okryptos/config.toml`
 
 | 参数 | 默认 | 作用与调优 |
 |------|------|-----------|
@@ -1164,7 +1164,7 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | `retrieve.top_n` | `3` | 每次最多注入条数；调大注意挤占 `max_tokens` 预算 |
 | `server.url` / `server.username` / `server.token` | 空 | okserver 管理面连接（GUI 服务器页写入；token 空串保留旧值，空 URL 整段清空即 logout）；[server] 仅全局层有意义 |
 
-### 18.2 项目配置 `~/.openknowledge/projects/<名>/config.toml`
+### 18.2 项目配置 `~/.okryptos/projects/<名>/config.toml`
 
 可覆盖以上全部参数（`[[enforce]]` 全局层同样可配，GUI 规则卡写全局层）：
 
@@ -1186,7 +1186,7 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 
 | 变量 | 作用 |
 |------|------|
-| `OK_HOME` | KB 根目录（默认 `~/.openknowledge`）；测试隔离也用它 |
+| `OK_HOME` | KB 根目录（默认 `~/.okryptos`）；测试隔离也用它 |
 | `KIMI_CODE_HOME` | kimi 配置目录（`ok setup` 写 hooks 时定位 config.toml） |
 | `OK_SKILLS_HOME` | 技能安装目录（默认 `~/.agents/skills`） |
 | `PI_CODING_AGENT_DIR` | pi 配置根目录（默认 `~/.pi/agent`；`ok setup` 写扩展时定位 extensions/） |
@@ -1205,12 +1205,12 @@ os.ReadDir(knowledge/)                # 只拿文件名，不读内容
 | `command` | `"<exe> hook prompt\|post-tool\|stop"` | `ok setup` 烧入绝对路径 |
 | `timeout` | 三条统一，默认 `10` 秒 | 取全局配置 `[hooks] timeout_sec`（GUI 设置页可调，1~60，只写配置不重装 hooks）；prompt 必须 > `embedding.timeout_sec`（默认 5），否则慢 API 会被 kimi 强杀；post-tool/stop 过短会在高负载下被 kimi 静默杀死（2026-08-04 整会话 touched 丢失事故） |
 
-**pi**：写入 `~/.pi/agent/extensions/openknowledge.ts`（`PI_CODING_AGENT_DIR` 优先）。文件头为头标记（`// openknowledge hooks (managed by ok.exe; do not edit)`）+ `// fingerprint: <模板 sha256 前 12 位>` 行；`HooksInstalled` 要求头标记存在且指纹等于当前模板指纹——模板升级后旧扩展判为"非当前版本"，由 hook 入口 `EnsureHooks` 自愈重写。安装时既有非本工具生成的同名文件先备份为 `.bak-openknowledge`，卸载只删本工具生成的文件。
+**pi**：写入 `~/.pi/agent/extensions/okryptos.ts`（`PI_CODING_AGENT_DIR` 优先）。文件头为头标记（`// okryptos hooks (managed by ok.exe; do not edit)`）+ `// fingerprint: <模板 sha256 前 12 位>` 行；`HooksInstalled` 要求头标记存在且指纹等于当前模板指纹——模板升级后旧扩展判为"非当前版本"，由 hook 入口 `EnsureHooks` 自愈重写。安装时既有非本工具生成的同名文件先备份为 `.bak-openknowledge`，卸载只删本工具生成的文件。
 
 ### 18.5 合并与解析顺序速查
 
 ```
-配置值：  内置默认  ←  ~/.openknowledge/config.toml  ←  项目 config.toml
+配置值：  内置默认  ←  ~/.okryptos/config.toml  ←  项目 config.toml
 API key： 项目 api_key → 全局 api_key → api_key_env 环境变量 → 无(纯关键词)
-开关：    ~/.openknowledge/hooks-disabled 存在 = 全静默（ok on 恢复）
+开关：    ~/.okryptos/hooks-disabled 存在 = 全静默（ok on 恢复）
 ```

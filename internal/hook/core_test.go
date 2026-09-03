@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/index"
-	"openknowledge/internal/project"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/state"
-	"openknowledge/internal/wiki"
+	"okryptos/internal/index"
+	"okryptos/internal/project"
+	"okryptos/internal/registry"
+	"okryptos/internal/state"
+	"okryptos/internal/wiki"
 )
 
 // core_test.go 直接覆盖 InjectForPrompt / TrackTouched / CheckStop（不经 Handler），
@@ -124,11 +124,11 @@ func TestInjectSemanticDegradeHintOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	out1 := InjectForPrompt(pc, "s-degrade", projDir, "git 提交")
-	if !strings.Contains(out1, "[OpenKnowledge] 语义检索退化") {
+	if !strings.Contains(out1, "[Okryptos] 语义检索退化") {
 		t.Fatalf("first injection should carry degrade hint: %q", out1)
 	}
 	out2 := InjectForPrompt(pc, "s-degrade", projDir, "git 提交")
-	if strings.Contains(out2, "[OpenKnowledge] 语义检索退化") {
+	if strings.Contains(out2, "[Okryptos] 语义检索退化") {
 		t.Fatalf("degrade hint must be once per session: %q", out2)
 	}
 }

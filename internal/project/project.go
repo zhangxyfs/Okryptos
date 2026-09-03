@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/store"
+	"okryptos/internal/config"
+	"okryptos/internal/registry"
+	"okryptos/internal/store"
 )
 
 type Context struct {

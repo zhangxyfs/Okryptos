@@ -1,17 +1,20 @@
 package registry
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 type Project struct {
@@ -23,7 +26,16 @@ type Registry struct {
 	Projects []Project `toml:"project"`
 }
 
-// Home 返回知识库根目录：OK_HOME 环境变量优先，否则真实用户目录下的 ~/.openknowledge。
+// homeDirName / legacyHomeDirName：2.25.0 改名版（OpenKnowledge→Okryptos）数据根
+// 更名。旧根仅存于 <2.25.0 的安装，存在即等价于"安装前版本 < 2.25.0"门控。
+const (
+	homeDirName       = ".okryptos"
+	legacyHomeDirName = ".openknowledge"
+)
+
+// Home 返回知识库根目录：OK_HOME 环境变量优先，否则真实用户目录下的数据根
+// （新根 ~/.okryptos 优先；仅旧根 ~/.openknowledge 存在时仍用旧根，等待
+// MigrateLegacyHome 显式迁移——Home 是热路径纯函数，绝不做文件系统写操作）。
 // 真实目录解析对 HOME/USERPROFILE 重定向免疫——CodePilot 等宿主 spawn 子进程时会把
 // 它们重定向到 shadow 临时目录做 provider 隔离，跟随重定向会看到空数据根而静默失效。
 func Home() string {
@@ -31,13 +43,127 @@ func Home() string {
 		return h
 	}
 	if home, err := realProfileDir(); err == nil && home != "" {
-		return filepath.Join(home, ".openknowledge")
+		return homeDirForBase(home)
 	}
 	home, err := os.UserHomeDir()
 	if err == nil {
-		return filepath.Join(home, ".openknowledge")
+		return homeDirForBase(home)
 	}
 	return fallbackHome()
+}
+
+// homeDirForBase 按存在性选择数据根：新根存在 → 新根；仅旧根存在 → 旧根
+// （未迁移期间继续工作）；都没有 → 新根（由调用方按需创建）。
+func homeDirForBase(base string) string {
+	newDir := filepath.Join(base, homeDirName)
+	if dirExists(newDir) {
+		return newDir
+	}
+	legacy := filepath.Join(base, legacyHomeDirName)
+	if dirExists(legacy) {
+		return legacy
+	}
+	return newDir
+}
+
+func dirExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
+}
+
+// MigrateLegacyHome 把旧数据根 ~/.openknowledge 整体迁移为 ~/.okryptos
+//（2.25.0 改名版自动迁移：旧根存在即来自 < 2.25.0，等价版本门控；操作幂等）。
+// 各 CLI/daemon 入口 main 早期调用，先于任何数据文件读写。
+func MigrateLegacyHome() {
+	base := ""
+	if home, err := realProfileDir(); err == nil && home != "" {
+		base = home
+	} else if home, err := os.UserHomeDir(); err == nil {
+		base = home
+	}
+	if base == "" {
+		return
+	}
+	_ = migrateLegacyHome(base)
+}
+
+// migrateLegacyHome 是 MigrateLegacyHome 的可测试内核。旧 daemon 存活时不迁
+//（其 daemon.json 持有的端口/锁仍在旧根上，强迁会双根分裂）；Rename 失败
+//（文件占用等）同样保留旧根，下次启动重试。
+func migrateLegacyHome(base string) error {
+	newDir := filepath.Join(base, homeDirName)
+	legacy := filepath.Join(base, legacyHomeDirName)
+	if dirExists(newDir) || !dirExists(legacy) {
+		return nil
+	}
+	if legacyDaemonAlive(legacy) {
+		return nil
+	}
+	if err := os.Rename(legacy, newDir); err != nil {
+		return nil // 回退旧根：Home() 按存在性仍解析到 legacy，下次重试
+	}
+	fixLegacyAbsPaths(newDir, legacy)
+	marker := legacy + "\n" + time.Now().UTC().Format(time.RFC3339) + "\n"
+	_ = os.WriteFile(filepath.Join(newDir, "migrated-from"), []byte(marker), 0o644)
+	return nil
+}
+
+// legacyDaemonAlive 轻量探测旧根 daemon.json 指向的实例是否健康（registry 是
+// daemonx 的被依赖方，不能反向 import，这里最小化重复：只取 port/token 两个字段）。
+func legacyDaemonAlive(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "daemon.json"))
+	if err != nil {
+		return false
+	}
+	var i struct {
+		Port  int    `json:"port"`
+		Token string `json:"token"`
+	}
+	if json.Unmarshal(data, &i) != nil || i.Port == 0 {
+		return false
+	}
+	req, err := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/api/health", i.Port), nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("X-Ok-Token", i.Token)
+	hc := &http.Client{Timeout: 800 * time.Millisecond}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// fixLegacyAbsPaths 修正迁移后 config 里指向旧根的绝对路径（已知唯一真实来源是
+// [embedding] models_dir 的 .deb 回退落盘；做全局字符串替换覆盖一切同类键）。
+// 覆盖三种写法：原生分隔符、正斜杠、TOML 转义反斜杠。范围：全局 config.toml
+// 与 projects/*/config.toml。
+func fixLegacyAbsPaths(newDir, legacy string) {
+	targets := []string{filepath.Join(newDir, "config.toml")}
+	if m, err := filepath.Glob(filepath.Join(newDir, "projects", "*", "config.toml")); err == nil {
+		targets = append(targets, m...)
+	}
+	variants := [][2]string{
+		{legacy, newDir},
+		{filepath.ToSlash(legacy), filepath.ToSlash(newDir)},
+		{strings.ReplaceAll(legacy, `\`, `\\`), strings.ReplaceAll(newDir, `\`, `\\`)},
+	}
+	for _, cfg := range targets {
+		data, err := os.ReadFile(cfg)
+		if err != nil {
+			continue
+		}
+		s := string(data)
+		out := s
+		for _, v := range variants {
+			out = strings.ReplaceAll(out, v[0], v[1])
+		}
+		if out != s {
+			_ = os.WriteFile(cfg, []byte(out), 0o644)
+		}
+	}
 }
 
 var (
@@ -46,14 +172,14 @@ var (
 )
 
 // fallbackHome 是 realProfileDir 与 os.UserHomeDir 双重失败时的兜底根：
-// 裸相对路径 ".openknowledge" 会让数据根随 cwd 漂移，且两次调用可能解析到
+// 裸相对路径 ".okryptos" 会让数据根随 cwd 漂移，且两次调用可能解析到
 // 不同目录——进程内只解析一次并转绝对路径，保证一致性。
 func fallbackHome() string {
 	fallbackHomeOnce.Do(func() {
-		if abs, err := filepath.Abs(".openknowledge"); err == nil {
+		if abs, err := filepath.Abs(homeDirName); err == nil {
 			fallbackHomeDir = abs
 		} else {
-			fallbackHomeDir = ".openknowledge"
+			fallbackHomeDir = homeDirName
 		}
 	})
 	return fallbackHomeDir

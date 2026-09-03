@@ -1,6 +1,6 @@
 # okdeploy 一键部署器
 
-图形化的 OpenKnowledge 服务端部署工具：双击运行 → 浏览器向导 → SSH 部署到 NAS。
+图形化的 Okryptos 服务端部署工具：双击运行 → 浏览器向导 → SSH 部署到 NAS。
 
 ## 获取与运行
 

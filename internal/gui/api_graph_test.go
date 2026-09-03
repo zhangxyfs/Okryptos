@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"openknowledge/internal/index"
+	"okryptos/internal/index"
 )
 
 type graphTestPayload struct {

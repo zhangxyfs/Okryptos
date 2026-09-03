@@ -39,7 +39,7 @@ export default function (pi: ExtensionAPI) {
     );
     const out = r.stdout.trim();
     if (out) {
-      return { message: { customType: "openknowledge", content: out, display: false } };
+      return { message: { customType: "okryptos", content: out, display: false } };
     }
   });
 
@@ -67,7 +67,7 @@ export default function (pi: ExtensionAPI) {
     if (r.code === 2 && reason) {
       try {
         pi.sendMessage(
-          { customType: "openknowledge", content: reason, display: true },
+          { customType: "okryptos", content: reason, display: true },
           { triggerTurn: true },
         );
       } catch {

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // wrappers.go：Windows .cmd 包装文件三件套的共享实现（M-03）——codex/qoder/

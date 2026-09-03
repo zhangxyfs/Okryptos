@@ -9,14 +9,25 @@ import (
 	"path/filepath"
 	"strings"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 //go:embed dsh_plugin.js
 var dshPluginTemplate string
 
 // dshPluginMarker 本工具生成的插件文件头标记（RemoveHooks 据此识别归属）。
-const dshPluginMarker = "// openknowledge hooks (managed by ok.exe; do not edit)"
+// legacyDSHPluginMarker 是 2.25.0 改名前（OpenKnowledge 时代）的旧标记：
+// 归属识别双认，渲染只写新标记。
+const (
+	dshPluginMarker       = "// okryptos hooks (managed by ok.exe; do not edit)"
+	legacyDSHPluginMarker = "// openknowledge hooks (managed by ok.exe; do not edit)"
+)
+
+// ownsDSHPlugin 报告内容是否本工具生成（新旧标记任一命中）。
+func ownsDSHPlugin(content string) bool {
+	return strings.Contains(content, dshPluginMarker) ||
+		strings.Contains(content, legacyDSHPluginMarker)
+}
 
 // DSHHome 返回 DeepSeek Harness 家目录。解析序：OK_DSH_HOME（ok 自留测试隔离口，
 // OK_ZCODE_HOME 同款）> DSH_HOME（官方重定位变量，packages/util/home-paths 的
@@ -32,9 +43,23 @@ func DSHHome() string {
 	return filepath.Join(home, ".dsh")
 }
 
-// dshPluginPath 插件写入目标：<home>/plugins/openknowledge/index.js。
+// dshPluginPath 插件写入目标：<home>/plugins/okryptos/index.js。
 // DSH 无插件目录自动扫描，位置为 ok 自选，经 cordis.patch.yml 绝对路径挂载。
-func dshPluginPath() string { return filepath.Join(DSHHome(), "plugins", "openknowledge", "index.js") }
+func dshPluginPath() string { return filepath.Join(DSHHome(), "plugins", "okryptos", "index.js") }
+
+// legacyDSHPluginDir 是 2.25.0 改名前的插件目录；patch 行内的 file URL 指向它，
+// 不清理则旧目录成孤儿（patch 块由 upsert 双标记剥除，目录须显式删）。
+func legacyDSHPluginDir() string { return filepath.Join(DSHHome(), "plugins", "openknowledge") }
+
+// removeLegacyDSHPlugin 删除旧名插件目录（仅当其中 index.js 为本工具生成）。
+func removeLegacyDSHPlugin() {
+	dir := legacyDSHPluginDir()
+	data, err := os.ReadFile(filepath.Join(dir, "index.js"))
+	if err != nil || !ownsDSHPlugin(string(data)) {
+		return
+	}
+	_ = os.RemoveAll(dir)
+}
 
 // dshPatchPath 家目录级 patch 文件：<home>/cordis.patch.yml（所有 profile 共享，
 // DSH 文档明示的家目录级 patch 层）。
@@ -100,7 +125,7 @@ func (dshAgent) HooksInstalled() bool {
 		return false
 	}
 	content := string(data)
-	if !strings.Contains(content, dshPluginMarker) ||
+	if !ownsDSHPlugin(content) ||
 		!strings.Contains(content, "// fingerprint: "+dshTemplateFingerprint()) {
 		return false
 	}
@@ -117,10 +142,11 @@ func (dshAgent) HooksInstalled() bool {
 }
 
 func (dshAgent) InstallHooks(exe string) error {
+	removeLegacyDSHPlugin() // 改名迁移：旧名插件目录随安装清除
 	// 插件文件（自有新文件整写；既有文件非自家则先备份）
 	path := dshPluginPath()
 	if data, err := os.ReadFile(path); err == nil {
-		if !strings.Contains(string(data), dshPluginMarker) {
+		if !ownsDSHPlugin(string(data)) {
 			if err := os.WriteFile(path+".bak-openknowledge", data, 0o644); err != nil {
 				return fmt.Errorf("备份既有插件失败: %w", err)
 			}
@@ -143,23 +169,35 @@ func (dshAgent) InstallHooks(exe string) error {
 	return UpsertHooksBlock(patch, dshPatchBlock())
 }
 
-// removeDSHMarkerBlock 从 patch 内容移除 ok 标记块，返回 (新内容, 是否移除)。
+// removeDSHMarkerBlock 从 patch 内容移除 ok 标记块（新旧品牌双认），返回
+// (新内容, 是否移除)。
 func removeDSHMarkerBlock(content string) (string, bool) {
-	i := strings.Index(content, MarkerBegin)
-	j := strings.Index(content, MarkerEnd)
-	if i < 0 || j <= i {
+	removed := false
+	for _, pair := range [][2]string{{MarkerBegin, MarkerEnd}, {LegacyMarkerBegin, LegacyMarkerEnd}} {
+		begin, end := pair[0], pair[1]
+		for {
+			i := strings.Index(content, begin)
+			j := strings.Index(content, end)
+			if i < 0 || j <= i {
+				break
+			}
+			tail := strings.TrimPrefix(content[j+len(end):], "\n")
+			head := strings.TrimRight(content[:i], "\n")
+			out := head
+			if strings.TrimSpace(tail) != "" {
+				if out != "" {
+					out += "\n"
+				}
+				out += "\n" + tail
+			}
+			content = out
+			removed = true
+		}
+	}
+	if !removed {
 		return content, false
 	}
-	tail := strings.TrimPrefix(content[j+len(MarkerEnd):], "\n")
-	head := strings.TrimRight(content[:i], "\n")
-	out := head
-	if strings.TrimSpace(tail) != "" {
-		if out != "" {
-			out += "\n"
-		}
-		out += "\n" + tail
-	}
-	out = strings.TrimLeft(out, "\n")
+	out := strings.TrimLeft(content, "\n")
 	if out != "" && !strings.HasSuffix(out, "\n") {
 		out += "\n"
 	}
@@ -174,11 +212,19 @@ func (dshAgent) RemoveHooks() (bool, error) {
 	case os.IsNotExist(err):
 	case err != nil:
 		return false, err
-	case strings.Contains(string(data), dshPluginMarker):
+	case ownsDSHPlugin(string(data)):
 		if err := os.Remove(path); err != nil {
 			return false, fmt.Errorf("删除 dsh 插件: %w", err)
 		}
 		removed = true
+	}
+	// 改名迁移：旧名插件目录一并在卸载窗口清除
+	if dir := legacyDSHPluginDir(); dir != "" {
+		if d, rerr := os.ReadFile(filepath.Join(dir, "index.js")); rerr == nil && ownsDSHPlugin(string(d)) {
+			if os.RemoveAll(dir) == nil {
+				removed = true
+			}
+		}
 	}
 	// patch 行是宿主 cordis.patch.yml 的读-改-写，包在 WithFileLock 内
 	//（同 UpsertHooksBlock；插件文件为自家 marker 校验后的整删，无需锁）。
@@ -208,18 +254,24 @@ func (dshAgent) RemoveHooks() (bool, error) {
 	return removed, nil
 }
 
-// EnsureHooks 自愈：仅在曾安装（patch 标记块存在或插件文件为自家）且内容过期
-// 时整体重写；从未安装 / 经 RemoveHooks 显式移除（两者均不在）不复活。
+// EnsureHooks 自愈：仅在曾安装（patch 标记块存在或插件文件为自家，新旧品牌
+// 双认）且内容过期时整体重写；从未安装 / 经 RemoveHooks 显式移除（两者均不在）
+// 不复活。旧品牌形态命中 ours 后走 InstallHooks：upsert 剥旧 patch 块、插件写
+// 新路径、旧插件目录清除，一次完成迁移。
 func (dshAgent) EnsureHooks(exe string) error {
 	pluginData, pluginErr := os.ReadFile(dshPluginPath())
 	patchData, patchErr := os.ReadFile(dshPatchPath())
-	ours := (pluginErr == nil && strings.Contains(string(pluginData), dshPluginMarker)) ||
-		(patchErr == nil && strings.Contains(string(patchData), MarkerBegin))
+	legacyPluginData, legacyPluginErr := os.ReadFile(filepath.Join(legacyDSHPluginDir(), "index.js"))
+	ours := (pluginErr == nil && ownsDSHPlugin(string(pluginData))) ||
+		(legacyPluginErr == nil && ownsDSHPlugin(string(legacyPluginData))) ||
+		(patchErr == nil && (strings.Contains(string(patchData), MarkerBegin) ||
+			strings.Contains(string(patchData), LegacyMarkerBegin)))
 	if !ours {
 		return nil
 	}
 	if pluginErr == nil && string(pluginData) == renderDSHPlugin(exe) &&
-		patchErr == nil && strings.Contains(string(patchData), "id: ok-hooks") {
+		patchErr == nil && strings.Contains(string(patchData), "id: ok-hooks") &&
+		!strings.Contains(string(patchData), LegacyMarkerBegin) && legacyPluginErr != nil {
 		return nil
 	}
 	return dshAgent{}.InstallHooks(exe)

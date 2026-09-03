@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"openknowledge/internal/registry"
+	"okryptos/internal/registry"
 )
 
 // DefaultPort 是 daemon 的首选监听端口（被占则回退随机端口并写入 daemon.json）。
@@ -26,7 +26,7 @@ type Info struct {
 	StartedAt   string `json:"started_at"`
 }
 
-// Path 返回 daemon.json 路径（~/.openknowledge/daemon.json）。
+// Path 返回 daemon.json 路径（~/.okryptos/daemon.json）。
 func Path() string { return filepath.Join(registry.Home(), "daemon.json") }
 
 // Load 读取 daemon.json；文件不存在或损坏均返回 error。

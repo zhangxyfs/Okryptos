@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"openknowledge/internal/registry"
-	"openknowledge/internal/state"
-	"openknowledge/internal/wiki"
+	"okryptos/internal/registry"
+	"okryptos/internal/state"
+	"okryptos/internal/wiki"
 )
 
 // TestMain 隔离 KIMI_CODE_HOME 与 PI_CODING_AGENT_DIR：HandlePrompt 的 hooks 自愈
@@ -791,7 +791,7 @@ func TestPromptWikiBranchContextOnDiverged(t *testing.T) {
 		t.Fatalf("exit %d", code)
 	}
 	got := out.String()
-	if !strings.Contains(got, "[OpenKnowledge] wiki 基于 master@") || !strings.Contains(got, "当前分支 dev") {
+	if !strings.Contains(got, "[Okryptos] wiki 基于 master@") || !strings.Contains(got, "当前分支 dev") {
 		t.Errorf("分叉/无基线分支应附上下文行: %q", got)
 	}
 	if !strings.Contains(got, "测试条目") {

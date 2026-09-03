@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // SetGate 重写 config.toml 的 [retrieve.gate] 子表：已存在则整段替换（到下一个

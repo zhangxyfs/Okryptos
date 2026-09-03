@@ -16,13 +16,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"openknowledge/internal/daemonx"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/version"
+	"okryptos/internal/daemonx"
+	"okryptos/internal/registry"
+	"okryptos/internal/version"
 )
 
 // githubAPI 是包级变量以便测试替换为 httptest server。
-var githubAPI = "https://api.github.com/repos/zhangxyfs/OpenKnowledge/releases/latest"
+var githubAPI = "https://api.github.com/repos/zhangxyfs/Okryptos/releases/latest"
 
 var updateHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
@@ -165,9 +165,24 @@ func fetchLatestRelease() *UpdateCheck {
 	return uc
 }
 
-// updateURLPrefix 是安装器下载 URL 的合法前缀（SSRF 纪律：check 端点给的
+// updateURLPrefixes 是安装器下载 URL 的合法前缀白名单（SSRF 纪律：check 端点给的
 // GitHub release 资产地址之外的一律 400）。包级 var 以便测试替换为 httptest server。
-var updateURLPrefix = "https://github.com/zhangxyfs/OpenKnowledge/releases/download/"
+// 改名过渡（2026-09-02-rename-okryptos-design.md Phase -1）：OpenKnowledge→Okryptos
+// 双前缀并存——repo 改名后新旧 release 的资产 URL 都可能出现，旧前缀永久保留兜底。
+var updateURLPrefixes = []string{
+	"https://github.com/zhangxyfs/OpenKnowledge/releases/download/",
+	"https://github.com/zhangxyfs/Okryptos/releases/download/",
+}
+
+// updateURLAllowed 报告下载 URL 是否命中白名单任一前缀。
+func updateURLAllowed(u string) bool {
+	for _, p := range updateURLPrefixes {
+		if strings.HasPrefix(u, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // updateDownloadClient 不设整体 Timeout（安装器动辄数百 MB，慢速网络下整体超时会
 // 误杀正常下载），只给响应头 30s 兜底——同 embed/download.go defaultClient 的思路。
@@ -209,7 +224,7 @@ func updSnapshot() updJob {
 	return updJob{State: j.State, Done: j.Done, Total: j.Total, Path: j.Path, Err: j.Err}
 }
 
-// apiUpdateDownloadStart：后台下载安装器到 ~/.openknowledge/update/（单任务；
+// apiUpdateDownloadStart：后台下载安装器到 ~/.okryptos/update/（单任务；
 // 已有 running 任务的重复 POST 直接返回当前快照，幂等）。
 func (h *Handler) apiUpdateDownloadStart(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -219,7 +234,7 @@ func (h *Handler) apiUpdateDownloadStart(w http.ResponseWriter, r *http.Request)
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if !strings.HasPrefix(req.URL, updateURLPrefix) {
+	if !updateURLAllowed(req.URL) {
 		writeErr(w, http.StatusBadRequest, "非法下载地址：仅允许 GitHub release 资产")
 		return
 	}
@@ -227,7 +242,7 @@ func (h *Handler) apiUpdateDownloadStart(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusBadRequest, "非法版本号")
 		return
 	}
-	dest := filepath.Join(registry.Home(), "update", "OpenKnowledge-Setup-"+req.Version+".exe")
+	dest := filepath.Join(registry.Home(), "update", "Okryptos-Setup-"+req.Version+".exe")
 	updMu.Lock()
 	if updCur != nil {
 		updCur.mu.Lock()

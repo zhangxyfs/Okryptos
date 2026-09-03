@@ -17,7 +17,7 @@ var composeExternal string
 // DeploySpec 是一次部署的全部参数。
 type DeploySpec struct {
 	Mode       string `json:"mode"`        // "full" | "external"
-	Dir        string `json:"dir"`         // 远端部署目录（默认 ~/openknowledge）
+	Dir        string `json:"dir"`         // 远端部署目录（默认 ~/okryptos）
 	GiteaPort  int    `json:"gitea_port"`  // full 模式
 	OKPort     int    `json:"ok_port"`
 	Tag        string `json:"tag"`         // okserver 镜像 tag
@@ -47,7 +47,7 @@ func RenderEnv(s DeploySpec) string {
 		fmt.Fprintf(&b, "EXTERNAL_GITEA_URL=%s\n", s.GiteaURL)
 	}
 	fmt.Fprintf(&b, "OKSERVER_PORT=%d\n", s.OKPort)
-	fmt.Fprintf(&b, "OKSERVER_IMAGE=z7dream/openknowledge-okserver:%s\n", s.Tag)
+	fmt.Fprintf(&b, "OKSERVER_IMAGE=z7dream/okryptos-okserver:%s\n", s.Tag)
 	fmt.Fprintf(&b, "GITEA_ADMIN_TOKEN=%s\n", s.AdminToken)
 	return b.String()
 }

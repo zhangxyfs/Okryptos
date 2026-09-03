@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"strings"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // CodexHome 返回 Codex 配置根目录：OK_CODEX_HOME（ok 自留测试隔离口，

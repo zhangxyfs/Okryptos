@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"sort"
 
-	"openknowledge/internal/embed"
-	"openknowledge/internal/entry"
+	"okryptos/internal/embed"
+	"okryptos/internal/entry"
 )
 
 type graphNode struct {

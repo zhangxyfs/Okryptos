@@ -9,8 +9,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/retrieve"
+	"okryptos/internal/config"
+	"okryptos/internal/retrieve"
 )
 
 const draftEntry = `---

@@ -1,28 +1,28 @@
-; OpenKnowledge 安装程序脚本（Inno Setup 6/7）
+; Okryptos 安装程序脚本（Inno Setup 6/7）
 ; 构建：bash scripts/build-installer.sh（先构建 dist/ 再调用 ISCC）
 
-#define AppName "OpenKnowledge"
-#define AppVersion "2.24.3"
-#define AppPublisher "OpenKnowledge"
+#define AppName "Okryptos"
+#define AppVersion "2.25.0"
+#define AppPublisher "Okryptos"
 
 [Setup]
 AppId={{9F4C3A2E-7B1D-4A5F-9E2C-6D8B1A3F5E70}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-DefaultDirName={localappdata}\Programs\OpenKnowledge
+DefaultDirName={localappdata}\Programs\Okryptos
 UsePreviousAppDir=no
-DefaultGroupName=OpenKnowledge
+DefaultGroupName=Okryptos
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=output
-OutputBaseFilename=OpenKnowledgeSetup-{#AppVersion}
+OutputBaseFilename=OkryptosSetup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName={#AppName} 知识库
 SetupIconFile=assets\logo.ico
-; 数据目录 ~/.openknowledge 由程序运行时创建，卸载默认保留（见 [Code]）
+; 数据目录 ~/.okryptos 由程序运行时创建，卸载默认保留（见 [Code]）
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "lang\ChineseSimplified.isl"
@@ -42,17 +42,17 @@ Source: "..\dist\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recu
 Source: "assets\logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\OpenKnowledge 知识库"; Filename: "{app}\OkManager.exe"; IconFilename: "{app}\logo.ico"; Comment: "打开 OpenKnowledge 配置中心"
-Name: "{group}\卸载 OpenKnowledge"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\OpenKnowledge 知识库"; Filename: "{app}\OkManager.exe"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon
+Name: "{group}\Okryptos 知识库"; Filename: "{app}\OkManager.exe"; IconFilename: "{app}\logo.ico"; Comment: "打开 Okryptos 配置中心"
+Name: "{group}\卸载 Okryptos"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\Okryptos 知识库"; Filename: "{app}\OkManager.exe"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OpenKnowledge"; ValueData: """{app}\okd.exe"""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Okryptos"; ValueData: """{app}\okd.exe"""; Flags: uninsdeletevalue
 
 [Run]
 ; 升级收尾：静默覆盖安装后也拉起新 okd（不带 skipifsilent）；okd 启动时自愈删除 .upgrading 熔断
 Filename: "{app}\okd.exe"; Flags: nowait runhidden
-Filename: "{app}\OkManager.exe"; Description: "打开 OpenKnowledge 配置中心（引导页可一键完成 hooks / 技能 / embedding 配置）"; Flags: postinstall skipifsilent
+Filename: "{app}\OkManager.exe"; Description: "打开 Okryptos 配置中心（引导页可一键完成 hooks / 技能 / embedding 配置）"; Flags: postinstall skipifsilent
 
 [Code]
 const
@@ -140,8 +140,15 @@ begin
     else if FileExists(ExpandConstant('{app}\ok.exe')) then
       Exec(ExpandConstant('{app}\ok.exe'), 'daemon stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('addpath') then
-    AddToUserPath(ExpandConstant('{app}'));
+  if CurStep = ssPostInstall then
+  begin
+    { 2.25.0 改名（OpenKnowledge→Okryptos）：新 Run 值名 Okryptos 已由 [Registry]
+      段写入；旧值名不删会双自启，且卸载后残留指向已删 okd.exe 的死项
+      （uninsdeletevalue 只认新名） }
+    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'OpenKnowledge');
+    if WizardIsTaskSelected('addpath') then
+      AddToUserPath(ExpandConstant('{app}'));
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -159,7 +166,7 @@ begin
     RemoveFromUserPath(ExpandConstant('{app}'));
     { 数据目录定位用 %USERPROFILE%：旧写法 userdocs\.. 在 Documents 重定向（OneDrive 已知文件夹
       迁移等）下指错目录，可能找不到真实数据目录甚至误删无关数据 }
-    DataDir := ExpandConstant('{%USERPROFILE}\.openknowledge');
+    DataDir := ExpandConstant('{%USERPROFILE}\.okryptos');
     { 静默卸载（/VERYSILENT）下绝不删除数据；交互模式才询问。
       注意：卸载期只能用 UninstallSilent，WizardSilent 是 Setup 期函数，误用会运行时错误。 }
     if (not UninstallSilent) and DirExists(DataDir) then

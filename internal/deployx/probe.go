@@ -151,9 +151,9 @@ func Probe(ctx context.Context, ex Executor, sudoPw string) (*ProbeResult, error
 }
 
 // okserverContainer 识别 okserver 容器。compose 未指定 name:/-p 时项目名取部署目录
-// basename，真机容器名是 openknowledge-okserver-1 而非裸 okserver（2026-08-30 实测
-// Existing 检测因此落空）；镜像名含 okserver（z7dream/openknowledge-okserver、
-// ghcr …/openknowledge/okserver）作兜底。
+// basename，真机容器名是 <目录名>-okserver-1 而非裸 okserver（2026-08-30 实测
+// Existing 检测因此落空）；镜像名含 okserver（z7dream/okryptos-okserver、旧名
+// z7dream/openknowledge-okserver、ghcr …/okryptos/okserver）作兜底，新旧部署都认。
 func okserverContainer(name, image string) bool {
 	if name == "okserver" || strings.HasPrefix(name, "okserver-") || strings.Contains(name, "-okserver-") {
 		return true

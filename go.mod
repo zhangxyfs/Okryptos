@@ -1,4 +1,4 @@
-module openknowledge
+module okryptos
 
 go 1.25.0
 

@@ -66,7 +66,7 @@ func (r *Repo) Init() error {
 		return err
 	}
 	_, err := execGit(r.Dir, localTimeout,
-		"-c", "user.name=OpenKnowledge Sync", "-c", "user.email=sync@openknowledge.local",
+		"-c", "user.name=Okryptos Sync", "-c", "user.email=sync@okryptos.local",
 		"commit", "-m", "sync: init")
 	return err
 }
@@ -125,7 +125,7 @@ func (r *Repo) CommitAll(msg string) (bool, error) {
 		return false, nil // 无暂存变更
 	}
 	if _, err := execGit(r.Dir, localTimeout,
-		"-c", "user.name=OpenKnowledge Sync", "-c", "user.email=sync@openknowledge.local",
+		"-c", "user.name=Okryptos Sync", "-c", "user.email=sync@okryptos.local",
 		"commit", "-m", msg); err != nil {
 		return false, err
 	}

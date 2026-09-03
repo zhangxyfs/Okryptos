@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"openknowledge/internal/procx"
+	"okryptos/internal/procx"
 )
 
 // ErrNoCredentialHelper 表示系统/仓库未配置 git credential.helper——

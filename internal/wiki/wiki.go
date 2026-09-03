@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/fsx"
-	"openknowledge/internal/procx"
+	"okryptos/internal/fsx"
+	"okryptos/internal/procx"
 )
 
 // CursorPath 返回游标文件路径（固定文件名，不受 state 目录 session-* GC 影响）。

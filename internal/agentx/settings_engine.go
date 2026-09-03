@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"openknowledge/internal/fsx"
+	"okryptos/internal/fsx"
 )
 
 // settings_engine.go：claude/codex/qoder/qoderide/zcode 五适配器同形部分的共享

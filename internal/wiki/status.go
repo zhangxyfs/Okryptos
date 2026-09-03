@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/procx"
+	"okryptos/internal/procx"
 )
 
 // gitTimeout 单次 git 子进程上限：网络盘/凭据提示下 git 可挂起，

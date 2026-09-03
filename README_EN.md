@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" alt="OpenKnowledge" width="580">
+  <img src="docs/assets/logo.svg" alt="Okryptos" width="415">
 </p>
 
 <p align="center">
@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.24.3-2563eb">
+  <img alt="version" src="https://img.shields.io/badge/version-2.25.0-2563eb">
   <img alt="go" src="https://img.shields.io/badge/go-%3E%3D1.25-00ADD8">
   <img alt="platform" src="https://img.shields.io/badge/platform-windows%20%7C%20linux-0078d6">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
@@ -27,7 +27,7 @@
 
 | Platform | How |
 |----------|-----|
-| Windows | Run `OpenKnowledgeSetup-<version>.exe` (no admin rights; installs to `%LOCALAPPDATA%\Programs\OpenKnowledge`; uninstall keeps knowledge-base data by default) |
+| Windows | Run `OkryptosSetup-<version>.exe` (no admin rights; installs to `%LOCALAPPDATA%\Programs\Okryptos`; uninstall keeps knowledge-base data by default) |
 | Linux | Extract `openknowledge_<version>_linux_amd64.tar.gz` and run `./ok setup`, or `sudo dpkg -i openknowledge_<version>_amd64.deb` |
 
 > The installer is ~50MB and bundles the llama.cpp CPU runtime (for on-device embeddings); models are downloaded on first activation.
@@ -37,7 +37,7 @@
 **Double-click `ok.exe` (or run `ok gui`)** — the browser opens the admin UI at `http://127.0.0.1:17888`. On first use you land on the **Guide tab**; work through the cards in order:
 
 1. **Hooks** — writes integrations for every detected AI assistant on your machine: Kimi Code, Pi, ZCode, Reasonix, opencode, Claude Code/CodePilot, Codex, Qoder CN (CLI + IDE), DeepSeek Harness
-2. **Skills** — installs the six skills `openknowledge-init / on / off / propose / capture / wiki` into each agent's skills directory
+2. **Skills** — installs the six skills `ok-init / on / off / propose / capture / wiki` into each agent's skills directory
 3. **Embedding** — pick one of three semantic-retrieval forms: hosted OpenAI-compatible service / local Ollama (key-free) / built-in on-device model (fully offline, knowledge never leaves the machine); skip it to use keyword-only retrieval — you can configure it later anytime
 
 <p align="center">
@@ -66,7 +66,7 @@ The GUI is hosted by a single system-wide resident daemon — closing the page d
 
 Open your AI assistant and **start a new session inside the project directory** (hooks load at session start), then use two skills in turn:
 
-1. **Initialize** — type `/openknowledge-init` (or just say "initialize the knowledge base"). The skill registers the current project, taking the directory name automatically — no parameters needed
+1. **Initialize** — type `/ok-init` (or just say "initialize the knowledge base"). The skill registers the current project, taking the directory name automatically — no parameters needed
 2. **Generate the wiki** — then say **"generate the project wiki"**. The wiki skill scans the code structure and git history and distills the project into a set of reference entries (index and vectors are built automatically). Later, when a feature or module is finalized, say **"update the wiki"** to refresh it incrementally
 
 > Advanced: behind these skills are `ok init` and the wiki CLI — skills are the in-session wrapper around the commands. Use natural language day to day; the CLI is for scripting and troubleshooting (see [Common commands](#common-commands)).
@@ -109,7 +109,7 @@ ok search commit conventions    # preview retrieval from the CLI
 
 ## Knowledge entries
 
-Each entry is a Markdown file with frontmatter (created via `ok add`, or handwritten), stored centrally in `~/.openknowledge/` — project repositories stay clean:
+Each entry is a Markdown file with frontmatter (created via `ok add`, or handwritten), stored centrally in `~/.okryptos/` — project repositories stay clean:
 
 ```markdown
 ---
@@ -141,7 +141,7 @@ Deploy the server with the **okdeploy one-click deployer** (SSH in, fully automa
 | Windows | `okdeploy-windows-amd64.exe` |
 | Linux | `okdeploy-linux-amd64` |
 
-> Download: [GitHub Releases](https://github.com/zhangxyfs/OpenKnowledge/releases) (same page as the installer). Already-deployed servers can be upgraded in one click from the okdeploy console.
+> Download: [GitHub Releases](https://github.com/zhangxyfs/Okryptos/releases) (same page as the installer). Already-deployed servers can be upgraded in one click from the okdeploy console.
 
 ## Common commands
 
@@ -173,7 +173,7 @@ Deploy the server with the **okdeploy one-click deployer** (SSH in, fully automa
 <details>
 <summary>Configuration: two-layer TOML and embedding profiles</summary>
 
-Effective config = built-in defaults ← global `~/.openknowledge/config.toml` ← per-project `~/.openknowledge/projects/<name>/config.toml` (each layer overrides the previous).
+Effective config = built-in defaults ← global `~/.okryptos/config.toml` ← per-project `~/.okryptos/projects/<name>/config.toml` (each layer overrides the previous).
 
 ```toml
 # Global config (ok setup can write this interactively; the GUI guide-tab dialog manages multiple profiles)
@@ -226,7 +226,7 @@ message = "Code was changed this session without a changelog update; please add 
 | `PostToolUse` (Write/Edit) | Records the files the AI touched into session state |
 | `Stop` | Code changed without changelog → exit 2 block (at most once per rule per session) |
 
-All hook paths are fail-open: any internal error is only logged (`~/.openknowledge/ok.log`) and never disrupts the session. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (Chinese).
+All hook paths are fail-open: any internal error is only logged (`~/.okryptos/ok.log`) and never disrupts the session. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (Chinese).
 
 </details>
 

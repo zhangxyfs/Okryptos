@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/embed"
-	"openknowledge/internal/logx"
-	"openknowledge/internal/registry"
+	"okryptos/internal/config"
+	"okryptos/internal/embed"
+	"okryptos/internal/logx"
+	"okryptos/internal/registry"
 )
 
 // ServerCommand 是 spawn 接缝：测试替换为 helper 进程。生产即 exec.Command。

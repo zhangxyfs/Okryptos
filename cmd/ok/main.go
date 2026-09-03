@@ -9,13 +9,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"openknowledge/internal/cli"
-	"openknowledge/internal/daemon"
-	"openknowledge/internal/hook"
-	"openknowledge/internal/logx"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/rxext"
-	"openknowledge/internal/webdir"
+	"okryptos/internal/cli"
+	"okryptos/internal/daemon"
+	"okryptos/internal/hook"
+	"okryptos/internal/logx"
+	"okryptos/internal/registry"
+	"okryptos/internal/rxext"
+	"okryptos/internal/webdir"
 )
 
 func main() {
@@ -23,6 +23,9 @@ func main() {
 }
 
 func run(argv []string) int {
+	// 2.25.0 改名版：旧数据根 ~/.openknowledge → ~/.okryptos 自动迁移（幂等，
+	// 旧 daemon 存活时跳过下次再试），必须先于一切数据文件访问。
+	registry.MigrateLegacyHome()
 	if len(argv) < 2 {
 		// 无参数（双击 exe 场景）→ 启动 Web GUI
 		return runGUI()

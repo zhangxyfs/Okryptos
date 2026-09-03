@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"openknowledge/internal/daemonx"
+	"okryptos/internal/daemonx"
 )
 
 // cliSubcommands 是 ok CLI 的全部子命令（cmd/ok/main.go run() 的分发面）。

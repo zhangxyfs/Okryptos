@@ -26,12 +26,12 @@ func TestMain(m *testing.M) {
 	}
 	binPath = filepath.Join(dir, name)
 	okdPath = filepath.Join(dir, okdName)
-	build := exec.Command("go", "build", "-o", binPath, "openknowledge/cmd/ok")
+	build := exec.Command("go", "build", "-o", binPath, "okryptos/cmd/ok")
 	if out, err := build.CombinedOutput(); err != nil {
 		panic(fmt.Sprintf("build ok failed: %v\n%s", err, out))
 	}
 	// 同目录提供 okd：spawn 走三 exe 拆分路径（daemonTarget 命中同目录 okd）
-	build = exec.Command("go", "build", "-o", okdPath, "openknowledge/cmd/okd")
+	build = exec.Command("go", "build", "-o", okdPath, "okryptos/cmd/okd")
 	if out, err := build.CombinedOutput(); err != nil {
 		panic(fmt.Sprintf("build okd failed: %v\n%s", err, out))
 	}
@@ -39,7 +39,7 @@ func TestMain(m *testing.M) {
 	if runtime.GOOS == "windows" {
 		okserverPath += ".exe"
 	}
-	build = exec.Command("go", "build", "-o", okserverPath, "openknowledge/cmd/okserver")
+	build = exec.Command("go", "build", "-o", okserverPath, "okryptos/cmd/okserver")
 	if out, err := build.CombinedOutput(); err != nil {
 		panic(fmt.Sprintf("build okserver failed: %v\n%s", err, out))
 	}

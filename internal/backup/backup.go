@@ -12,12 +12,12 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"openknowledge/internal/config"
-	"openknowledge/internal/entry"
-	"openknowledge/internal/fsx"
-	"openknowledge/internal/index"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/store"
+	"okryptos/internal/config"
+	"okryptos/internal/entry"
+	"okryptos/internal/fsx"
+	"okryptos/internal/index"
+	"okryptos/internal/registry"
+	"okryptos/internal/store"
 )
 
 // MaxSize 是导入包的大小上限。

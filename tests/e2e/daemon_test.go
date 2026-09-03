@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"openknowledge/internal/daemonx"
+	"okryptos/internal/daemonx"
 )
 
 // killPid 跨平台杀进程树（清理后台拉起的 daemon）。

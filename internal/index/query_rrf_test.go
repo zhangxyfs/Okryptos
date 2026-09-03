@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/retrieve"
+	"okryptos/internal/config"
+	"okryptos/internal/retrieve"
 )
 
 // rrfFixture 两条目：a.md 关键词命中"苹果"，b.md 无关键词命中；

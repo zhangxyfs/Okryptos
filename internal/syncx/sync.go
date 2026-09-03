@@ -24,7 +24,7 @@ type Outcome struct {
 // runner、全新机器）不能依赖外部配置。
 func (r *Repo) PullRebase() ([]string, error) {
 	if _, err := execGit(r.Dir, networkTimeout,
-		"-c", "user.name=OpenKnowledge Sync", "-c", "user.email=sync@openknowledge.local",
+		"-c", "user.name=Okryptos Sync", "-c", "user.email=sync@okryptos.local",
 		"pull", "--rebase"); err != nil {
 		// rebase 进行中 → 结构化冲突而非错误
 		if r.MergeInProgress() {

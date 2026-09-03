@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"openknowledge/internal/procx"
+	"okryptos/internal/procx"
 )
 
 var (

@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"openknowledge/internal/config"
-	"openknowledge/internal/registry"
-	"openknowledge/internal/store"
-	"openknowledge/internal/syncx"
+	"okryptos/internal/config"
+	"okryptos/internal/registry"
+	"okryptos/internal/store"
+	"okryptos/internal/syncx"
 )
 
 // TestEnsure file:// remote 项目跳过凭据覆盖；重发被调一次；标记落盘；重复调幂等。
