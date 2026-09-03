@@ -399,7 +399,7 @@ okserver 是独立的**服务端程序**（cmd/okserver，NAS/Docker 部署，Li
 - **Executor 接口（executor.go + ssh.go）**：流式执行/上传/下载三原语；`SSHClient` 用 `x/crypto/ssh` 实现（go.mod 已有依赖，零新增）；`LogHub` 收集日志并向订阅者广播（保留全量历史，迟到订阅者先补历史）
 - **任务编排（task.go）**：Task = 步骤序列，掩码步骤的失败可附 stdout 尾（gitea CLI 日志走 stdout）；前端经本地 HTTP API + SSE 实时日志（api.go，token 鉴权）
 - **探测/部署/管理（probe/deploy/manage/backup.go）**：远端环境探测（docker/compose 分两档、端口、已有 Gitea/已有部署，sudo 自动回退）；compose 模板 + .env 渲染双模式——`full`（全新部署：Gitea + okserver 两容器，Gitea 无人值守初始化，root 密码安全读取）/ `external`（接入已有 Gitea）；管理页任务 = 状态/升级（新版本检测 + 重拉当前版本）/容器日志/备份/恢复（停机一致性语义）/重置 root（`okserver reset-root`）/卸载（默认保留数据）
-- **发布线**：`.github/workflows/docker.yml` 打 v* tag 构建 okserver 多架构镜像，GHCR + Docker Hub（`z7dream/okryptos-okserver`）双发；部署侧默认拉 Docker Hub，不可达时 `.env` 的 `OKSERVER_IMAGE` 可切 GHCR 全名；registry 未发布前优先用本地 `docker load` 的镜像（tag 白名单防线）；拉镜像 3 次重试 + 60min 超时（NAS 直连 Docker Hub 限速）
+- **发布线**：`.github/workflows/docker.yml` 打 v* tag 构建 okserver 多架构镜像，GHCR + Docker Hub（`z7dream/okryptos-okserver`）双发；改名过渡期（v2.25.0 起，计划 2~3 个大版本）新旧名四仓同 digest 八 tag 同推（另含 `z7dream/openknowledge-okserver` 与 `ghcr.io/zhangxyfs/openknowledge/okserver`），保住存量 NAS 固化的旧镜像名升级渠道；部署侧默认拉 Docker Hub，不可达时 `.env` 的 `OKSERVER_IMAGE` 可切 GHCR 全名；registry 未发布前优先用本地 `docker load` 的镜像（tag 白名单防线）；拉镜像 3 次重试 + 60min 超时（NAS 直连 Docker Hub 限速）
 
 ---
 
@@ -823,7 +823,7 @@ bash scripts/build-linux.sh   # Linux 发布：tar + deb（含 runtime/）
 
 **安装器收尾（iss）**：`[Run]` 段静默覆盖安装后拉起新 okd（`nowait runhidden`，不带 skipifsilent——配合升级熔断的收尾，见 6.9），交互安装另给「打开配置中心」勾选项拉起 OkManager。
 
-**okserver 镜像发布（CI）**：`.github/workflows/docker.yml` 打 `v*` tag（或 workflow_dispatch 手动单发）构建 okserver 多架构镜像，GHCR + Docker Hub（`z7dream/okryptos-okserver`）双发；NAS 侧默认拉 Docker Hub，`OKSERVER_IMAGE` 可切 GHCR。
+**okserver 镜像发布（CI）**：`.github/workflows/docker.yml` 打 `v*` tag（或 workflow_dispatch 手动单发）构建 okserver 多架构镜像，GHCR + Docker Hub（`z7dream/okryptos-okserver`）双发；改名过渡期同时推旧名 `z7dream/openknowledge-okserver` / `ghcr.io/zhangxyfs/openknowledge/okserver`（八 tag 同 digest，详见工作流文件头注释）。NAS 侧默认拉 Docker Hub，`OKSERVER_IMAGE` 可切 GHCR。
 
 **runtime 随包分发（内置 embedding 推理运行时）**：`build.py`/`build-linux.sh` 从 llama.cpp release 下载预编译 `llama-server`（版本钉死 b10405 CPU 版，win `bin-win-cpu-x64` zip / linux `bin-ubuntu-x64` tar；`LLAMA_CPP_BASE_URL` 可换源）到 `dist/runtime/`，iss 装到 `{app}\runtime`、linux 包装进 tar/deb 同目录——安装包体积因此约 50MB 级。运行时定位 `<exe 所在目录>/runtime/llama-server`，缺失则内置形态不可用（裸 exe 便携形态）并在 GUI/CLI/doctor 明确提示。**模型不随包分发**：首次启用内置形态时按清单从镜像源下载（默认 hf-mirror，约 146MB–639MB/档，断点续传 + sha256 校验）默认下载到 `<安装目录>/models/`（`[embedding] models_dir` 可改；GUI 配置弹窗可直接修改并打开文件夹，已有模型文件不随迁）。
 

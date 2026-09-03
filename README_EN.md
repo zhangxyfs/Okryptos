@@ -30,7 +30,7 @@
 | Windows | Run `OkryptosSetup-<version>.exe` (no admin rights; installs to `%LOCALAPPDATA%\Programs\Okryptos`; uninstall keeps knowledge-base data by default) |
 | Linux | Extract `openknowledge_<version>_linux_amd64.tar.gz` and run `./ok setup`, or `sudo dpkg -i openknowledge_<version>_amd64.deb` |
 
-> The installer is ~50MB and bundles the llama.cpp CPU runtime (for on-device embeddings); models are downloaded on first activation.
+> The installer is ~25MB and bundles the llama.cpp CPU runtime (for on-device embeddings); models are downloaded on first activation.
 
 ### 2. Open the Web GUI and finish the guided setup
 

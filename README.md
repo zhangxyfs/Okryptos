@@ -29,7 +29,7 @@
 | Windows | 运行 `OkryptosSetup-<版本>.exe`（免管理员，装到 `%LOCALAPPDATA%\Programs\Okryptos`，卸载默认保留知识库数据） |
 | Linux | `openknowledge_<版本>_linux_amd64.tar.gz` 解压后 `./ok setup`，或 `sudo dpkg -i openknowledge_<版本>_amd64.deb` |
 
-> 安装包约 50MB，内含 llama.cpp CPU runtime（本地 embedding 用）；模型首次启用时按需下载。
+> 安装包约 25MB，内含 llama.cpp CPU runtime（本地 embedding 用）；模型首次启用时按需下载。
 
 ### 2. 打开 Web GUI，完成引导配置
 
