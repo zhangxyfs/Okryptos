@@ -7,6 +7,8 @@
 
 namespace okmeter {
 
+// 线程契约：本类非线程安全。运行时约定——采集 poll 与渲染读都在 UI 线程
+// 由 timer 驱动串行进行（Plan 2 接线时遵守）；跨线程使用必须自行加锁。
 class Store {
 public:
   explicit Store(std::filesystem::path dir) : dir_(std::move(dir)) {}

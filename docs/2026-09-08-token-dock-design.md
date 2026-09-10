@@ -169,6 +169,7 @@ Kimi Code CLI 的 token 用量只能进 TUI 敲 `/usage` 看，hooks 事件不�
 ## 8. 风险与开放问题
 
 - **wire.jsonl 是非公开内部格式**，Kimi Code 升级可能改字段名（`usage.record` / `inputOther` 等）。对策：解析层集中一处 + 字段缺失时降级跳过，并在日志里记录首次见到的未知结构。
+- **游标 rewind 已知限制**：wire.jsonl 被截断/轮换（文件变小）时适配器从头重读，历史事件会重复计入，总量膨胀且无自动修复路径（无事件级去重）。实测 wire.jsonl 为 append-only，触发概率低；恢复手段 = 删除 `~/.okryptos/okmeter/state.json` 全量重建。poll 路径对 rewind 事件打 stderr 日志以便观测。
 - **WGC 在锁屏 / 远程桌面 / 安全桌面下不可用**：背景捕获失败时液态玻璃退化为静态模糊背景，不能黑窗或闪退；恢复可用时自动切回实时折射。
 - **`WDA_EXCLUDEFROMCAPTURE` 需 Win10 2003+**：更低版本捕获画面会包含 dock 自身（折射出自己，产生反馈伪影），检测到缺失则液态玻璃整体降级为毛玻璃材质。
 - **多显示器与 DPI**：PerMonitorV2 逐屏缩放，跨屏拖动时重建交换链与捕获会话；窗口贴边位置按物理像素重算。
