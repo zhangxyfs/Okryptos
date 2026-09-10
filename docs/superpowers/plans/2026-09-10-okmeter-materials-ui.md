@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **视觉验收新规（本计划每条视觉任务强制）**：实现者必须用 Edge headless 截图原型（`msedge --headless --screenshot`）+ 真实运行 OkMeter.exe 截图（CopyFromScreen），两张图都经 ReadMediaFile 亲眼看过后才允许报 DONE；肉眼差距点逐条写入报告。
+- **视觉验收新规（本计划每条视觉任务强制）**：实现者必须用 Edge headless 截图原型（`msedge --headless --screenshot`）+ 真实运行 OkMeter.exe 截图（CopyFromScreen），两张图都经 ReadMediaFile 亲眼看过后才允许报 DONE。**材质效果只能比原型好、不得比原型差（规格 §1 硬性条款）**——并排对比中任何肉眼可辨的差距点都算不合格，逐条写入报告并修到达标。
 - 线程契约不变：采集 poll 与渲染读都在 UI 线程；WGC 帧回调不得直接触碰 Aggregator/Store，只交换纹理/标志位。
 - 动画必须丝滑：帧间隔抖动 >4ms 或肉眼可辨的顿挫都算不合格；方案选择以 Task 1 的诊断数据为准。
 - 右键菜单与设置面板禁止假功能：每个可见入口必须有真实能力（灰化 = 合法的可见反馈，文案不得承诺未实现的东西）。
