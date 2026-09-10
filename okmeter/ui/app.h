@@ -8,6 +8,7 @@
 #include "../core/spring.h"
 #include "../render/d3d.h"
 #include "../render/dock_scene.h"
+#include "../render/backdrop.h"
 #include "geometry.h"
 #include "watch.h"
 #include <cstdint>
@@ -49,9 +50,13 @@ private:
   void setWide(bool w);   // 展开态窗口宽 g.w+268（卡区）；收缩态回 g.w
   void flipEdge();        // 换边：edge 互换 → saveConfig → 重建位置几何
   void exitApp();         // 退出：flush 游标落盘 → DestroyWindow
+  void startCapture();    // 背景捕获：取当前 DXGI 设备 → backdrop_.start（可重入）
 
   render::D3DContext d3d_;
   render::DockScene scene_;
+  render::BackdropCapture backdrop_;  // WGC 实时背景捕获（降级链见 backdrop.h）
+  unsigned backdropGen_ = 0;          // 上次接线捕获时的 D3D 代际（设备丢失重建检测）
+  bool sessionNotif_ = false;         // WTS 会话通知已注册
   HWND hwnd_ = nullptr;
   DirWatcher watch_;          // sessions 目录 RDCW 监听（start 失败则纯轮询）
 

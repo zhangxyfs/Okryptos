@@ -81,10 +81,10 @@ git commit -m "fix(okmeter): 动画流畅性诊断与修复（帧间隔数据实
 - 帧到达回调：只交换"最新帧纹理指针 + dirty 标志"（SRWLock 保护，纹理生命周期由池管理，取 `ID3D11Texture2D` 需从 `IDirect3DSurface` 互操作——`Windows.Graphics.DirectX.Direct3D11.IDirect3DDxgiInterfaceAccess::GetInterface(IID_ID3D11Texture2D)`）。**回调线程不得触碰 Aggregator/Store/Config。**
 - 渲染侧：dirty 时把最新帧纹理注册为 D2D 位图（共享句柄/A11 纹理直接包 `ID2D1Bitmap1` via `CreateBitmapFromDxgiSurface`）；球体区域采样窗口矩形对应的背景区域。
 - 降级：StartCapture/CreateFramePool 失败（锁屏/RDP/安全桌面）→ `backdropOk=false`，材质全部回落"静态模糊"（启动时抓一次 DWM 缩略图或干脆纯色毛玻璃），恢复事件（会话解锁）时重建捕获。
-- 设备丢失实证：用 `dxcap -forcetdr`（Windows SDK 自带）或锁屏往返强制一次 DEVICE_REMOVED，验证 dock 重建后背景纹理与球体恢复——必须真实执行并记录。
+- 设备丢失恢复（DEVICE_REMOVED 重建）的代码路径保留，但**不做强制崩溃演练**（不搞 dxcap -forcetdr / 强制锁屏这类会打断用户工作的验证）——按用户裁决，真实驱动崩溃极少发生，该路径以代码审查为准。
 
 - [ ] **Step 1: 实现 backdrop 管线 + 降级链**
-- [ ] **Step 2: 构建零警告 + 手动验收**：dock 球体区域透出真实桌面内容（截图为证）；锁屏往返无崩溃；`dxcap -forcetdr` 后恢复。
+- [ ] **Step 2: 构建零警告 + 手动验收**：捕获帧真实到达（帧计数/内容哈希递增，调试验证后移除残留）；锁屏/会话切换走 WTS 解锁重建路径（代码审查为准，不强制演练）；静止时 CPU ≈0。
 - [ ] **Step 3: Commit**
 
 ```bash

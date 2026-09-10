@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <string>
+#include <wtsapi32.h>
 
 // 动画流畅性诊断：帧间隔 + 分阶段耗时统计。默认仅 _DEBUG 构建启用；
 // 临时诊断可在本行下方加 `#define OKM_ANIM_DIAG 1`（release 也生效）。
@@ -300,8 +301,20 @@ void DockApp::exitApp() {
   DestroyWindow(hwnd_);
 }
 
+// 背景捕获接线：失败仅降级标记（backdrop.log），不影响 dock 本体
+void DockApp::startCapture() {
+  const auto dxgi = d3d_.dxgiDevice();
+  if (!dxgi) return;
+  (void)backdrop_.start(hwnd_, dxgi.Get());
+}
+
 void DockApp::render() {
   if (!d3d_.begin()) return;
+  if (d3d_.generation() != backdropGen_) {
+    // 设备丢失重建（end() 内 init 重入）后：用新 DXGI 设备重启捕获
+    backdropGen_ = d3d_.generation();
+    startCapture();
+  }
 #if defined(OKM_ANIM_DIAG)
   if (g_diag.active) g_diag.drawBegin = qpcNow();
 #endif
@@ -372,6 +385,11 @@ void DockApp::animTick() {
 LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
   switch (msg) {
   case WM_DESTROY:
+    if (sessionNotif_) {
+      WTSUnRegisterSessionNotification(hwnd_);
+      sessionNotif_ = false;
+    }
+    backdrop_.stop();
     PostQuitMessage(0);
     return 0;
   case WM_PAINT:
@@ -452,8 +470,18 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
     return 0;
   }
   case WM_DISPLAYCHANGE:
-  case WM_DPICHANGED:
+    startCapture();   // 显示器拓扑/尺寸变化 → 重建捕获（HMONITOR/池尺寸）
     rebuildLayout();  // 屏高/DPI 变化 → 几何重建
+    render();
+    return 0;
+  case WM_WTSSESSION_CHANGE:
+    if (wp == WTS_SESSION_UNLOCK) {
+      backdrop_.retry();  // 锁屏/安全桌面期间捕获被中止 → 解锁重建
+      render();
+    }
+    return 0;
+  case WM_DPICHANGED:
+    rebuildLayout();
     render();
     return 0;
   default:
@@ -515,6 +543,12 @@ int DockApp::run(HINSTANCE inst) {
     DestroyWindow(hwnd_);
     return 2;
   }
+
+  // 背景捕获管线（WGC）：affinity 排除自身 + 实时抓屏；失败仅降级不影响 dock
+  startCapture();
+  backdropGen_ = d3d_.generation();
+  // 会话解锁通知：锁屏/安全桌面中止捕获，解锁后重建
+  sessionNotif_ = WTSRegisterSessionNotification(hwnd_, NOTIFY_FOR_THIS_SESSION) != FALSE;
 
   // 首轮数据：启动即有真实值（不等第一个 2s 轮询）
   pollData();

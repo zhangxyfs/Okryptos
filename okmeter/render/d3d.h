@@ -26,6 +26,8 @@ public:
   bool ok() const { return dc_ != nullptr; }
   // 设备代际：每次 init 重建成功 +1；资源缓存方应比较代际而非裸指针（防 ABA）
   unsigned generation() const { return generation_; }
+  // 共享 DXGI 设备（WGC 背景捕获互操作用；设备重建后代际变化，需重新获取）
+  Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice() const;
 
 private:
   void release();

@@ -91,6 +91,12 @@ bool D3DContext::ensureTarget() {
   return true;
 }
 
+Microsoft::WRL::ComPtr<IDXGIDevice> D3DContext::dxgiDevice() const {
+  Microsoft::WRL::ComPtr<IDXGIDevice> dxgi;
+  if (d3d_) (void)d3d_.As(&dxgi);
+  return dxgi;
+}
+
 bool D3DContext::begin() {
   if (!ok() || !ensureTarget()) return false;
   dc_->BeginDraw();
