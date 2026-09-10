@@ -16,7 +16,7 @@ if not exist build mkdir build
 set "FLAGS=/nologo /std:c++20 /EHsc /W4 /utf-8 /O2 /MT /I."
 
 echo [1/3] 编译单测...
-cl %FLAGS% tests\*.cpp core\*.cpp adapters\kimi\*.cpp /Fo:build\ /Fe:build\okmeter-tests.exe || (popd & exit /b 1)
+cl %FLAGS% tests\*.cpp core\*.cpp adapters\kimi\*.cpp ui\geometry.cpp /Fo:build\ /Fe:build\okmeter-tests.exe || (popd & exit /b 1)
 
 echo [2/3] 运行单测...
 build\okmeter-tests.exe || (popd & exit /b 1)
