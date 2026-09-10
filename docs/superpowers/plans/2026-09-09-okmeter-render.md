@@ -1164,7 +1164,9 @@ git commit -m "feat(okmeter): 目录变更监听、换边与右键菜单"
 
 ## 后续计划（不在本计划范围）
 
-- **Plan 2b（高级材质与形态）**：WGC 背景捕获（`WDA_EXCLUDEFROMCAPTURE`）+ 毛玻璃/液态玻璃/沉浸光感材质渲染模块 + 胶囊量表/星环罗盘形态；复用 `Registry<T>` 做形态/材质注册表（规格 §3.6）。
+- **Plan 2b（高级材质与形态）**：WGC 背景捕获（`WDA_EXCLUDEFROMCAPTURE`）+ 毛玻璃/液态玻璃/沉浸光感材质渲染模块 + 胶囊量表/星环罗盘形态；复用 `Registry<T>` 做形态/材质注册表（规格 §3.6）。另含两项 Plan 2 有意简化、归口本计划的规格偏差：
+  - 拖拽换边（§3.2 "拖到另一侧松手即换边"；Plan 2 仅右键菜单换边）；
+  - 多显示器按"窗口中心所在屏"处理（当前实现取主屏 `SM_CXSCREEN`/`SM_CYSCREEN`）。
 - **Plan 3（设置背板）**：D2D/DWrite 背板式设置面板（v8 背板 + 缩略图选项卡），两段式保存；面板跟随当前材质。
 - **Plan 4（集成与分发）**：托盘菜单项、build-dist.sh 的 MSVC 步骤、version.rc 接 sync-version、iss [Files]、/SUBSYSTEM:WINDOWS。
 

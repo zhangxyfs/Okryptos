@@ -46,6 +46,7 @@ private:
   bool ensure(D3DContext& d3d);  // dc 指针变化（设备重建）时重建全部资源
 
   ID2D1DeviceContext* seen_ = nullptr;
+  unsigned seenGen_ = 0;  // 上次重建资源时的设备代际（防 dc 地址复用 ABA 误判）
   Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush_;
   Microsoft::WRL::ComPtr<IDWriteTextFormat> valueFmt_;
   Microsoft::WRL::ComPtr<IDWriteTextFormat> labelFmt_;

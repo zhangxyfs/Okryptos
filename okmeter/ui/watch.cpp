@@ -6,6 +6,8 @@ namespace okmeter {
 DirWatcher::~DirWatcher() {
   if (dir_ != INVALID_HANDLE_VALUE) {
     CancelIoEx(dir_, &ov_);
+    DWORD bytes = 0;
+    GetOverlappedResult(dir_, &ov_, &bytes, TRUE);  // 等 IRP 落定再关句柄（取消落定返回 FALSE 属正常）
     CloseHandle(dir_);
   }
   if (event_) CloseHandle(event_);

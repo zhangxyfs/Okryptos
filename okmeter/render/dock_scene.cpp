@@ -27,9 +27,11 @@ bool makeFmt(IDWriteFactory* dw, const wchar_t* family, float size,
 bool DockScene::ensure(D3DContext& d3d) {
   ID2D1DeviceContext* dc = d3d.dc();
   if (!dc || !d3d.dwrite()) return false;
-  if (dc == seen_ && brush_ && valueFmt_ && labelFmt_ && cardTitleFmt_ &&
-      cardBigFmt_ && cardRowFmt_ && cardValFmt_ && cardFootFmt_) return true;
+  if (dc == seen_ && seenGen_ == d3d.generation() && brush_ && valueFmt_ &&
+      labelFmt_ && cardTitleFmt_ && cardBigFmt_ && cardRowFmt_ && cardValFmt_ &&
+      cardFootFmt_) return true;
   seen_ = dc;
+  seenGen_ = d3d.generation();
   brush_.Reset();
   valueFmt_.Reset();
   labelFmt_.Reset();

@@ -52,7 +52,9 @@ bool D3DContext::init(HWND hwnd, int w, int h) {
   if (FAILED(target_->SetRoot(visual_.Get()))) return false;
 
   // 5. 透明 swapchain 并挂到 visual
-  return createSwapChain();
+  if (!createSwapChain()) return false;
+  ++generation_;  // 重建成功：代际 +1（资源缓存方据此失效）
+  return true;
 }
 
 bool D3DContext::createSwapChain() {

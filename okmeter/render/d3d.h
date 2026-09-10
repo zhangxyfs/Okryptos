@@ -24,6 +24,8 @@ public:
   ID2D1DeviceContext* dc() const { return dc_.Get(); }
   IDWriteFactory* dwrite() const { return dwrite_.Get(); }
   bool ok() const { return dc_ != nullptr; }
+  // 设备代际：每次 init 重建成功 +1；资源缓存方应比较代际而非裸指针（防 ABA）
+  unsigned generation() const { return generation_; }
 
 private:
   void release();
@@ -42,6 +44,7 @@ private:
   Microsoft::WRL::ComPtr<IDCompositionVisual> visual_;
   Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_;
   Microsoft::WRL::ComPtr<ID2D1Bitmap1> frame_;
+  unsigned generation_ = 0;
 };
 
 } // namespace okmeter::render
