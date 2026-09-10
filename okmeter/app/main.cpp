@@ -1,11 +1,13 @@
-// app/main.cpp —— 冒烟入口（Plan 1）：扫描真实 home 打印各口径总量
-// 窗口/渲染属 Plan 2；本入口同时充当采集链路的可执行验收
+// app/main.cpp —— 入口：默认启动 dock（Plan 2 起为产品形态）；
+// --scan 保留 Plan 1 控制台冒烟（扫描真实 home 打印各口径总量）
 #include "../adapters/kimi/adapter.h"
 #include "../core/aggregator.h"
 #include "../core/paths.h"
 #include "../core/store.h"
+#include "../ui/app.h"
 #include <chrono>
 #include <cstdio>
+#include <string>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -24,7 +26,7 @@ static void printSums(const char* label, const Sums& s) {
               (long long)s.output);
 }
 
-int main() {
+static int runSmoke() {
   SetConsoleOutputCP(CP_UTF8);
   Store store(okmeterDir());
   store.load();
@@ -46,4 +48,10 @@ int main() {
     std::printf("  %-24s all %lld\n", id.c_str(), (long long)m->all.total());
   }
   return 0;
+}
+
+int main(int argc, char** argv) {
+  if (argc > 1 && std::string(argv[1]) == "--scan") return runSmoke();
+  DockApp app;
+  return app.run(GetModuleHandleW(nullptr));
 }

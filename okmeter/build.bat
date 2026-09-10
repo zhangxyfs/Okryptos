@@ -15,15 +15,23 @@ call "%VS%\VC\Auxiliary\Build\vcvars64.bat" >nul || (echo 错误：vcvars64 初�
 if not exist build mkdir build
 set "FLAGS=/nologo /std:c++20 /EHsc /W4 /utf-8 /O2 /MT /I."
 
+rem -- source groups: tests must not include render/ or ui/app.cpp ui/watch.cpp --
+set "CORE=core\*.cpp"
+set "ADAPT=adapters\kimi\*.cpp"
+set "UI_CORE=ui\geometry.cpp"
+set "UI_WIN=ui\app.cpp ui\watch.cpp"
+set "RENDER=render\*.cpp"
+set "SYSLIBS=d3d11.lib d2d1.lib dwrite.lib dcomp.lib dxgi.lib windowscodecs.lib user32.lib"
+
 echo [1/3] 编译单测...
-cl %FLAGS% tests\*.cpp core\*.cpp adapters\kimi\*.cpp ui\geometry.cpp /Fo:build\ /Fe:build\okmeter-tests.exe || (popd & exit /b 1)
+cl %FLAGS% tests\*.cpp %CORE% %ADAPT% %UI_CORE% /Fo:build\ /Fe:build\okmeter-tests.exe || (popd & exit /b 1)
 
 echo [2/3] 运行单测...
 build\okmeter-tests.exe || (popd & exit /b 1)
 
 echo [3/3] 编译 OkMeter.exe...
 rc /nologo /fo build\version.res version.rc || (popd & exit /b 1)
-cl %FLAGS% app\main.cpp core\*.cpp adapters\kimi\*.cpp build\version.res /Fo:build\ /Fe:build\OkMeter.exe || (popd & exit /b 1)
+cl %FLAGS% app\main.cpp %CORE% %ADAPT% %UI_CORE% %UI_WIN% %RENDER% build\version.res %SYSLIBS% /Fo:build\ /Fe:build\OkMeter.exe || (popd & exit /b 1)
 
 echo 完成：build\OkMeter.exe
 popd
