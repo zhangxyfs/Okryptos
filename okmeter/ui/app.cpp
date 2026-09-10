@@ -12,6 +12,7 @@ namespace {
 
 constexpr wchar_t kClassName[] = L"OkMeterDock";
 constexpr int kCollapsedPx = 24;    // 收缩态露出宽度
+constexpr int kCardZoneW = 268;     // 展开态卡区宽（卡 252 + 两侧边距）
 constexpr UINT_PTR kTimerAnim = 1;    // 动画帧 16ms
 constexpr UINT_PTR kTimerPoll = 2;    // 数据轮询 2000ms
 constexpr UINT_PTR kTimerRel = 3;     // 相对时间/口径文本刷新 30s
@@ -51,6 +52,16 @@ const wchar_t* scopeLabel(Scope s) {
 
 double lerp(double a, double b, double t) { return a + (b - a) * t; }
 
+Sums scopeSums(const Aggregator& agg, Scope s, int64_t now) {
+  switch (s) {
+  case Scope::Session: return agg.session();
+  case Scope::Today:   return agg.today(now);
+  case Scope::Week:    return agg.week(now);
+  case Scope::All:     return agg.all();
+  }
+  return agg.all();
+}
+
 } // namespace
 
 DockApp::~DockApp() = default;
@@ -68,16 +79,57 @@ void DockApp::rebuildItems() {
       if (const ModelStat* m = agg.model(b.modelId)) v = m->all.total();
       items_[i].label = wide(shortName(b.modelId));
     } else {
-      switch (b.scope) {
-      case Scope::Session: v = agg.session().total(); break;
-      case Scope::Today:   v = agg.today(now).total(); break;
-      case Scope::Week:    v = agg.week(now).total(); break;
-      case Scope::All:     v = agg.all().total(); break;
-      }
+      v = scopeSums(agg, b.scope, now).total();
       items_[i].label = scopeLabel(b.scope);
     }
     items_[i].value = wide(fmtCompact(v));
   }
+  rebuildCard();  // 数据/口径刷新后卡内容同源更新
+}
+
+// 悬停详情卡组装：hoverIdx<0 或越界 → 隐藏；模型/总量双模式（规格 §3.4）
+void DockApp::rebuildCard() {
+  card_ = render::DetailCard{};
+  if (hoverIdx_ < 0 || hoverIdx_ >= (int)bindings_.size()) return;
+  Aggregator& agg = store_->agg();
+  const Binding& b = bindings_[(size_t)hoverIdx_];
+  const int64_t now = nowMs();
+  auto row = [&](const wchar_t* label, int64_t v) {
+    card_.rows.emplace_back(label, wide(fmtExact(v)));
+  };
+  if (b.isModel) {
+    const ModelStat* m = agg.model(b.modelId);
+    if (!m) return;
+    card_.title = wide(b.modelId);
+    card_.big = wide(fmtExact(m->all.total()));
+    row(L"今日", agg.modelToday(b.modelId, now).total());
+    row(L"本周", agg.modelWeek(b.modelId, now).total());
+    row(L"累计", m->all.total());
+    card_.foot = L"最近调用 " + wide(relTime(m->lastCallMs, now)) + L" · 模型模式";
+  } else {
+    const Sums t = scopeSums(agg, b.scope, now);
+    card_.title = std::wstring(scopeLabel(b.scope)) + L" · 总量模式";
+    card_.big = wide(fmtExact(t.total()));
+    row(L"当前会话", agg.session().total());
+    row(L"今日", agg.today(now).total());
+    row(L"全部累计", agg.all().total());
+    const int64_t input = t.inputOther + t.inputCacheRead + t.inputCacheCreation;
+    if (cfg_.mergeCache) {
+      // cache pct = (cacheRead+cacheCreation)/input×100，input=0 时 pct=0
+      const long pct = input
+          ? (long)std::lround(100.0 * (t.inputCacheRead + t.inputCacheCreation) / input)
+          : 0;
+      card_.rows.emplace_back(L"input",
+          wide(fmtExact(input)) + L" · cache 命中 " + std::to_wstring(pct) + L"%");
+      row(L"output", t.output);
+    } else {
+      row(L"常规 input", t.inputOther);
+      row(L"cache 读", t.inputCacheRead);
+      row(L"cache 新建", t.inputCacheCreation);
+      row(L"output", t.output);
+    }
+  }
+  card_.valid = true;
 }
 
 void DockApp::pollData() {
@@ -94,10 +146,11 @@ void DockApp::rebuildLayout() {
   int h = (int)g.h;
   if (h < 120) h = 120;
   dockW_ = (int)g.w;
+  winH_ = h;
   RECT work{};
   SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
   winY_ = work.top + ((work.bottom - work.top) - h) / 2;
-  SetWindowPos(hwnd_, nullptr, 0, winY_, dockW_, h,
+  SetWindowPos(hwnd_, nullptr, 0, winY_, dockW_ + (wide_ ? kCardZoneW : 0), h,
                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
   updatePosition();
 }
@@ -105,20 +158,36 @@ void DockApp::rebuildLayout() {
 void DockApp::updatePosition() {
   if (!hwnd_) return;
   const int screenW = GetSystemMetrics(SM_CXSCREEN);
-  const double e = emerge_.value;
+  const double base = lerp((double)kCollapsedPx, (double)dockW_, emerge_.value);
   int x;
   if (cfg_.edge == "left")
-    x = (int)std::lround(lerp((double)kCollapsedPx, (double)dockW_, e) - dockW_);
+    x = (int)std::lround(base - dockW_);  // 卡区在球区右侧，x 不变
   else
-    x = screenW - (int)std::lround(lerp((double)kCollapsedPx, (double)dockW_, e));
+    x = screenW - (int)std::lround(base) - (wide_ ? kCardZoneW : 0);
   SetWindowPos(hwnd_, nullptr, x, winY_, 0, 0,
                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+// 展开/收缩切换窗口宽度（球区位置不动，卡区在屏内侧增减）
+void DockApp::setWide(bool w) {
+  if (wide_ == w || !hwnd_) return;
+  wide_ = w;
+  const int screenW = GetSystemMetrics(SM_CXSCREEN);
+  const double base = lerp((double)kCollapsedPx, (double)dockW_, emerge_.value);
+  int x;
+  if (cfg_.edge == "left")
+    x = (int)std::lround(base - dockW_);
+  else
+    x = screenW - (int)std::lround(base) - (wide_ ? kCardZoneW : 0);
+  SetWindowPos(hwnd_, nullptr, x, winY_, dockW_ + (wide_ ? kCardZoneW : 0), winH_,
+               SWP_NOZORDER | SWP_NOACTIVATE);  // WM_SIZE → d3d.resize + render
 }
 
 void DockApp::setEmergeTarget(double t) {
   if (emergeTarget_ == t) return;
   emergeTarget_ = t;
   emerged_ = false;
+  setWide(t > 0.5);
 }
 
 void DockApp::render() {
@@ -127,7 +196,14 @@ void DockApp::render() {
   const int screenH = GetSystemMetrics(SM_CYSCREEN);
   DockGeom g = layoutArc(cfg_.count, 30, 14, screenH, cfg_.edge);
   applyHover(g, hoverIdx_, kHoverScale, kHoverPush);
-  scene_.draw(d3d_, g, items_, (cfg_.count - 1) / 2, emerge_.value, cfg_.edge);
+  // 宽窗右缘：球区整体右移 268（卡区靠左贴球区）；左缘球区在窗口左端不动
+  const float dx = (wide_ && cfg_.edge == "right") ? (float)kCardZoneW : 0.0f;
+  scene_.draw(d3d_, g, items_, (cfg_.count - 1) / 2, emerge_.value, cfg_.edge, dx);
+  if (card_.valid && hoverIdx_ >= 0 && hoverIdx_ < (int)g.items.size() &&
+      emerge_.value > 0.5) {
+    const ItemGeom& it = g.items[(size_t)hoverIdx_];
+    scene_.drawCard(d3d_, card_, cfg_.edge, g.w, (double)winH_, it.y + it.dy);
+  }
   d3d_.end();
 }
 
@@ -191,6 +267,7 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
     }
     if (idx != hoverIdx_) {
       hoverIdx_ = idx;
+      rebuildCard();  // 切球即换卡内容
       render();
     }
     return 0;
@@ -199,6 +276,7 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
     trackingLeave_ = false;
     if (hoverIdx_ != -1) {
       hoverIdx_ = -1;
+      rebuildCard();  // 移出即隐
       render();
     }
     SetTimer(hwnd_, kTimerRetract, 600, nullptr);  // 600ms 迟滞后收回
@@ -249,6 +327,7 @@ int DockApp::run(HINSTANCE inst) {
   int h = (int)g.h;
   if (h < 120) h = 120;
   dockW_ = (int)g.w;
+  winH_ = h;
   RECT work{};
   SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
   winY_ = work.top + ((work.bottom - work.top) - h) / 2;
