@@ -184,6 +184,8 @@ bool BackdropCapture::start(HWND hwnd, IDXGIDevice* dxgi) {
   dirty_ = false;
   capW_ = size.Width;
   capH_ = size.Height;
+  capX_ = mi.rcMonitor.left;
+  capY_ = mi.rcMonitor.top;
   device_ = dev;
   ReleaseSRWLockExclusive(&lock_);
   item_ = item;
@@ -293,6 +295,13 @@ bool BackdropCapture::acquire(ID3D11Texture2D** out) {
   if (latest_) (void)latest_.CopyTo(out);
   ReleaseSRWLockShared(&lock_);
   return *out != nullptr;
+}
+
+void BackdropCapture::capOrigin(int& x, int& y) const {
+  AcquireSRWLockShared(&lock_);
+  x = capX_;
+  y = capY_;
+  ReleaseSRWLockShared(&lock_);
 }
 
 bool BackdropCapture::dirty() const {

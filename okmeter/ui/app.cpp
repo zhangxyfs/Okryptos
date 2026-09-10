@@ -2,6 +2,7 @@
 #include "../adapters/kimi/adapter.h"
 #include "../core/fmt.h"
 #include "../core/paths.h"
+#include "../core/registry.h"
 #include "../core/store.h"
 #include <chrono>
 #include <cmath>
@@ -23,12 +24,12 @@ namespace okmeter {
 namespace {
 
 constexpr wchar_t kClassName[] = L"OkMeterDock";
-constexpr int kCollapsedPx = 24;    // 收缩态露出宽度
 constexpr int kCardZoneW = 268;     // 展开态卡区宽（卡 252 + 两侧边距）
 constexpr UINT_PTR kTimerAnim = 1;    // 动画帧 16ms
 constexpr UINT_PTR kTimerPoll = 2;    // 数据轮询 2000ms
 constexpr UINT_PTR kTimerRel = 3;     // 相对时间/口径文本刷新 30s
 constexpr UINT_PTR kTimerRetract = 4; // 离开迟滞 600ms（一次性）
+constexpr UINT_PTR kTimerShot = 5;    // --shot 自检：启动 2.5s 后截图退出（一次性）
 constexpr UINT kMenuFlip = 1;         // 右键菜单：换边
 constexpr UINT kMenuExit = 2;         // 右键菜单：退出
 constexpr double kHoverScale = 1.34;
@@ -163,6 +164,19 @@ Sums scopeSums(const Aggregator& agg, Scope s, int64_t now) {
 
 DockApp::~DockApp() = default;
 
+// 形态/材质：注册表按 cfg 创建，未知名称回退 arc/dark（后续 Plan 2b 形态注册进同一表）
+void DockApp::createModules() {
+  Registry<render::IForm> forms;
+  render::registerArcForm(forms);
+  form_ = forms.create(cfg_.form);
+  if (!form_) form_ = forms.create("arc");
+
+  Registry<render::IMaterial> materials;
+  render::registerDarkMaterial(materials);
+  material_ = materials.create(cfg_.material);
+  if (!material_) material_ = materials.create("dark");
+}
+
 void DockApp::rebuildItems() {
   Aggregator& agg = store_->agg();
   bindings_ = resolveBindings(cfg_, agg);
@@ -239,7 +253,7 @@ void DockApp::pollData() {
 
 void DockApp::rebuildLayout() {
   const int screenH = GetSystemMetrics(SM_CYSCREEN);
-  const DockGeom g = layoutArc(cfg_.count, 30, 14, screenH, cfg_.edge);
+  const DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
   int h = (int)g.h;
   if (h < 120) h = 120;
   dockW_ = (int)g.w;
@@ -320,15 +334,23 @@ void DockApp::render() {
 #endif
   d3d_.dc()->Clear(D2D1::ColorF(0, 0.0f));  // 全透明底
   const int screenH = GetSystemMetrics(SM_CYSCREEN);
-  DockGeom g = layoutArc(cfg_.count, 30, 14, screenH, cfg_.edge);
+  DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
   applyHover(g, hoverIdx_, kHoverScale, kHoverPush);
   // 宽窗右缘：球区整体右移 268（卡区靠左贴球区）；左缘球区在窗口左端不动
   const float dx = (wide_ && cfg_.edge == "right") ? (float)kCardZoneW : 0.0f;
-  scene_.draw(d3d_, g, items_, (cfg_.count - 1) / 2, emerge_.value, cfg_.edge, dx);
+  // 背景纹理→窗口坐标平移：tex(0,0)=捕获屏左上角；窗口左上角=GetWindowRect
+  RECT wr{};
+  GetWindowRect(hwnd_, &wr);
+  int monX = 0, monY = 0;
+  backdrop_.capOrigin(monX, monY);
+  scene_.draw(d3d_, *form_, *material_, &backdrop_, g, items_,
+              (cfg_.count - 1) / 2, emerge_.value, cfg_.edge, dx,
+              (float)(monX - wr.left), (float)(monY - wr.top));
   if (card_.valid && hoverIdx_ >= 0 && hoverIdx_ < (int)g.items.size() &&
       emerge_.value > 0.5) {
     const ItemGeom& it = g.items[(size_t)hoverIdx_];
-    scene_.drawCard(d3d_, card_, cfg_.edge, g.w, (double)winH_, it.y + it.dy);
+    scene_.drawCard(d3d_, *material_, card_, cfg_.edge, g.w, (double)winH_,
+                    it.y + it.dy);
   }
 #if defined(OKM_ANIM_DIAG)
   const LARGE_INTEGER drawEnd = qpcNow();
@@ -416,6 +438,23 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
       KillTimer(hwnd_, kTimerRetract);
       setEmergeTarget(0);
       return 0;
+    case kTimerShot: {
+      KillTimer(hwnd_, kTimerShot);
+      // 自检截图：直接静止在展开终态（悬停中心球），不等弹簧动画
+      hoverIdx_ = (cfg_.count - 1) / 2;
+      emerge_.snap(1);
+      emergeTarget_ = 1;
+      emerged_ = true;
+      setWide(true);
+      updatePosition();
+      rebuildCard();
+      render();
+      render();  // setWide 触发的 resize 可能让首帧 EndDraw 返回 RECREATE_TARGET
+                 // 被丢弃（end 内重建设备），第二帧才落到新设备 back buffer
+      (void)d3d_.saveFrame(shotPath_);
+      DestroyWindow(hwnd_);
+      return 0;
+    }
     }
     return 0;
   case WM_MOUSEMOVE: {
@@ -429,9 +468,11 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
       KillTimer(hwnd_, kTimerRetract);  // 进入取消迟滞收回
       setEmergeTarget(1);
     }
+    material_->onPointer((float)(int)(short)LOWORD(lp),
+                         (float)(int)(short)HIWORD(lp));  // 跟手光光源
     const int y = (int)(short)HIWORD(lp);
     const int screenH = GetSystemMetrics(SM_CYSCREEN);
-    const DockGeom g = layoutArc(cfg_.count, 30, 14, screenH, cfg_.edge);
+    const DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
     int idx = -1;
     double best = kHoverHitY;
     for (size_t i = 0; i < g.items.size(); ++i) {
@@ -500,7 +541,8 @@ LRESULT CALLBACK DockApp::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
   return self->onMessage(msg, wp, lp);
 }
 
-int DockApp::run(HINSTANCE inst) {
+int DockApp::run(HINSTANCE inst, const std::wstring& shotPath) {
+  shotPath_ = shotPath;
   // DPI 感知（失败忽略，按系统缩放继续）
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -518,13 +560,14 @@ int DockApp::run(HINSTANCE inst) {
   kimi_ = std::make_unique<KimiAdapter>(kimiHome(), store_.get());
   loadConfig(okmeterDir(), cfg_);
   cfg_.normalize();
+  createModules();  // 形态/材质注册表创建（布局与渲染都经 form_）
 
   // 目录变更监听：RDCW 提前触发 poll；失败静默回落纯 2s 轮询
   watch_.start(kimiHome() / "sessions");
 
   // 初始窗口：收缩态（e=0，右缘露出 24px）
   const int screenH = GetSystemMetrics(SM_CYSCREEN);
-  const DockGeom g = layoutArc(cfg_.count, 30, 14, screenH, cfg_.edge);
+  const DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
   int h = (int)g.h;
   if (h < 120) h = 120;
   dockW_ = (int)g.w;
@@ -572,6 +615,7 @@ int DockApp::run(HINSTANCE inst) {
   if (!animTimer_) SetTimer(hwnd_, kTimerAnim, 16, nullptr);
   SetTimer(hwnd_, kTimerPoll, 2000, nullptr);
   SetTimer(hwnd_, kTimerRel, 30000, nullptr);
+  if (!shotPath_.empty()) SetTimer(hwnd_, kTimerShot, 2500, nullptr);  // 等 WGC 帧流稳定
 
   MSG msg;
   if (!animTimer_) {

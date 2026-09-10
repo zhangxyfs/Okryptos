@@ -29,6 +29,10 @@ public:
   bool ok() const { return ok_; }
   bool degraded() const { return degraded_; }  // affinity 缺失/失败 → 液态玻璃不可用
 
+  // 捕获纹理原点：纹理像素 (0,0) 对应的虚拟屏幕坐标（显示器左上角），
+  // 供渲染侧把窗口坐标换算成纹理坐标；捕获未启动时为 (0,0)
+  void capOrigin(int& x, int& y) const;
+
   // 渲染侧取最新帧：成功返回 AddRef 的整屏纹理（BGRA8，捕获尺寸）
   bool acquire(ID3D11Texture2D** out);
   bool dirty() const;
@@ -50,6 +54,7 @@ private:
   bool dirty_ = false;
   unsigned long long frames_ = 0;
   int capW_ = 0, capH_ = 0;  // 帧池尺寸（内容尺寸变化时回调线程 Recreate）
+  int capX_ = 0, capY_ = 0;  // 捕获显示器左上角虚拟屏幕坐标（纹理原点）
 
   bool ok_ = false;
   bool degraded_ = false;

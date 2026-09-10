@@ -1,4 +1,5 @@
 #include "d3d.h"
+#include <wincodec.h>
 
 using Microsoft::WRL::ComPtr;
 
@@ -95,6 +96,65 @@ Microsoft::WRL::ComPtr<IDXGIDevice> D3DContext::dxgiDevice() const {
   Microsoft::WRL::ComPtr<IDXGIDevice> dxgi;
   if (d3d_) (void)d3d_.As(&dxgi);
   return dxgi;
+}
+
+// back buffer → staging → WIC PNG（预乘 BGRA 转非预乘编码）
+bool D3DContext::saveFrame(const std::wstring& path) const {
+  if (!swap_ || !d3d_) return false;
+  ComPtr<ID3D11Texture2D> back;
+  if (FAILED(swap_->GetBuffer(0, IID_PPV_ARGS(&back)))) return false;
+  D3D11_TEXTURE2D_DESC desc{};
+  back->GetDesc(&desc);
+  desc.Usage = D3D11_USAGE_STAGING;
+  desc.BindFlags = 0;
+  desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+  desc.MiscFlags = 0;
+  ComPtr<ID3D11Texture2D> staging;
+  if (FAILED(d3d_->CreateTexture2D(&desc, nullptr, &staging))) return false;
+  ComPtr<ID3D11DeviceContext> imm;
+  d3d_->GetImmediateContext(&imm);
+  if (!imm) return false;
+  imm->CopyResource(staging.Get(), back.Get());
+
+  (void)CoInitializeEx(nullptr, COINIT_MULTITHREADED);  // 已初始化则 S_FALSE
+  ComPtr<IWICImagingFactory> wic;
+  if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                              CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))))
+    return false;
+
+  D3D11_MAPPED_SUBRESOURCE m{};
+  if (FAILED(imm->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &m))) return false;
+  bool ok = false;
+  ComPtr<IWICBitmap> bmp;
+  if (SUCCEEDED(wic->CreateBitmapFromMemory(
+          desc.Width, desc.Height, GUID_WICPixelFormat32bppPBGRA, m.RowPitch,
+          m.RowPitch * desc.Height, static_cast<BYTE*>(m.pData), &bmp))) {
+    ComPtr<IWICFormatConverter> conv;
+    if (SUCCEEDED(wic->CreateFormatConverter(&conv)) &&
+        SUCCEEDED(conv->Initialize(bmp.Get(), GUID_WICPixelFormat32bppBGRA,
+                                   WICBitmapDitherTypeNone, nullptr, 0.0,
+                                   WICBitmapPaletteTypeCustom))) {
+      ComPtr<IWICStream> stream;
+      ComPtr<IWICBitmapEncoder> enc;
+      ComPtr<IWICBitmapFrameEncode> frame;
+      if (SUCCEEDED(wic->CreateStream(&stream)) &&
+          SUCCEEDED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE)) &&
+          SUCCEEDED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc)) &&
+          SUCCEEDED(enc->Initialize(stream.Get(), WICBitmapEncoderNoCache)) &&
+          SUCCEEDED(enc->CreateNewFrame(&frame, nullptr)) &&
+          SUCCEEDED(frame->Initialize(nullptr)) &&
+          SUCCEEDED(frame->SetSize(desc.Width, desc.Height)) &&
+          SUCCEEDED(frame->SetResolution(96.0, 96.0))) {
+        WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppBGRA;
+        if (SUCCEEDED(frame->SetPixelFormat(&fmt)) &&
+            SUCCEEDED(frame->WriteSource(conv.Get(), nullptr)) &&
+            SUCCEEDED(frame->Commit()) && SUCCEEDED(enc->Commit()))
+          ok = true;
+      }
+    }
+  }
+  imm->Unmap(staging.Get(), 0);
+  return ok;
 }
 
 bool D3DContext::begin() {

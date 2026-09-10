@@ -5,16 +5,11 @@ using Microsoft::WRL::ComPtr;
 namespace okmeter::render {
 namespace {
 
-constexpr UINT32 kAccent = 0x5FE0A8;  // 原型 accent 绿
-
-D2D1_COLOR_F kHairline() { return D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.13f); }
-D2D1_COLOR_F kGlass()    { return D2D1::ColorF(0.06f, 0.07f, 0.09f, 0.92f); }
-D2D1_COLOR_F kCardBg()   { return D2D1::ColorF(0.06f, 0.07f, 0.09f, 0.90f); }
-
 // 创建文本格式并设对齐（失败返回 false）
 bool makeFmt(IDWriteFactory* dw, const wchar_t* family, float size,
-             DWRITE_TEXT_ALIGNMENT halign, IDWriteTextFormat** out) {
-  if (FAILED(dw->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+             DWRITE_FONT_WEIGHT weight, DWRITE_TEXT_ALIGNMENT halign,
+             IDWriteTextFormat** out) {
+  if (FAILED(dw->CreateTextFormat(family, nullptr, weight,
                                   DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
                                   size, L"", out))) return false;
   (*out)->SetTextAlignment(halign);
@@ -40,20 +35,30 @@ bool DockScene::ensure(D3DContext& d3d) {
   cardRowFmt_.Reset();
   cardValFmt_.Reset();
   cardFootFmt_.Reset();
-  if (FAILED(dc->CreateSolidColorBrush(kGlass(), &brush_))) return false;
+  if (FAILED(dc->CreateSolidColorBrush(D2D1::ColorF(0, 0), &brush_))) return false;
   IDWriteFactory* dw = d3d.dwrite();
-  return makeFmt(dw, L"Consolas", 11.0f, DWRITE_TEXT_ALIGNMENT_CENTER, &valueFmt_) &&
-         makeFmt(dw, L"Consolas", 8.5f, DWRITE_TEXT_ALIGNMENT_CENTER, &labelFmt_) &&
-         makeFmt(dw, L"Segoe UI", 10.5f, DWRITE_TEXT_ALIGNMENT_LEADING, &cardTitleFmt_) &&
-         makeFmt(dw, L"Consolas", 21.0f, DWRITE_TEXT_ALIGNMENT_LEADING, &cardBigFmt_) &&
-         makeFmt(dw, L"Segoe UI", 11.0f, DWRITE_TEXT_ALIGNMENT_LEADING, &cardRowFmt_) &&
-         makeFmt(dw, L"Consolas", 11.0f, DWRITE_TEXT_ALIGNMENT_TRAILING, &cardValFmt_) &&
-         makeFmt(dw, L"Segoe UI", 10.0f, DWRITE_TEXT_ALIGNMENT_LEADING, &cardFootFmt_);
+  // 数值字号校准原型：值 13px 600 字重、短名 8.5px
+  return makeFmt(dw, L"Consolas", 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                 DWRITE_TEXT_ALIGNMENT_CENTER, &valueFmt_) &&
+         makeFmt(dw, L"Consolas", 8.5f, DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_CENTER, &labelFmt_) &&
+         makeFmt(dw, L"Segoe UI", 10.5f, DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_LEADING, &cardTitleFmt_) &&
+         makeFmt(dw, L"Consolas", 21.0f, DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_LEADING, &cardBigFmt_) &&
+         makeFmt(dw, L"Segoe UI", 11.0f, DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_LEADING, &cardRowFmt_) &&
+         makeFmt(dw, L"Consolas", 11.0f, DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_TRAILING, &cardValFmt_) &&
+         makeFmt(dw, L"Segoe UI", 10.0f, DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_LEADING, &cardFootFmt_);
 }
 
-void DockScene::draw(D3DContext& d3d, const DockGeom& g,
+void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
+                     BackdropCapture* backdrop, const DockGeom& g,
                      const std::vector<DockItem>& items, int mid,
-                     double e, const std::string& edge, float dx) {
+                     double e, const std::string& edge, float dx,
+                     float backdropDX, float backdropDY) {
   if (!ensure(d3d)) return;
   ID2D1DeviceContext* dc = d3d.dc();
   dc->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
@@ -62,73 +67,40 @@ void DockScene::draw(D3DContext& d3d, const DockGeom& g,
   const size_t n = g.items.size();
   if (n == 0) return;
 
-  // 收缩 tuck：e=0 时球心收拢到露出条内侧（右帽露出 12px），e=1 回布局位；
-  // dx 为球区在窗口内的水平偏移（含卡区时右缘 +268）
-  auto drawPos = [&](const ItemGeom& it, D2D1_POINT_2F& out) {
-    const double collapsedX =
-        edge == "right" ? (12.0 - it.r) : (g.w - 12.0 + it.r);
-    out.x = (float)(it.x + (1.0 - e) * (collapsedX - it.x)) + dx;
-    out.y = (float)(it.y + it.dy);
-  };
-
-  // 弧线：首项到末项依次连线（tuck/dy 随点走）
-  brush_->SetColor(kHairline());
-  for (size_t i = 0; i + 1 < n; ++i) {
-    D2D1_POINT_2F a, b;
-    drawPos(g.items[i], a);
-    drawPos(g.items[i + 1], b);
-    dc->DrawLine(a, b, brush_.Get(), 1.0f);
-  }
-
+  // 位置烘焙：收缩 tuck（e=0 球心收拢到露出侧，球帽露出 kCollapsedCapPx）+
+  // 悬停让位 dy + 卡区偏移 dx，全部并入 geom，形态/材质直读最终坐标
+  DockGeom baked = g;
   for (size_t i = 0; i < n; ++i) {
     const ItemGeom& it = g.items[i];
-    D2D1_POINT_2F c;
-    drawPos(it, c);
-    const float r = (float)it.r;
-    const bool isCenter = (int)i == mid;
-
-    const bool scaled = it.scale > 1.001;
-    if (scaled)
-      dc->SetTransform(D2D1::Matrix3x2F::Scale((float)it.scale, (float)it.scale, c));
-
-    // 中心项：半径+3 accent 10% 光晕环
-    if (isCenter) {
-      brush_->SetColor(D2D1::ColorF(kAccent, 0.10f));
-      const D2D1_ELLIPSE halo = D2D1::Ellipse(c, r + 3.0f, r + 3.0f);
-      dc->DrawEllipse(&halo, brush_.Get(), 6.0f);
-    }
-
-    // 球体：深玻璃底 + 1px 描边（中心项 accent）
-    brush_->SetColor(kGlass());
-    const D2D1_ELLIPSE ball = D2D1::Ellipse(c, r, r);
-    dc->FillEllipse(&ball, brush_.Get());
-    brush_->SetColor(isCenter ? D2D1::ColorF(kAccent, 1.0f) : kHairline());
-    dc->DrawEllipse(&ball, brush_.Get(), 1.0f);
-
-    // 球内双行文本：上值下名
-    if (i < items.size()) {
-      const DockItem& di = items[i];
-      if (!di.value.empty()) {
-        brush_->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.93f));
-        const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y - 15.0f, c.x + r, c.y + 1.0f);
-        dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), valueFmt_.Get(),
-                     &tr, brush_.Get());
-      }
-      if (!di.label.empty()) {
-        brush_->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.66f));
-        const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y + 1.0f, c.x + r, c.y + 15.0f);
-        dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), labelFmt_.Get(),
-                     &tr, brush_.Get());
-      }
-    }
-
-    if (scaled) dc->SetTransform(D2D1::Matrix3x2F::Identity());
+    const double collapsedX =
+        edge == "right" ? ((double)kCollapsedCapPx - it.r)
+                        : (g.w - kCollapsedCapPx + it.r);
+    baked.items[i].x = it.x + (1.0 - e) * (collapsedX - it.x) + dx;
+    baked.items[i].y = it.y + it.dy;
   }
+
+  material.drawArcStroke(dc, baked);
+
+  DrawContext ctx;
+  ctx.d3d = &d3d;
+  ctx.material = &material;
+  ctx.geom = &baked;
+  ctx.items = &items;
+  ctx.mid = mid;
+  ctx.e = e;
+  ctx.edge = edge;
+  ctx.brush = brush_.Get();
+  ctx.valueFmt = valueFmt_.Get();
+  ctx.labelFmt = labelFmt_.Get();
+  ctx.backdrop = backdrop;
+  ctx.backdropDX = backdropDX;
+  ctx.backdropDY = backdropDY;
+  form.drawItems(dc, ctx);
 }
 
-void DockScene::drawCard(D3DContext& d3d, const DetailCard& card,
-                         const std::string& edge, double ballZoneW,
-                         double winH, double anchorY) {
+void DockScene::drawCard(D3DContext& d3d, IMaterial& material,
+                         const DetailCard& card, const std::string& edge,
+                         double ballZoneW, double winH, double anchorY) {
   if (!card.valid || !ensure(d3d)) return;
   ID2D1DeviceContext* dc = d3d.dc();
   dc->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
@@ -148,13 +120,7 @@ void DockScene::drawCard(D3DContext& d3d, const DetailCard& card,
   if (y > maxY) y = maxY;
   if (y < 12.0f) y = 12.0f;
 
-  // 卡体：深玻璃底（90% 不透明，v1 无 backdrop blur）+ 1px hairline
-  const D2D1_ROUNDED_RECT rr =
-      D2D1::RoundedRect(D2D1::RectF(x, y, x + kCardW, y + cardH), 12.0f, 12.0f);
-  brush_->SetColor(kCardBg());
-  dc->FillRoundedRectangle(&rr, brush_.Get());
-  brush_->SetColor(kHairline());
-  dc->DrawRoundedRectangle(&rr, brush_.Get(), 1.0f);
+  material.drawCardBack(dc, D2D1::RectF(x, y, x + kCardW, y + cardH), 12.0f);
 
   const float cx0 = x + kPadX;
   const float cx1 = x + kCardW - kPadX;

@@ -33,13 +33,14 @@ class KimiAdapter;
 class DockApp {
 public:
   ~DockApp();
-  int run(HINSTANCE inst);  // DPI → 注册类 → 建窗 → 数据/渲染初始化 → 消息循环
+  // shotPath 非空 = 自检截图模式：启动后强制展开中心球，2.5s 后存 PNG 退出
+  int run(HINSTANCE inst, const std::wstring& shotPath = L"");
 
 private:
   static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
   LRESULT onMessage(UINT msg, WPARAM wp, LPARAM lp);
 
-  void render();          // layoutArc → applyHover → dock_scene 一帧（含详情卡）
+  void render();          // 布局 → applyHover → dock_scene 一帧（形态/材质委托，含详情卡）
   void animTick();        // 动画帧：RDCW 检查 + 弹簧 step（真实 dt）+ 挪窗 + 重绘
   void pollData();        // kimi.poll→agg.add→flush→rebuildItems→重绘
   void rebuildItems();    // resolveBindings + 文本缓存（值/短名）+ 详情卡重组
@@ -51,11 +52,14 @@ private:
   void flipEdge();        // 换边：edge 互换 → saveConfig → 重建位置几何
   void exitApp();         // 退出：flush 游标落盘 → DestroyWindow
   void startCapture();    // 背景捕获：取当前 DXGI 设备 → backdrop_.start（可重入）
+  void createModules();   // 按 cfg_.form/material 从注册表创建形态/材质（未知回退 arc/dark）
 
   render::D3DContext d3d_;
   render::DockScene scene_;
   render::BackdropCapture backdrop_;  // WGC 实时背景捕获（降级链见 backdrop.h）
   unsigned backdropGen_ = 0;          // 上次接线捕获时的 D3D 代际（设备丢失重建检测）
+  std::unique_ptr<render::IForm> form_;        // 形态（cfg.form，注册表创建）
+  std::unique_ptr<render::IMaterial> material_;  // 材质（cfg.material，注册表创建）
   bool sessionNotif_ = false;         // WTS 会话通知已注册
   HWND hwnd_ = nullptr;
   DirWatcher watch_;          // sessions 目录 RDCW 监听（start 失败则纯轮询）
@@ -76,6 +80,7 @@ private:
   int winY_ = 0;              // 垂直居中 y（rebuildLayout 重算）
   int winH_ = 0;              // 窗口高（卡垂直夹取/宽度切换用）
   int dockW_ = 150;           // layoutArc g.w（位置插值用）
+  std::wstring shotPath_;     // --shot 自检截图输出路径（空=正常模式）
   int64_t lastWatchMs_ = 0;   // 上次 RDCW 检查时刻（动画帧里每 500ms 一次）
   LARGE_INTEGER lastTickQpc_{};  // 上一动画 tick 的 QPC（真实 dt 采样点，含静止 tick）
   HANDLE animTimer_ = nullptr;  // HR 可等待定时器动画时钟（NULL → WM_TIMER 回退）

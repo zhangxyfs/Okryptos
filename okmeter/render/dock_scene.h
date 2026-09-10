@@ -1,18 +1,15 @@
-// render/dock_scene.h —— dock 场景绘制：弧线 + 球体 + 球内双行文本 + 悬停详情卡（暗夜材质）
+// render/dock_scene.h —— dock 场景编排：D2D 资源缓存（画刷/文本格式）+ 收缩 tuck
+// 位置烘焙 + 形态/材质委托 + 悬停详情卡。球底/卡底/弧线见 render/material.h，
+// 项布局与球内文本见 render/form.h。
 #pragma once
 
-#include "d3d.h"
-#include "../ui/geometry.h"
+#include "form.h"
+#include "material.h"
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace okmeter::render {
-
-struct DockItem {
-  std::wstring value;  // 紧凑值（球内主文本，Consolas 11px 白 93%）
-  std::wstring label;  // 模型短名 / 口径名（Consolas 8.5px 白 66%）
-};
 
 // 悬停详情卡内容（app 侧在 hoverIdx 变化/数据刷新时重组，非每帧）
 struct DetailCard {
@@ -23,27 +20,29 @@ struct DetailCard {
   bool valid = false;
 };
 
-// 每帧：弧线连线（hairline 白 13%）→ 球（深玻璃底 + 1px 描边；中心项 accent
-// 描边 + 半径+3 accent 10% 光晕环；悬停项按 ItemGeom.scale 绕中心放大）→ 文本。
-// e 为滑出进度（0=收缩，1=展开）：收缩时各球心向露出侧收拢（tuck），
-// 右缘球心落到 local 12-r（球右帽露出 12px，约半球被屏缘裁掉），左缘镜像。
-// 画刷与文本格式是设备相关资源：通过比较 dc 指针检测 D3DContext 设备重建后重建。
+// 每帧：烘焙最终位置（e 收缩 tuck + 悬停让位 dy + 卡区偏移 dx 并入 geom）→
+// material.drawArcStroke → form.drawItems（球底委托 material.drawOrbBack）。
+// 画刷与文本格式是设备相关资源：比较 dc 指针 + 设备代际检测 D3DContext 重建后重建。
 class DockScene {
 public:
   // g 须先经 applyHover 处理；mid 为中心项下标（accent 高亮）；e=弹簧滑出进度；
-  // dx 为球区整体水平偏移（窗口含卡区时右缘 +268，球区贴屏缘不动）
-  void draw(D3DContext& d3d, const DockGeom& g,
+  // dx 为球区整体水平偏移（窗口含卡区时右缘 +268，球区贴屏缘不动）；
+  // backdropDX/DY 为背景纹理→窗口坐标平移（材质玻璃取样对齐用）
+  void draw(D3DContext& d3d, IForm& form, IMaterial& material,
+            BackdropCapture* backdrop, const DockGeom& g,
             const std::vector<DockItem>& items, int mid,
-            double e, const std::string& edge, float dx = 0);
+            double e, const std::string& edge, float dx = 0,
+            float backdropDX = 0, float backdropDY = 0);
 
-  // 悬停详情卡：宽 252、圆角 12、90% 不透明深底 + 1px hairline；位于球区屏内侧
+  // 悬停详情卡：宽 252、圆角 12、卡底委托 material.drawCardBack；位于球区屏内侧
   // （右缘：卡区在左 x∈[8,260]；左缘镜像 x=ballZoneW+8）；垂直居中 anchorY 并
-  // 夹进 [12, winH-12]。ballZoneW = layoutArc g.w，winH = 窗口高。
-  void drawCard(D3DContext& d3d, const DetailCard& card, const std::string& edge,
-                double ballZoneW, double winH, double anchorY);
+  // 夹进 [12, winH-12]。ballZoneW = 布局 g.w，winH = 窗口高。
+  void drawCard(D3DContext& d3d, IMaterial& material, const DetailCard& card,
+                const std::string& edge, double ballZoneW, double winH,
+                double anchorY);
 
 private:
-  bool ensure(D3DContext& d3d);  // dc 指针变化（设备重建）时重建全部资源
+  bool ensure(D3DContext& d3d);  // dc 指针/代际变化（设备重建）时重建全部资源
 
   ID2D1DeviceContext* seen_ = nullptr;
   unsigned seenGen_ = 0;  // 上次重建资源时的设备代际（防 dc 地址复用 ABA 误判）

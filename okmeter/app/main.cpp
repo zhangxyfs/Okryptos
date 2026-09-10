@@ -53,5 +53,11 @@ static int runSmoke() {
 int main(int argc, char** argv) {
   if (argc > 1 && std::string(argv[1]) == "--scan") return runSmoke();
   DockApp app;
+  if (argc > 2 && std::string(argv[1]) == "--shot") {
+    const int n = MultiByteToWideChar(CP_UTF8, 0, argv[2], -1, nullptr, 0);
+    std::wstring p(n > 0 ? (size_t)n - 1 : 0, L'\0');
+    if (n > 0) MultiByteToWideChar(CP_UTF8, 0, argv[2], -1, p.data(), n);
+    return app.run(GetModuleHandleW(nullptr), p);
+  }
   return app.run(GetModuleHandleW(nullptr));
 }

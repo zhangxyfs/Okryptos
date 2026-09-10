@@ -9,6 +9,7 @@
 #include <d2d1_1.h>
 #include <dwrite.h>
 #include <dcomp.h>
+#include <string>
 
 namespace okmeter::render {
 
@@ -28,6 +29,10 @@ public:
   unsigned generation() const { return generation_; }
   // 共享 DXGI 设备（WGC 背景捕获互操作用；设备重建后代际变化，需重新获取）
   Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice() const;
+
+  // 诊断：把当前 swapchain back buffer 存成 PNG（--shot 自检用；不受
+  // SetWindowDisplayAffinity 自排除影响，产出应用真实绘制像素）
+  bool saveFrame(const std::wstring& path) const;
 
 private:
   void release();
