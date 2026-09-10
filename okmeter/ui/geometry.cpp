@@ -27,6 +27,7 @@ DockGeom layoutArc(int n, int radius, int gap, int screenH, const std::string& e
 }
 
 void applyHover(DockGeom& g, int hoverIdx, double hoverScale, double push) {
+  if (hoverIdx >= (int)g.items.size()) hoverIdx = -1;  // 越界正索引按复位处理
   for (size_t i = 0; i < g.items.size(); ++i) {
     ItemGeom& it = g.items[i];
     if (hoverIdx < 0 || (int)i == hoverIdx) {
