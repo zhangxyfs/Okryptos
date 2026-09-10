@@ -27,4 +27,7 @@ TEST(fmt_rel_time) {
   CHECK(relTime(now - 380 * 60000LL, now) == "6 小时前");
   CHECK(relTime(now - 4300 * 60000LL, now) == "2 天前");
   CHECK(relTime(now + 60000, now) == "刚刚");                    // 未来/乱序钳制
+  CHECK(relTime(now - 45 * 1000LL, now) == "刚刚");
+  CHECK(relTime(now - 59 * 1000LL, now) == "刚刚");
+  CHECK(relTime(now - 60 * 1000LL, now) == "1 分钟前");
 }

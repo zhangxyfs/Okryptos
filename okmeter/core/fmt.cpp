@@ -28,7 +28,7 @@ std::string fmtExact(int64_t v) {
 std::string relTime(int64_t thenMs, int64_t nowMs) {
   int64_t s = (nowMs - thenMs) / 1000;
   if (s < 0) s = 0;
-  if (s < 45) return "刚刚";
+  if (s < 60) return "刚刚";
   const int64_t m = s / 60;
   if (m < 60) return std::to_string(m) + " 分钟前";
   const int64_t h = m / 60;
