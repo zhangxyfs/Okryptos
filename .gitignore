@@ -13,3 +13,4 @@ cmd/ok/*.syso
 __pycache__/
 /docs/prototypes/
 .env
+okmeter/build/
