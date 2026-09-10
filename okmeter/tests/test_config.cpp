@@ -58,6 +58,31 @@ TEST(config_roundtrip) {
   std::filesystem::remove_all(d, ec);
 }
 
+TEST(config_mergecache_bool_literal) {
+  auto d = tempDir("config-mergecache");
+  {
+    std::ofstream f(d / "config.json", std::ios::binary);
+    f << "{\"mergeCache\": false}";   // 手写布尔字面量（saveConfig 写的是 0/1 数字）
+  }
+  Config c;
+  CHECK(loadConfig(d, c));
+  CHECK(!c.mergeCache);              // 布尔 false 不被吞
+  {
+    std::ofstream f(d / "config.json", std::ios::binary);
+    f << "{\"mergeCache\": 0}";      // 数字 0 兼容
+  }
+  CHECK(loadConfig(d, c));
+  CHECK(!c.mergeCache);
+  {
+    std::ofstream f(d / "config.json", std::ios::binary);
+    f << "{\"mergeCache\": true}";
+  }
+  CHECK(loadConfig(d, c));
+  CHECK(c.mergeCache);
+  std::error_code ec;
+  std::filesystem::remove_all(d, ec);
+}
+
 TEST(config_missing_or_broken_returns_defaults) {
   auto d = tempDir("config-broken");
   Config c;

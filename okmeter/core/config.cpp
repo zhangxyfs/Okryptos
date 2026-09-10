@@ -34,7 +34,7 @@ bool loadConfig(const std::filesystem::path& dir, Config& out) {
   if (const json::Value* x = v.find("material")) out.material = x->str();
   if (const json::Value* x = v.find("count")) out.count = (int)x->num(3);
   if (const json::Value* x = v.find("edge")) out.edge = x->str();
-  if (const json::Value* x = v.find("mergeCache")) out.mergeCache = x->num(1) != 0;
+  if (const json::Value* x = v.find("mergeCache")) out.mergeCache = x->boolean(true);
   if (const json::Value* m = v.find("mapping"); m && m->isArray()) {
     out.mapping.clear();
     for (const auto& val : m->arr()) out.mapping.push_back(val.str());

@@ -29,6 +29,12 @@ struct Value {
   double num(double dflt = 0) const {
     return std::holds_alternative<double>(v) ? std::get<double>(v) : dflt;
   }
+  // 布尔优先，兼容数字 0/1（手写 JSON 布尔不被 num() 吞掉）
+  bool boolean(bool dflt = false) const {
+    if (std::holds_alternative<bool>(v)) return std::get<bool>(v);
+    if (std::holds_alternative<double>(v)) return std::get<double>(v) != 0;
+    return dflt;
+  }
   const std::string& str() const {
     static const std::string kEmpty;
     return std::holds_alternative<std::string>(v) ? std::get<std::string>(v) : kEmpty;

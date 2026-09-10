@@ -17,6 +17,8 @@ constexpr UINT_PTR kTimerAnim = 1;    // 动画帧 16ms
 constexpr UINT_PTR kTimerPoll = 2;    // 数据轮询 2000ms
 constexpr UINT_PTR kTimerRel = 3;     // 相对时间/口径文本刷新 30s
 constexpr UINT_PTR kTimerRetract = 4; // 离开迟滞 600ms（一次性）
+constexpr UINT kMenuFlip = 1;         // 右键菜单：换边
+constexpr UINT kMenuExit = 2;         // 右键菜单：退出
 constexpr double kHoverScale = 1.34;
 constexpr double kHoverPush = 10;
 constexpr double kHoverHitY = 28;   // 悬停命中：按 y 最近项 < 28px
@@ -190,6 +192,20 @@ void DockApp::setEmergeTarget(double t) {
   setWide(t > 0.5);
 }
 
+// 换边：edge 互换 → 持久化 config.json → 重建位置与几何（layoutArc edge 同步）
+void DockApp::flipEdge() {
+  cfg_.edge = cfg_.edge == "right" ? "left" : "right";
+  saveConfig(okmeterDir(), cfg_);
+  rebuildLayout();
+  render();
+}
+
+// 退出：游标落盘后销毁窗口（与正常析构同一路径）
+void DockApp::exitApp() {
+  if (store_) store_->flush();
+  DestroyWindow(hwnd_);
+}
+
 void DockApp::render() {
   if (!d3d_.begin()) return;
   d3d_.dc()->Clear(D2D1::ColorF(0, 0.0f));  // 全透明底
@@ -222,7 +238,13 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
     return 0;
   case WM_TIMER:
     switch (wp) {
-    case kTimerAnim:
+    case kTimerAnim: {
+      // RDCW 目录监听：每 500ms 检查一次，触发则提前 poll（与 2s 轮询同路径）
+      const int64_t now = nowMs();
+      if (now - lastWatchMs_ >= 500) {
+        lastWatchMs_ = now;
+        if (watch_.signaled()) pollData();
+      }
       if (emerged_) return 0;  // 静止：不 step 不重绘不挪窗
       emerge_.step(0.016, emergeTarget_);
       if (emerge_.settled(emergeTarget_)) {
@@ -232,6 +254,7 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
       updatePosition();
       render();
       return 0;
+    }
     case kTimerPoll:
       pollData();
       return 0;
@@ -281,6 +304,21 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
     }
     SetTimer(hwnd_, kTimerRetract, 600, nullptr);  // 600ms 迟滞后收回
     return 0;
+  case WM_RBUTTONUP: {
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return 0;
+    AppendMenuW(menu, MF_STRING, kMenuFlip, L"换边");
+    AppendMenuW(menu, MF_STRING, kMenuExit, L"退出");
+    POINT pt{(int)(short)LOWORD(lp), (int)(short)HIWORD(lp)};
+    ClientToScreen(hwnd_, &pt);
+    SetForegroundWindow(hwnd_);  // 无此调用菜单不自动消失
+    const UINT cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY,
+                                    pt.x, pt.y, 0, hwnd_, nullptr);
+    DestroyMenu(menu);
+    if (cmd == kMenuFlip) flipEdge();        // 选空（0）无事发生
+    else if (cmd == kMenuExit) exitApp();
+    return 0;
+  }
   case WM_DISPLAYCHANGE:
   case WM_DPICHANGED:
     rebuildLayout();  // 屏高/DPI 变化 → 几何重建
@@ -320,6 +358,9 @@ int DockApp::run(HINSTANCE inst) {
   kimi_ = std::make_unique<KimiAdapter>(kimiHome(), store_.get());
   loadConfig(okmeterDir(), cfg_);
   cfg_.normalize();
+
+  // 目录变更监听：RDCW 提前触发 poll；失败静默回落纯 2s 轮询
+  watch_.start(kimiHome() / "sessions");
 
   // 初始窗口：收缩态（e=0，右缘露出 24px）
   const int screenH = GetSystemMetrics(SM_CYSCREEN);

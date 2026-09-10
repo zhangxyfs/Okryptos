@@ -9,6 +9,8 @@
 #include "../render/d3d.h"
 #include "../render/dock_scene.h"
 #include "geometry.h"
+#include "watch.h"
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -18,8 +20,10 @@ class Store;
 class KimiAdapter;
 
 // 单线程契约：poll 与渲染读都在 UI 线程，由 WM_TIMER 串行驱动（aggregator.h 约定）。
-// 三 timer：动画帧 16ms（弹簧 step + 需要时重绘 + SetWindowPos）、
-// 数据轮询 2000ms（poll→flush→重建 bindings/文本缓存→重绘）、相对时间刷新 30s。
+// 三 timer：动画帧 16ms（弹簧 step + 需要时重绘 + SetWindowPos + 每 500ms 检查
+// RDCW 目录监听 → 触发则提前 poll）、数据轮询 2000ms（poll→flush→重建
+// bindings/文本缓存→重绘）、相对时间刷新 30s。
+// 右键菜单：换边（edge 互换 + saveConfig 持久化 + 重建几何）、退出（flush 游标）。
 // 两态：emerge 弹簧 e∈[0,1]，右缘窗口 x = 屏宽 - lerp(24, g.w, e) - (wide?268:0)；
 // 展开态窗口宽 g.w+268（卡区在球区屏内侧，右缘靠左），收缩态宽 g.w；
 // 鼠标进入 e→1，离开 600ms 迟滞后 e→0。
@@ -40,10 +44,13 @@ private:
   void updatePosition();  // 按弹簧 e 移动窗口 x（SetWindowPos）
   void setEmergeTarget(double t);
   void setWide(bool w);   // 展开态窗口宽 g.w+268（卡区）；收缩态回 g.w
+  void flipEdge();        // 换边：edge 互换 → saveConfig → 重建位置几何
+  void exitApp();         // 退出：flush 游标落盘 → DestroyWindow
 
   render::D3DContext d3d_;
   render::DockScene scene_;
   HWND hwnd_ = nullptr;
+  DirWatcher watch_;          // sessions 目录 RDCW 监听（start 失败则纯轮询）
 
   std::unique_ptr<Store> store_;
   std::unique_ptr<KimiAdapter> kimi_;
@@ -61,6 +68,7 @@ private:
   int winY_ = 0;              // 垂直居中 y（rebuildLayout 重算）
   int winH_ = 0;              // 窗口高（卡垂直夹取/宽度切换用）
   int dockW_ = 150;           // layoutArc g.w（位置插值用）
+  int64_t lastWatchMs_ = 0;   // 上次 RDCW 检查时刻（动画帧里每 500ms 一次）
 };
 
 } // namespace okmeter
