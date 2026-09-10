@@ -15,7 +15,7 @@ D2D1_COLOR_F kGlass()    { return D2D1::ColorF(0.06f, 0.07f, 0.09f, 0.92f); }
 bool DockScene::ensure(D3DContext& d3d) {
   ID2D1DeviceContext* dc = d3d.dc();
   if (!dc || !d3d.dwrite()) return false;
-  if (dc == seen_ && brush_) return true;
+  if (dc == seen_ && brush_ && valueFmt_ && labelFmt_) return true;
   seen_ = dc;
   brush_.Reset();
   valueFmt_.Reset();
@@ -36,7 +36,8 @@ bool DockScene::ensure(D3DContext& d3d) {
 }
 
 void DockScene::draw(D3DContext& d3d, const DockGeom& g,
-                     const std::vector<DockItem>& items, int mid) {
+                     const std::vector<DockItem>& items, int mid,
+                     double e, const std::string& edge) {
   if (!ensure(d3d)) return;
   ID2D1DeviceContext* dc = d3d.dc();
   dc->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
@@ -45,19 +46,27 @@ void DockScene::draw(D3DContext& d3d, const DockGeom& g,
   const size_t n = g.items.size();
   if (n == 0) return;
 
-  // 弧线：首项到末项依次连线（dy 让位随点走）
+  // 收缩 tuck：e=0 时球心收拢到露出条内侧（右帽露出 12px），e=1 回布局位
+  auto drawPos = [&](const ItemGeom& it, D2D1_POINT_2F& out) {
+    const double collapsedX =
+        edge == "right" ? (12.0 - it.r) : (g.w - 12.0 + it.r);
+    out.x = (float)(it.x + (1.0 - e) * (collapsedX - it.x));
+    out.y = (float)(it.y + it.dy);
+  };
+
+  // 弧线：首项到末项依次连线（tuck/dy 随点走）
   brush_->SetColor(kHairline());
   for (size_t i = 0; i + 1 < n; ++i) {
-    const ItemGeom& a = g.items[i];
-    const ItemGeom& b = g.items[i + 1];
-    dc->DrawLine(D2D1::Point2F((float)a.x, (float)(a.y + a.dy)),
-                 D2D1::Point2F((float)b.x, (float)(b.y + b.dy)),
-                 brush_.Get(), 1.0f);
+    D2D1_POINT_2F a, b;
+    drawPos(g.items[i], a);
+    drawPos(g.items[i + 1], b);
+    dc->DrawLine(a, b, brush_.Get(), 1.0f);
   }
 
   for (size_t i = 0; i < n; ++i) {
     const ItemGeom& it = g.items[i];
-    const auto c = D2D1::Point2F((float)it.x, (float)(it.y + it.dy));
+    D2D1_POINT_2F c;
+    drawPos(it, c);
     const float r = (float)it.r;
     const bool isCenter = (int)i == mid;
 

@@ -127,7 +127,7 @@ void DockApp::render() {
   const int screenH = GetSystemMetrics(SM_CYSCREEN);
   DockGeom g = layoutArc(cfg_.count, 30, 14, screenH, cfg_.edge);
   applyHover(g, hoverIdx_, kHoverScale, kHoverPush);
-  scene_.draw(d3d_, g, items_, (cfg_.count - 1) / 2);
+  scene_.draw(d3d_, g, items_, (cfg_.count - 1) / 2, emerge_.value, cfg_.edge);
   d3d_.end();
 }
 
@@ -265,7 +265,6 @@ int DockApp::run(HINSTANCE inst) {
   }
 
   // 首轮数据：启动即有真实值（不等第一个 2s 轮询）
-  rebuildItems();
   pollData();
 
   ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
