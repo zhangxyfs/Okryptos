@@ -16,10 +16,15 @@ struct Value {
   std::variant<std::nullptr_t, bool, double, std::string, Array, Object> v{nullptr};
 
   bool isObject() const { return std::holds_alternative<Object>(v); }
+  bool isArray() const { return std::holds_alternative<Array>(v); }
 
   const Object& obj() const {
     static const Object kEmpty;
     return isObject() ? std::get<Object>(v) : kEmpty;
+  }
+  const Array& arr() const {
+    static const Array kEmpty;
+    return isArray() ? std::get<Array>(v) : kEmpty;
   }
   double num(double dflt = 0) const {
     return std::holds_alternative<double>(v) ? std::get<double>(v) : dflt;

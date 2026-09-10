@@ -1,0 +1,65 @@
+#include "config.h"
+#include "atomic.h"
+#include "minjson.h"
+#include <fstream>
+
+namespace okmeter {
+namespace {
+
+bool isValidCount(int n) { return n == 1 || n == 3 || n == 5 || n == 7; }
+
+} // namespace
+
+void Config::normalize() {
+  if (form != "arc" && form != "capsule" && form != "compass" &&
+      form != "level" && form != "wave" && form != "nixie")
+    form = "arc";
+  if (material != "dark" && material != "frost" &&
+      material != "liquid" && material != "glow")
+    material = "dark";
+  if (!isValidCount(count)) count = 3;
+  if (edge != "right" && edge != "left") edge = "right";
+  mapping.resize(count, "auto");
+  for (auto& m : mapping) if (m.empty()) m = "auto";
+}
+
+bool loadConfig(const std::filesystem::path& dir, Config& out) {
+  out = Config{};
+  std::ifstream in(dir / "config.json", std::ios::binary);
+  if (!in) return false;
+  std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  json::Value v;
+  if (!json::parse(text, v) || !v.isObject()) return false;
+  if (const json::Value* x = v.find("form")) out.form = x->str();
+  if (const json::Value* x = v.find("material")) out.material = x->str();
+  if (const json::Value* x = v.find("count")) out.count = (int)x->num(3);
+  if (const json::Value* x = v.find("edge")) out.edge = x->str();
+  if (const json::Value* x = v.find("mergeCache")) out.mergeCache = x->num(1) != 0;
+  if (const json::Value* m = v.find("mapping"); m && m->isArray()) {
+    out.mapping.clear();
+    for (const auto& val : m->arr()) out.mapping.push_back(val.str());
+  }
+  out.normalize();
+  return true;
+}
+
+bool saveConfig(const std::filesystem::path& dir, const Config& cfg) {
+  Config c = cfg;
+  c.normalize();
+  json::Object root;
+  root["form"] = json::str(c.form);
+  root["material"] = json::str(c.material);
+  root["count"] = json::num(c.count);
+  root["edge"] = json::str(c.edge);
+  root["mergeCache"] = json::num(c.mergeCache ? 1 : 0);
+  json::Array arr;
+  for (const auto& m : c.mapping) arr.push_back(json::str(m));
+  json::Value av;
+  av.v = std::move(arr);
+  root["mapping"] = std::move(av);
+  json::Value rv;
+  rv.v = std::move(root);
+  return atomicWriteText(dir / "config.json", json::dump(rv));
+}
+
+} // namespace okmeter

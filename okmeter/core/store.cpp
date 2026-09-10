@@ -1,8 +1,6 @@
 #include "store.h"
+#include "atomic.h"
 #include <fstream>
-
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 
 namespace okmeter {
 
@@ -20,8 +18,6 @@ bool Store::load() {
 }
 
 bool Store::flush() {
-  std::error_code ec;
-  std::filesystem::create_directories(dir_, ec);
   json::Object root;
   json::Object cur;
   for (const auto& [k, off] : cursors_) cur[k] = json::num(off);
@@ -31,18 +27,7 @@ bool Store::flush() {
   root["agg"] = agg_.toJson();
   json::Value rv;
   rv.v = std::move(root);
-
-  const auto tmp = dir_ / "state.json.tmp";
-  {
-    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-    if (!out) return false;
-    out << json::dump(rv);
-    out.flush();
-    if (!out) return false;
-  }
-  const auto dst = dir_ / "state.json";
-  return MoveFileExW(tmp.c_str(), dst.c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+  return atomicWriteText(dir_ / "state.json", json::dump(rv));
 }
 
 } // namespace okmeter
