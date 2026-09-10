@@ -103,7 +103,9 @@ bool D3DContext::end() {
     return init(hwnd_, w_, h_);  // 本帧丢弃，init 重入重建，下一帧重绘
   }
   if (FAILED(hr)) return false;
-  hr = swap_->Present(1, 0);
+  // DComp 内容由 DWM 在 vsync 合成上屏，Present(1,0) 的 vsync 阻塞只会让消息泵
+  // 空转、WM_TIMER 合并（动画抖动放大源）；Present(0,0) 非阻塞提交即可。
+  hr = swap_->Present(0, 0);
   if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
     return init(hwnd_, w_, h_);
   }

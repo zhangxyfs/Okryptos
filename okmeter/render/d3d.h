@@ -14,7 +14,7 @@ namespace okmeter::render {
 
 // 透明 swapchain（B8G8R8A8 + PREMULTIPLIED + FLIP_SEQUENTIAL）经 DComp visual 上屏。
 // init 可重入：设备丢失（DEVICE_REMOVED/RESET）时释放全部 COM 对象按序重建。
-// 每帧：begin() → D2D 绘制 → end()（EndDraw + Present(1,0) + Commit）。
+// 每帧：begin() → D2D 绘制 → end()（EndDraw + Present(0,0) 非阻塞 + Commit；DWM 按 vsync 合成）。
 class D3DContext {
 public:
   bool init(HWND hwnd, int w, int h);   // 失败返回 false；可重入

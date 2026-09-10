@@ -19,10 +19,12 @@ namespace okmeter {
 class Store;
 class KimiAdapter;
 
-// 单线程契约：poll 与渲染读都在 UI 线程，由 WM_TIMER 串行驱动（aggregator.h 约定）。
-// 三 timer：动画帧 16ms（弹簧 step + 需要时重绘 + SetWindowPos + 每 500ms 检查
-// RDCW 目录监听 → 触发则提前 poll）、数据轮询 2000ms（poll→flush→重建
-// bindings/文本缓存→重绘）、相对时间刷新 30s。
+// 单线程契约：poll 与渲染读都在 UI 线程，由定时器串行驱动（aggregator.h 约定）。
+// 动画时钟为高分辨率可等待定时器 16ms（MsgWaitForMultipleObjectsEx 消息循环；
+// 不支持时回退 16ms WM_TIMER），驱动弹簧 step（真实 elapsed dt）+ 需要时重绘 +
+// SetWindowPos + 每 500ms 检查 RDCW 目录监听 → 触发则提前 poll；另有两个
+// WM_TIMER：数据轮询 2000ms（poll→flush→重建 bindings/文本缓存→重绘）、相对时间
+// 刷新 30s；离开迟滞 600ms 一次性 WM_TIMER。
 // 右键菜单：换边（edge 互换 + saveConfig 持久化 + 重建几何）、退出（flush 游标）。
 // 两态：emerge 弹簧 e∈[0,1]，右缘窗口 x = 屏宽 - lerp(24, g.w, e) - (wide?268:0)；
 // 展开态窗口宽 g.w+268（卡区在球区屏内侧，右缘靠左），收缩态宽 g.w；
@@ -37,6 +39,7 @@ private:
   LRESULT onMessage(UINT msg, WPARAM wp, LPARAM lp);
 
   void render();          // layoutArc → applyHover → dock_scene 一帧（含详情卡）
+  void animTick();        // 动画帧：RDCW 检查 + 弹簧 step（真实 dt）+ 挪窗 + 重绘
   void pollData();        // kimi.poll→agg.add→flush→rebuildItems→重绘
   void rebuildItems();    // resolveBindings + 文本缓存（值/短名）+ 详情卡重组
   void rebuildCard();     // 按 hoverIdx 组装详情卡（hover 变化/数据刷新时调用）
@@ -69,6 +72,8 @@ private:
   int winH_ = 0;              // 窗口高（卡垂直夹取/宽度切换用）
   int dockW_ = 150;           // layoutArc g.w（位置插值用）
   int64_t lastWatchMs_ = 0;   // 上次 RDCW 检查时刻（动画帧里每 500ms 一次）
+  LARGE_INTEGER lastTickQpc_{};  // 上一动画 tick 的 QPC（真实 dt 采样点，含静止 tick）
+  HANDLE animTimer_ = nullptr;  // HR 可等待定时器动画时钟（NULL → WM_TIMER 回退）
 };
 
 } // namespace okmeter

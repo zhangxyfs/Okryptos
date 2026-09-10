@@ -7,6 +7,17 @@
 #include <cmath>
 #include <string>
 
+// 动画流畅性诊断：帧间隔 + 分阶段耗时统计。默认仅 _DEBUG 构建启用；
+// 临时诊断可在本行下方加 `#define OKM_ANIM_DIAG 1`（release 也生效）。
+#if defined(_DEBUG) && !defined(OKM_ANIM_DIAG)
+#define OKM_ANIM_DIAG 1
+#endif
+#if defined(OKM_ANIM_DIAG)
+#include <algorithm>
+#include <cstdio>
+#include "../core/paths.h"
+#endif
+
 namespace okmeter {
 namespace {
 
@@ -26,6 +37,18 @@ constexpr double kHoverHitY = 28;   // 悬停命中：按 y 最近项 < 28px
 int64_t nowMs() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+// QPC 间隔（秒）：动画弹簧用真实 elapsed dt，timer 抖动不再变成动画抖动
+LARGE_INTEGER qpcNow() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t; }
+
+double qpcSeconds(LARGE_INTEGER prev, LARGE_INTEGER now) {
+  static const double kFreq = [] {
+    LARGE_INTEGER f;
+    QueryPerformanceFrequency(&f);
+    return (double)f.QuadPart;
+  }();
+  return (double)(now.QuadPart - prev.QuadPart) / kFreq;
 }
 
 std::wstring wide(const std::string& s) {
@@ -53,6 +76,77 @@ const wchar_t* scopeLabel(Scope s) {
 }
 
 double lerp(double a, double b, double t) { return a + (b - a) * t; }
+
+#if defined(OKM_ANIM_DIAG)
+// ── 动画诊断（临时）：动画激活期间逐帧记录 QPC 间隔与 step/挪窗/绘制/Present 耗时，
+// settled 时把 min/p50/p95/max/方差 + 原始序列追加到 ~/.okryptos/okmeter/anim-diag.log。
+struct AnimDiag {
+  struct Frame { double dtMs, stepMs, swpMs, drawMs, presentMs; };
+  std::vector<Frame> frames;
+  LARGE_INTEGER freq{}, prevTick{}, tick{}, drawBegin{};
+  bool active = false;
+  bool expanding = false;
+  double framesDrawMs_ = 0;
+  AnimDiag() { QueryPerformanceFrequency(&freq); }
+  double ms(LARGE_INTEGER a, LARGE_INTEGER b) const {
+    return (double)(b.QuadPart - a.QuadPart) * 1000.0 / (double)freq.QuadPart;
+  }
+};
+AnimDiag g_diag;
+
+void diagFrameBegin(double target) {
+  const LARGE_INTEGER now = qpcNow();
+  if (!g_diag.active) {
+    g_diag.active = true;
+    g_diag.expanding = target > 0.5;
+    g_diag.frames.clear();
+    g_diag.prevTick = now;
+  }
+  g_diag.tick = now;
+}
+
+void diagFrameEnd(double stepMs, double swpMs, double drawMs, double presentMs) {
+  g_diag.frames.push_back({g_diag.ms(g_diag.prevTick, g_diag.tick),
+                           stepMs, swpMs, drawMs, presentMs});
+  g_diag.prevTick = g_diag.tick;
+}
+
+void diagFlush() {
+  g_diag.active = false;
+  const auto& f = g_diag.frames;
+  if (f.empty()) return;
+  std::vector<double> dt;
+  dt.reserve(f.size());
+  double sum = 0, maxStep = 0, maxSwp = 0, maxDraw = 0, maxPresent = 0;
+  for (const auto& r : f) {
+    dt.push_back(r.dtMs);
+    sum += r.dtMs;
+    if (r.stepMs > maxStep) maxStep = r.stepMs;
+    if (r.swpMs > maxSwp) maxSwp = r.swpMs;
+    if (r.drawMs > maxDraw) maxDraw = r.drawMs;
+    if (r.presentMs > maxPresent) maxPresent = r.presentMs;
+  }
+  std::sort(dt.begin(), dt.end());
+  const double mean = sum / (double)f.size();
+  double var = 0;
+  for (double d : dt) var += (d - mean) * (d - mean);
+  var /= (double)f.size();
+  const double p50 = dt[dt.size() / 2];
+  const double p95 = dt[(std::min)(dt.size() - 1, (size_t)std::ceil(dt.size() * 0.95) - 1)];
+  const std::string path = (okmeterDir() / "anim-diag.log").string();
+  FILE* fp = nullptr;
+  if (fopen_s(&fp, path.c_str(), "a") == 0 && fp) {
+    fprintf(fp, "[%s] frames=%zu dt min=%.2f p50=%.2f p95=%.2f max=%.2f mean=%.2f var=%.3f p95-p50=%.2f | max step=%.2f swp=%.2f draw=%.2f present=%.2f\n",
+            g_diag.expanding ? "expand" : "collapse", f.size(),
+            dt.front(), p50, p95, dt.back(), mean, var, p95 - p50,
+            maxStep, maxSwp, maxDraw, maxPresent);
+    fprintf(fp, "  raw dt:");
+    for (double d : dt) fprintf(fp, " %.1f", d);
+    fprintf(fp, "\n");
+    fclose(fp);
+  }
+}
+#endif
 
 Sums scopeSums(const Aggregator& agg, Scope s, int64_t now) {
   switch (s) {
@@ -208,6 +302,9 @@ void DockApp::exitApp() {
 
 void DockApp::render() {
   if (!d3d_.begin()) return;
+#if defined(OKM_ANIM_DIAG)
+  if (g_diag.active) g_diag.drawBegin = qpcNow();
+#endif
   d3d_.dc()->Clear(D2D1::ColorF(0, 0.0f));  // 全透明底
   const int screenH = GetSystemMetrics(SM_CYSCREEN);
   DockGeom g = layoutArc(cfg_.count, 30, 14, screenH, cfg_.edge);
@@ -220,7 +317,56 @@ void DockApp::render() {
     const ItemGeom& it = g.items[(size_t)hoverIdx_];
     scene_.drawCard(d3d_, card_, cfg_.edge, g.w, (double)winH_, it.y + it.dy);
   }
+#if defined(OKM_ANIM_DIAG)
+  const LARGE_INTEGER drawEnd = qpcNow();
+#endif
   d3d_.end();
+#if defined(OKM_ANIM_DIAG)
+  if (g_diag.active) {
+    g_diag.framesDrawMs_ = g_diag.ms(g_diag.drawBegin, drawEnd);
+  }
+#endif
+}
+
+// 动画帧 tick：HR 可等待定时器（主路径）或 16ms WM_TIMER（回退）驱动。
+// RDCW 目录监听检查 + 弹簧 step（真实 elapsed dt）+ 挪窗 + 重绘。
+void DockApp::animTick() {
+  // 真实 elapsed dt：每个 tick（含静止 tick）刷新采样点，弹簧按实际墙钟推进；
+  // step 内部钳 0.05s 上限防卡顿爆炸。
+  const LARGE_INTEGER qpc = qpcNow();
+  const double dt = lastTickQpc_.QuadPart == 0
+      ? 0.016 : qpcSeconds(lastTickQpc_, qpc);
+  lastTickQpc_ = qpc;
+  // RDCW 目录监听：每 500ms 检查一次，触发则提前 poll（与 2s 轮询同路径）
+  const int64_t now = nowMs();
+  if (now - lastWatchMs_ >= 500) {
+    lastWatchMs_ = now;
+    if (watch_.signaled()) pollData();
+  }
+  if (emerged_) return;  // 静止：不 step 不重绘不挪窗
+#if defined(OKM_ANIM_DIAG)
+  diagFrameBegin(emergeTarget_);
+  const LARGE_INTEGER q0 = qpcNow();
+#endif
+  emerge_.step(dt, emergeTarget_);
+#if defined(OKM_ANIM_DIAG)
+  const LARGE_INTEGER q1 = qpcNow();
+#endif
+  if (emerge_.settled(emergeTarget_)) {
+    emerge_.snap(emergeTarget_);
+    emerged_ = true;
+  }
+  updatePosition();
+#if defined(OKM_ANIM_DIAG)
+  const LARGE_INTEGER q2 = qpcNow();
+#endif
+  render();
+#if defined(OKM_ANIM_DIAG)
+  const LARGE_INTEGER q3 = qpcNow();
+  diagFrameEnd(g_diag.ms(q0, q1), g_diag.ms(q1, q2),
+               g_diag.framesDrawMs_, g_diag.ms(q2, q3) - g_diag.framesDrawMs_);
+  if (emerged_) diagFlush();
+#endif
 }
 
 LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
@@ -238,23 +384,9 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
     return 0;
   case WM_TIMER:
     switch (wp) {
-    case kTimerAnim: {
-      // RDCW 目录监听：每 500ms 检查一次，触发则提前 poll（与 2s 轮询同路径）
-      const int64_t now = nowMs();
-      if (now - lastWatchMs_ >= 500) {
-        lastWatchMs_ = now;
-        if (watch_.signaled()) pollData();
-      }
-      if (emerged_) return 0;  // 静止：不 step 不重绘不挪窗
-      emerge_.step(0.016, emergeTarget_);
-      if (emerge_.settled(emergeTarget_)) {
-        emerge_.snap(emergeTarget_);
-        emerged_ = true;
-      }
-      updatePosition();
-      render();
+    case kTimerAnim:
+      animTick();  // 回退路径（HR 定时器不可用时）
       return 0;
-    }
     case kTimerPoll:
       pollData();
       return 0;
@@ -389,14 +521,49 @@ int DockApp::run(HINSTANCE inst) {
 
   ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
   render();
-  SetTimer(hwnd_, kTimerAnim, 16, nullptr);
+
+  // 动画时钟：高分辨率可等待定时器（~0.5ms 粒度；实测 timeBeginPeriod(1) 对本
+  // 进程无效——Win11 对非前台窗口压制计时器粒度请求，16ms WM_TIMER 仍量化到
+  // 15.6ms 阶梯）。失败回退 16ms WM_TIMER。
+  animTimer_ = CreateWaitableTimerExW(nullptr, nullptr,
+      CREATE_WAITABLE_TIMER_MANUAL_RESET | CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+      TIMER_MODIFY_STATE | SYNCHRONIZE);
+  LARGE_INTEGER due{};
+  due.QuadPart = -160000LL;  // 16ms（相对，100ns 单位）
+  if (animTimer_ &&
+      !SetWaitableTimerEx(animTimer_, &due, 0, nullptr, nullptr, nullptr, 0)) {
+    CloseHandle(animTimer_);
+    animTimer_ = nullptr;
+  }
+  if (!animTimer_) SetTimer(hwnd_, kTimerAnim, 16, nullptr);
   SetTimer(hwnd_, kTimerPoll, 2000, nullptr);
   SetTimer(hwnd_, kTimerRel, 30000, nullptr);
 
   MSG msg;
-  while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
-    TranslateMessage(&msg);
-    DispatchMessageW(&msg);
+  if (!animTimer_) {
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+      TranslateMessage(&msg);
+      DispatchMessageW(&msg);
+    }
+  } else {
+    for (;;) {
+      MsgWaitForMultipleObjectsEx(1, &animTimer_, INFINITE, QS_ALLINPUT,
+                                  MWMO_INPUTAVAILABLE);
+      if (WaitForSingleObject(animTimer_, 0) == WAIT_OBJECT_0) {
+        // 先重整相位再处理帧：帧间隔恒定 16ms，与单帧耗时解耦
+        SetWaitableTimerEx(animTimer_, &due, 0, nullptr, nullptr, nullptr, 0);
+        animTick();
+      }
+      bool quit = false;
+      while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_QUIT) { quit = true; break; }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+      }
+      if (quit) break;
+    }
+    CloseHandle(animTimer_);
+    animTimer_ = nullptr;
   }
   KillTimer(hwnd_, kTimerAnim);
   KillTimer(hwnd_, kTimerPoll);
