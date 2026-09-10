@@ -650,7 +650,7 @@ TEST(binding_explicit_total_and_model) {
   auto b = resolveBindings(c, agg);
   CHECK(!b[0].isModel && b[0].scope == Scope::Today);
   CHECK(b[1].isModel && b[1].modelId == "m/keep");   // 显式模型保留（即使不在数据里）
-  CHECK(b[2].isModel && b[2].modelId == "m/new");    // auto 位仍按 recency
+  CHECK(b[2].isModel && b[2].modelId == "m/old");    // auto 位按槽位固定 rank（slot2←rank2）
 }
 
 TEST(binding_invalid_mapping_falls_back_auto) {
@@ -660,8 +660,8 @@ TEST(binding_invalid_mapping_falls_back_auto) {
   c.normalize();
   auto agg = threeModels();
   auto b = resolveBindings(c, agg);
-  CHECK(b[0].isModel && b[0].modelId == "m/new");  // garbage → auto → rank0
-  CHECK(b[1].isModel && b[1].modelId == "m/mid");  // total:wrong → auto → rank1
+  CHECK(b[0].isModel && b[0].modelId == "m/mid");  // garbage → auto；slot0←rank1
+  CHECK(b[1].isModel && b[1].modelId == "m/new");  // total:wrong → auto；slot1←rank0（最近占中心）
 }
 
 TEST(binding_empty_data_all_total) {
