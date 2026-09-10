@@ -1,48 +1,216 @@
 #include "app.h"
-#include "geometry.h"
-#include <cwchar>
-
-using Microsoft::WRL::ComPtr;
+#include "../adapters/kimi/adapter.h"
+#include "../core/fmt.h"
+#include "../core/paths.h"
+#include "../core/store.h"
+#include <chrono>
+#include <cmath>
+#include <string>
 
 namespace okmeter {
 namespace {
 
 constexpr wchar_t kClassName[] = L"OkMeterDock";
-constexpr int kDockWidth = 150;
-constexpr UINT_PTR kRepaintTimer = 1;
+constexpr int kCollapsedPx = 24;    // 收缩态露出宽度
+constexpr UINT_PTR kTimerAnim = 1;    // 动画帧 16ms
+constexpr UINT_PTR kTimerPoll = 2;    // 数据轮询 2000ms
+constexpr UINT_PTR kTimerRel = 3;     // 相对时间/口径文本刷新 30s
+constexpr UINT_PTR kTimerRetract = 4; // 离开迟滞 600ms（一次性）
+constexpr double kHoverScale = 1.34;
+constexpr double kHoverPush = 10;
+constexpr double kHoverHitY = 28;   // 悬停命中：按 y 最近项 < 28px
+
+int64_t nowMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+std::wstring wide(const std::string& s) {
+  if (s.empty()) return {};
+  const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+  std::wstring out((size_t)n, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), out.data(), n);
+  return out;
+}
+
+// 短名：modelId 最后一段（/ 后）
+std::string shortName(const std::string& modelId) {
+  const size_t p = modelId.rfind('/');
+  return p == std::string::npos ? modelId : modelId.substr(p + 1);
+}
+
+const wchar_t* scopeLabel(Scope s) {
+  switch (s) {
+  case Scope::Session: return L"当前会话";
+  case Scope::Today:   return L"今日";
+  case Scope::Week:    return L"本周";
+  case Scope::All:     return L"累计";
+  }
+  return L"累计";
+}
+
+double lerp(double a, double b, double t) { return a + (b - a) * t; }
 
 } // namespace
 
+DockApp::~DockApp() = default;
+
+void DockApp::rebuildItems() {
+  Aggregator& agg = store_->agg();
+  bindings_ = resolveBindings(cfg_, agg);
+  const int64_t now = nowMs();
+  items_.assign(bindings_.size(), render::DockItem{});
+  for (size_t i = 0; i < bindings_.size(); ++i) {
+    const Binding& b = bindings_[i];
+    int64_t v = 0;
+    if (b.isModel) {
+      // v1 auto/模型位一律展示模型累计 all（与原型一致）
+      if (const ModelStat* m = agg.model(b.modelId)) v = m->all.total();
+      items_[i].label = wide(shortName(b.modelId));
+    } else {
+      switch (b.scope) {
+      case Scope::Session: v = agg.session().total(); break;
+      case Scope::Today:   v = agg.today(now).total(); break;
+      case Scope::Week:    v = agg.week(now).total(); break;
+      case Scope::All:     v = agg.all().total(); break;
+      }
+      items_[i].label = scopeLabel(b.scope);
+    }
+    items_[i].value = wide(fmtCompact(v));
+  }
+}
+
+void DockApp::pollData() {
+  Aggregator& agg = store_->agg();
+  kimi_->poll([&](const UsageEvent& e) { agg.add(e); });
+  store_->flush();
+  rebuildItems();
+  render();
+}
+
+void DockApp::rebuildLayout() {
+  const int screenH = GetSystemMetrics(SM_CYSCREEN);
+  const DockGeom g = layoutArc(cfg_.count, 30, 14, screenH, cfg_.edge);
+  int h = (int)g.h;
+  if (h < 120) h = 120;
+  dockW_ = (int)g.w;
+  RECT work{};
+  SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+  winY_ = work.top + ((work.bottom - work.top) - h) / 2;
+  SetWindowPos(hwnd_, nullptr, 0, winY_, dockW_, h,
+               SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+  updatePosition();
+}
+
+void DockApp::updatePosition() {
+  if (!hwnd_) return;
+  const int screenW = GetSystemMetrics(SM_CXSCREEN);
+  const double e = emerge_.value;
+  int x;
+  if (cfg_.edge == "left")
+    x = (int)std::lround(lerp((double)kCollapsedPx, (double)dockW_, e) - dockW_);
+  else
+    x = screenW - (int)std::lround(lerp((double)kCollapsedPx, (double)dockW_, e));
+  SetWindowPos(hwnd_, nullptr, x, winY_, 0, 0,
+               SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void DockApp::setEmergeTarget(double t) {
+  if (emergeTarget_ == t) return;
+  emergeTarget_ = t;
+  emerged_ = false;
+}
+
 void DockApp::render() {
   if (!d3d_.begin()) return;
-  ID2D1DeviceContext* dc = d3d_.dc();
-  dc->Clear(D2D1::ColorF(0, 0.0f));  // 全透明底
-
-  RECT rc{};
-  GetClientRect(hwnd_, &rc);
-  const float w = (float)(rc.right - rc.left);
-  const float h = (float)(rc.bottom - rc.top);
-
-  // accent 绿实心圆（原型 accent 色）
-  ComPtr<ID2D1SolidColorBrush> brush;
-  if (SUCCEEDED(dc->CreateSolidColorBrush(D2D1::ColorF(0x5FE0A8), &brush))) {
-    const D2D1_ELLIPSE e = D2D1::Ellipse(D2D1::Point2F(w / 2, h / 3), 30.0f, 30.0f);
-    dc->FillEllipse(&e, brush.Get());
-  }
-
-  // Consolas 白文本（验证 DWrite 文本管线）
-  ComPtr<IDWriteTextFormat> fmt;
-  if (brush && SUCCEEDED(d3d_.dwrite()->CreateTextFormat(
-          L"Consolas", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-          DWRITE_FONT_STRETCH_NORMAL, 12.0f, L"", &fmt))) {
-    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    brush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
-    const wchar_t* text = L"OkMeter dock";
-    const D2D1_RECT_F tr = D2D1::RectF(0.0f, h * 2.0f / 3.0f, w, h);
-    dc->DrawText(text, (UINT32)std::wcslen(text), fmt.Get(), &tr, brush.Get());
-  }
-
+  d3d_.dc()->Clear(D2D1::ColorF(0, 0.0f));  // 全透明底
+  const int screenH = GetSystemMetrics(SM_CYSCREEN);
+  DockGeom g = layoutArc(cfg_.count, 30, 14, screenH, cfg_.edge);
+  applyHover(g, hoverIdx_, kHoverScale, kHoverPush);
+  scene_.draw(d3d_, g, items_, (cfg_.count - 1) / 2);
   d3d_.end();
+}
+
+LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
+  switch (msg) {
+  case WM_DESTROY:
+    PostQuitMessage(0);
+    return 0;
+  case WM_PAINT:
+    ValidateRect(hwnd_, nullptr);
+    render();
+    return 0;
+  case WM_SIZE:
+    d3d_.resize((int)LOWORD(lp), (int)HIWORD(lp));
+    render();
+    return 0;
+  case WM_TIMER:
+    switch (wp) {
+    case kTimerAnim:
+      if (emerged_) return 0;  // 静止：不 step 不重绘不挪窗
+      emerge_.step(0.016, emergeTarget_);
+      if (emerge_.settled(emergeTarget_)) {
+        emerge_.snap(emergeTarget_);
+        emerged_ = true;
+      }
+      updatePosition();
+      render();
+      return 0;
+    case kTimerPoll:
+      pollData();
+      return 0;
+    case kTimerRel:
+      rebuildItems();  // 仅刷新文本缓存（口径随 now 变化）
+      render();
+      return 0;
+    case kTimerRetract:
+      KillTimer(hwnd_, kTimerRetract);
+      setEmergeTarget(0);
+      return 0;
+    }
+    return 0;
+  case WM_MOUSEMOVE: {
+    if (!trackingLeave_) {
+      TRACKMOUSEEVENT tme{};
+      tme.cbSize = sizeof(tme);
+      tme.dwFlags = TME_LEAVE;
+      tme.hwndTrack = hwnd_;
+      TrackMouseEvent(&tme);
+      trackingLeave_ = true;
+      KillTimer(hwnd_, kTimerRetract);  // 进入取消迟滞收回
+      setEmergeTarget(1);
+    }
+    const int y = (int)(short)HIWORD(lp);
+    const int screenH = GetSystemMetrics(SM_CYSCREEN);
+    const DockGeom g = layoutArc(cfg_.count, 30, 14, screenH, cfg_.edge);
+    int idx = -1;
+    double best = kHoverHitY;
+    for (size_t i = 0; i < g.items.size(); ++i) {
+      const double d = std::abs((double)y - g.items[i].y);
+      if (d < best) { best = d; idx = (int)i; }
+    }
+    if (idx != hoverIdx_) {
+      hoverIdx_ = idx;
+      render();
+    }
+    return 0;
+  }
+  case WM_MOUSELEAVE:
+    trackingLeave_ = false;
+    if (hoverIdx_ != -1) {
+      hoverIdx_ = -1;
+      render();
+    }
+    SetTimer(hwnd_, kTimerRetract, 600, nullptr);  // 600ms 迟滞后收回
+    return 0;
+  case WM_DISPLAYCHANGE:
+  case WM_DPICHANGED:
+    rebuildLayout();  // 屏高/DPI 变化 → 几何重建
+    render();
+    return 0;
+  default:
+    return DefWindowProcW(hwnd_, msg, wp, lp);
+  }
 }
 
 LRESULT CALLBACK DockApp::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -53,24 +221,7 @@ LRESULT CALLBACK DockApp::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
   }
   auto* self = reinterpret_cast<DockApp*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
   if (!self) return DefWindowProcW(hwnd, msg, wp, lp);
-  switch (msg) {
-  case WM_DESTROY:
-    PostQuitMessage(0);
-    return 0;
-  case WM_PAINT:
-    ValidateRect(hwnd, nullptr);
-    self->render();
-    return 0;
-  case WM_TIMER:
-    self->render();  // 周期重绘；Task 7 数据刷新挂这里
-    return 0;
-  case WM_SIZE:
-    self->d3d_.resize((int)LOWORD(lp), (int)HIWORD(lp));
-    self->render();
-    return 0;
-  default:
-    return DefWindowProcW(hwnd, msg, wp, lp);
-  }
+  return self->onMessage(msg, wp, lp);
 }
 
 int DockApp::run(HINSTANCE inst) {
@@ -85,35 +236,53 @@ int DockApp::run(HINSTANCE inst) {
   wc.lpszClassName = kClassName;
   if (!RegisterClassExW(&wc)) return 1;
 
-  // 窗口矩形：右缘、宽 150、高按 layoutArc(3)，垂直居中于工作区
-  RECT work{};
-  SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
-  const DockGeom g = layoutArc(3, 24, 8, work.bottom - work.top, "right");
-  const int w = kDockWidth;
+  // 数据接线（单线程：全部对象随 UI 线程生灭）
+  store_ = std::make_unique<Store>(okmeterDir());
+  store_->load();
+  kimi_ = std::make_unique<KimiAdapter>(kimiHome(), store_.get());
+  loadConfig(okmeterDir(), cfg_);
+  cfg_.normalize();
+
+  // 初始窗口：收缩态（e=0，右缘露出 24px）
+  const int screenH = GetSystemMetrics(SM_CYSCREEN);
+  const DockGeom g = layoutArc(cfg_.count, 30, 14, screenH, cfg_.edge);
   int h = (int)g.h;
   if (h < 120) h = 120;
-  const int x = work.right - w;
-  const int y = work.top + ((work.bottom - work.top) - h) / 2;
+  dockW_ = (int)g.w;
+  RECT work{};
+  SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+  winY_ = work.top + ((work.bottom - work.top) - h) / 2;
+  const int screenW = GetSystemMetrics(SM_CXSCREEN);
+  const int x = cfg_.edge == "left" ? kCollapsedPx - dockW_ : screenW - kCollapsedPx;
 
   hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                           kClassName, L"OkMeter", WS_POPUP,
-                          x, y, w, h, nullptr, nullptr, inst, this);
+                          x, winY_, dockW_, h, nullptr, nullptr, inst, this);
   if (!hwnd_) return 1;
-  if (!d3d_.init(hwnd_, w, h)) {
+  if (!d3d_.init(hwnd_, dockW_, h)) {
     DestroyWindow(hwnd_);
     return 2;
   }
 
+  // 首轮数据：启动即有真实值（不等第一个 2s 轮询）
+  rebuildItems();
+  pollData();
+
   ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
   render();
-  SetTimer(hwnd_, kRepaintTimer, 1000, nullptr);
+  SetTimer(hwnd_, kTimerAnim, 16, nullptr);
+  SetTimer(hwnd_, kTimerPoll, 2000, nullptr);
+  SetTimer(hwnd_, kTimerRel, 30000, nullptr);
 
   MSG msg;
   while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
     TranslateMessage(&msg);
     DispatchMessageW(&msg);
   }
-  KillTimer(hwnd_, kRepaintTimer);
+  KillTimer(hwnd_, kTimerAnim);
+  KillTimer(hwnd_, kTimerPoll);
+  KillTimer(hwnd_, kTimerRel);
+  KillTimer(hwnd_, kTimerRetract);
   return (int)msg.wParam;
 }
 
