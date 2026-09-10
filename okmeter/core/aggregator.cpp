@@ -1,5 +1,6 @@
 #include "aggregator.h"
 #include <algorithm>
+#include <cctype>
 #include <ctime>
 #include <utility>
 
@@ -19,11 +20,19 @@ json::Value sumsJson(const Sums& s) {
 
 void sumsFrom(const json::Value* v, Sums& s) {
   if (!v || !v->isObject()) return;
-  s.inputOther = (int64_t)v->find("io")->num();
-  s.inputCacheRead = (int64_t)v->find("icr")->num();
-  s.inputCacheCreation = (int64_t)v->find("icc")->num();
-  s.output = (int64_t)v->find("o")->num();
+  if (const json::Value* f = v->find("io")) s.inputOther = (int64_t)f->num();
+  if (const json::Value* f = v->find("icr")) s.inputCacheRead = (int64_t)f->num();
+  if (const json::Value* f = v->find("icc")) s.inputCacheCreation = (int64_t)f->num();
+  if (const json::Value* f = v->find("o")) s.output = (int64_t)f->num();
 }
+
+// 损坏的非数字 dayKey 不让 stoi 抛 std::invalid_argument
+auto dayKeyOf = [](const std::string& k, int& out) {
+  if (k.size() != 8) return false;
+  for (char c : k) if (!isdigit((unsigned char)c)) return false;
+  out = std::stoi(k);
+  return true;
+};
 
 template <typename Map>
 json::Value mapJson(const Map& m) {
@@ -170,22 +179,31 @@ json::Value Aggregator::toJson() const {
 bool Aggregator::fromJson(const json::Value& v) {
   if (!v.isObject()) return false;
   sumsFrom(v.find("all"), allAll_);
-  for (const auto& [k, s] : v.find("days")->obj())
-    sumsFrom(&s, dayAll_[std::stoi(k)]);
-  for (const auto& [k, s] : v.find("sessions")->obj())
-    sumsFrom(&s, sessAll_[k]);
-  hotSession_ = v.find("hot")->str();
-  hotSessionMs_ = (int64_t)v.find("hotMs")->num(-1);
-  for (const auto& [id, mv] : v.find("models")->obj()) {
-    ModelStat m;
-    sumsFrom(mv.find("all"), m.all);
-    for (const auto& [k, s] : mv.find("days")->obj())
-      sumsFrom(&s, m.byDay[std::stoi(k)]);
-    for (const auto& [k, s] : mv.find("sessions")->obj())
-      sumsFrom(&s, m.bySession[k]);
-    m.lastCallMs = (int64_t)mv.find("last")->num();
-    models_[id] = std::move(m);
-  }
+  if (const json::Value* d = v.find("days"); d && d->isObject())
+    for (const auto& [k, s] : d->obj()) {
+      int key;
+      if (dayKeyOf(k, key)) sumsFrom(&s, dayAll_[key]);
+    }
+  if (const json::Value* d = v.find("sessions"); d && d->isObject())
+    for (const auto& [k, s] : d->obj())
+      sumsFrom(&s, sessAll_[k]);
+  if (const json::Value* d = v.find("hot")) hotSession_ = d->str();
+  if (const json::Value* d = v.find("hotMs")) hotSessionMs_ = (int64_t)d->num(-1);
+  if (const json::Value* d = v.find("models"); d && d->isObject())
+    for (const auto& [id, mv] : d->obj()) {
+      ModelStat m;
+      sumsFrom(mv.find("all"), m.all);
+      if (const json::Value* md = mv.find("days"); md && md->isObject())
+        for (const auto& [k, s] : md->obj()) {
+          int key;
+          if (dayKeyOf(k, key)) sumsFrom(&s, m.byDay[key]);
+        }
+      if (const json::Value* md = mv.find("sessions"); md && md->isObject())
+        for (const auto& [k, s] : md->obj())
+          sumsFrom(&s, m.bySession[k]);
+      if (const json::Value* md = mv.find("last")) m.lastCallMs = (int64_t)md->num();
+      models_[id] = std::move(m);
+    }
   return true;
 }
 

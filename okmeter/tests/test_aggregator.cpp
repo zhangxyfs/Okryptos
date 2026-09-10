@@ -74,3 +74,28 @@ TEST(agg_json_roundtrip) {
   CHECK_EQ(b.session().total(), 55);
   CHECK_EQ(b.modelsByRecency()[0], "m/b");
 }
+
+TEST(agg_fromjson_tolerates_missing_keys) {
+  Aggregator a;
+  a.add(ev("m/a", "s1", 100, 0, 0, 0, msOf(2026, 9, 9, 11, 0)));
+  json::Value full = a.toJson();
+
+  Aggregator b;
+  CHECK(b.fromJson(full));            // 完整快照正常
+
+  json::Value partial;                 // 只剩 models 节的残缺快照
+  partial.v = json::Object{};
+  partial.obj();                       // 确保是对象
+  json::Value modelsOnly;
+  modelsOnly.v = json::Object{};
+  // 构造 {"models": {...}} 的残缺对象
+  std::get<json::Object>(modelsOnly.v) = full.find("models")->obj();
+  std::get<json::Object>(partial.v)["models"] = modelsOnly;
+  Aggregator c;
+  CHECK(c.fromJson(partial));          // 不崩、缺节保持默认
+  CHECK_EQ(c.all().total(), 0);        // all 缺键 → 0
+  CHECK_EQ(c.model("m/a")->all.total(), 100);
+
+  Aggregator d;
+  CHECK(!d.fromJson(json::Value{}));   // 非对象 → false
+}
