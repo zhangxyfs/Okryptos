@@ -85,6 +85,7 @@ private:
   // 统一窗口矩形：基础（弹簧 e + 卡区 wide）∪ 菜单屏幕矩形（菜单打开时）；
   // zoneDX_/zoneDY_ = 球区在窗口内的偏移（卡区/菜单区让位），SetWindowPos 落窗
   void applyWindowPos();
+  void syncClickThru();  // 设置面板期按指针位置动态开关整窗 WS_EX_TRANSPARENT
   void updatePosition() { applyWindowPos(); }
   void setEmergeTarget(double t);
   void setWide(bool w);   // 展开态窗口宽 g.w+268（卡区）；收缩态回 g.w
@@ -148,6 +149,7 @@ private:
   int zoneDX_ = 0;            // 球区在窗口内的 x 偏移（卡区 268/菜单区让位）
   int zoneDY_ = 0;            // 球区 y 偏移（菜单向上扩窗时 >0）
   bool prevEsc_ = false;      // 上一动画帧 Escape 状态（菜单收起沿检测）
+  bool clickThru_ = false;    // 设置面板期整窗 WS_EX_TRANSPARENT 状态（syncClickThru）
   bool prevLmb_ = false;      // 上一帧左键状态（菜单外点击收起沿检测）
   bool prevRmb_ = false;      // 上一帧右键状态（同上）
   int shotMenuSlot_ = -2;     // --shotmenu 自检：截图前打开的菜单槽位（-2=不开）

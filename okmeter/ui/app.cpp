@@ -368,6 +368,39 @@ void DockApp::applyWindowPos() {
                SWP_NOZORDER | SWP_NOACTIVATE);  // 尺寸变化 → WM_SIZE → d3d.resize + render
 }
 
+// 设置面板打开期间的跨进程点击穿透：WM_NCHITTEST 的 HTTRANSPARENT 只对同线程
+// 窗口有效（MSDN/Raymond Chen），跨进程必须 WS_EX_TRANSPARENT。但样式是整窗的，
+// 面板/球区又要可交互 → 按指针位置动态开关：帧时钟每帧轮询 GetCursorPos
+//（面板打开期帧时钟必在跑），指针进面板/球区即清样式，离开即置样式。
+// 鸡生蛋问题不存在：穿透期间收不到 WM_MOUSEMOVE，但轮询不依赖消息。
+void DockApp::syncClickThru() {
+  if (!hwnd_) return;
+  bool want = false;
+  if (settings_.open) {
+    POINT pt{};
+    GetCursorPos(&pt);
+    // 可命中区 = 面板矩形（含打开的下拉浮层）∪ 球区竖条（详情卡区仅展示不吞点击）
+    RECT wr{};
+    GetWindowRect(hwnd_, &wr);
+    const bool inPanel = settings_.contains(pt.x - (int)wr.left, pt.y - (int)wr.top);
+    const RECT work = workArea();
+    const RECT ballZone{ cfg_.edge == "right" ? work.right - dockW_ : work.left,
+                         winY_,
+                         cfg_.edge == "right" ? work.right : work.left + dockW_,
+                         winY_ + winH_ };
+    want = !inPanel && !PtInRect(&ballZone, pt);
+  }
+  if (want == clickThru_) return;
+  clickThru_ = want;
+  LONG_PTR ex = GetWindowLongPtrW(hwnd_, GWL_EXSTYLE);
+  if (want) ex |= WS_EX_TRANSPARENT;
+  else ex &= ~(LONG_PTR)WS_EX_TRANSPARENT;
+  SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, ex);
+  SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
+                   SWP_FRAMECHANGED);  // 强制重命中测试
+}
+
 // 展开/收缩切换窗口宽度（球区位置不动，卡区在屏内侧增减）
 void DockApp::setWide(bool w) {
   if (wide_ == w || !hwnd_) return;
@@ -593,6 +626,7 @@ void DockApp::openSettings() {
   KillTimer(hwnd_, kTimerRetract);
   setEmergeTarget(1);   // 面板期间保持展开（原型 holdOpen）
   applyWindowPos();     // 面板区纳入窗口（并集扩窗 → WM_SIZE → render）
+  syncClickThru();      // 初始穿透状态按当前指针位置定
   render();
 }
 
@@ -611,6 +645,7 @@ void DockApp::closeSettings(bool apply) {
     rebuildItems();         // bindings/文本/详情卡同源更新
   }
   settings_.open = false;
+  if (clickThru_) syncClickThru();  // 恢复窗口可命中（关面板后不再需要穿透）
   rebuildLayout();  // edge/count 可能变化 → 几何重建（applyWindowPos 收回基础矩形）
   POINT pt{};
   GetCursorPos(&pt);
@@ -810,6 +845,7 @@ void DockApp::animTick() {
     const bool esc = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
     if (esc && !prevEsc_) closeSettings(false);
     prevEsc_ = esc;
+    syncClickThru();  // 按指针位置动态穿透（帧时钟每帧轮询，不依赖鼠标消息）
   }
   if (emerged_) {
     // 弹簧静止后：材质仍有进行中的光效动画（粒子/柔光/光晕）或形态仍有持续
