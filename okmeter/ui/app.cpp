@@ -579,6 +579,7 @@ void DockApp::syncFrames() {
 // 并集扩窗 + 保持展开（holdOpen）；面板皮肤跟随当前生效材质（草稿不即时换肤）
 void DockApp::openSettings() {
   if (settings_.open) return;
+  backdrop_.note(L"openSettings 入口（诊断消息触发或菜单）");
   closeMenu();
   settings_.begin(cfg_, store_->agg().modelsByRecency());
   settings_.layout(d3d_);
@@ -682,6 +683,11 @@ void DockApp::render() {
               material_->id() == "glow" ? pressIdx_ : -1);  // 按压下沉仅沉浸光感
   if (card_.valid && hoverIdx_ >= 0 && hoverIdx_ < (int)g.items.size() &&
       emerge_.value > 0.5) {
+    // 垂直夹取基准用当前真实客户区高度（联合窗口下 winH_ 只是球区高度，
+    // 菜单/设置面板扩窗后窗口更高——错用 winH_ 会把卡 clamp 到顶部）
+    RECT cr{};
+    GetClientRect(hwnd_, &cr);
+    const double clientH = (double)(cr.bottom - cr.top);
     // cardin 出现动画 140ms（透明度 + 向屏缘 6px 滑入，原型 .detail cardin 同款）
     const double ct = cardAnimT();
     if (ct < 1.0) {
@@ -693,12 +699,12 @@ void DockApp::render() {
           D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
           D2D1::IdentityMatrix(), (float)ct);
       dc->PushLayer(&lp, nullptr);
-      scene_.drawCard(d3d_, *material_, card_, cfg_.edge, g, dx, (double)winH_,
+      scene_.drawCard(d3d_, *material_, card_, cfg_.edge, g, dx, clientH,
                       hoverIdx_, form_->cardRadius(hoverIdx_, (cfg_.count - 1) / 2));
       dc->PopLayer();
       dc->SetTransform(D2D1::IdentityMatrix());
     } else {
-      scene_.drawCard(d3d_, *material_, card_, cfg_.edge, g, dx, (double)winH_,
+      scene_.drawCard(d3d_, *material_, card_, cfg_.edge, g, dx, clientH,
                       hoverIdx_, form_->cardRadius(hoverIdx_, (cfg_.count - 1) / 2));
     }
   }
@@ -1208,6 +1214,21 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       render();
     }
     return 0;
+  case WM_APP + 0x4C: {  // 在线诊断：转储当前 backbuffer + 布局状态到 okmeter 目录
+    if (wp == 1) openSettings();  // 诊断便捷：wp=1 先开设置面板（免菜单导航）
+    const std::wstring p = (okmeterDir() / L"dump-live.png").wstring();
+    const bool okDump = d3d_.saveFrame(p);
+    RECT wr2{};
+    GetWindowRect(hwnd_, &wr2);
+    backdrop_.note(
+        L"DUMP ok=%d win=(%ld,%ld,%ld,%ld) zone=(%d,%d) wide=%d hover=%d emerge=%.2f "
+        L"menu=%d settings=%d card=%d frames=%llu",
+        okDump ? 1 : 0, (long)wr2.left, (long)wr2.top, (long)wr2.right,
+        (long)wr2.bottom, zoneDX_, zoneDY_, wide_ ? 1 : 0, hoverIdx_, emerge_.value,
+        menu_.open ? 1 : 0, settings_.open ? 1 : 0, card_.valid ? 1 : 0,
+        backdrop_.frameCount());
+    return 0;
+  }
   case WM_DPICHANGED:
     rebuildLayout();
     render();
