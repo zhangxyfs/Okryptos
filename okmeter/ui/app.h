@@ -74,6 +74,7 @@ private:
   double emergeTarget_ = 0;
   bool emerged_ = true;       // 弹簧已静止在 target（避免静止帧空转）
   int hoverIdx_ = -1;
+  int pressIdx_ = -1;           // 左键按住项（沉浸光感按压下沉/光晕；仅 glow 生效）
   bool trackingLeave_ = false;
   bool wide_ = false;         // 窗口含 268px 卡区（展开态）
   render::DetailCard card_;   // 悬停详情卡缓存（rebuildCard 重组）

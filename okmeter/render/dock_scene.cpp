@@ -58,7 +58,7 @@ void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
                      BackdropCapture* backdrop, const DockGeom& g,
                      const std::vector<DockItem>& items, int mid,
                      double e, const std::string& edge, float dx,
-                     float backdropDX, float backdropDY) {
+                     float backdropDX, float backdropDY, int pressIdx) {
   if (!ensure(d3d)) return;
   ID2D1DeviceContext* dc = d3d.dc();
   dc->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
@@ -77,6 +77,7 @@ void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
                         : (g.w - kCollapsedCapPx + it.r);
     baked.items[i].x = it.x + (1.0 - e) * (collapsedX - it.x) + dx;
     baked.items[i].y = it.y + it.dy;
+    if ((int)i == pressIdx) baked.items[i].scale *= 0.9;  // 按压下沉（球与文本同步）
   }
 
   material.drawArcStroke(dc, baked);

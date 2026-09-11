@@ -173,6 +173,9 @@ void DockApp::createModules() {
 
   Registry<render::IMaterial> materials;
   render::registerDarkMaterial(materials);
+  render::registerFrostMaterial(materials);
+  render::registerLiquidMaterial(materials);
+  render::registerGlowMaterial(materials);
   material_ = materials.create(cfg_.material);
   if (!material_) material_ = materials.create("dark");
 }
@@ -245,9 +248,11 @@ void DockApp::rebuildCard() {
 
 void DockApp::pollData() {
   Aggregator& agg = store_->agg();
-  kimi_->poll([&](const UsageEvent& e) { agg.add(e); });
+  int arrived = 0;
+  kimi_->poll([&](const UsageEvent& e) { agg.add(e); ++arrived; });
   store_->flush();
   rebuildItems();
+  if (arrived > 0) material_->onPulse();  // 数据到达 → 沉浸光感粒子迸散
   render();
 }
 
@@ -345,7 +350,8 @@ void DockApp::render() {
   backdrop_.capOrigin(monX, monY);
   scene_.draw(d3d_, *form_, *material_, &backdrop_, g, items_,
               (cfg_.count - 1) / 2, emerge_.value, cfg_.edge, dx,
-              (float)(monX - wr.left), (float)(monY - wr.top));
+              (float)(monX - wr.left), (float)(monY - wr.top),
+              material_->id() == "glow" ? pressIdx_ : -1);  // 按压下沉仅沉浸光感
   if (card_.valid && hoverIdx_ >= 0 && hoverIdx_ < (int)g.items.size() &&
       emerge_.value > 0.5) {
     const ItemGeom& it = g.items[(size_t)hoverIdx_];
@@ -378,7 +384,11 @@ void DockApp::animTick() {
     lastWatchMs_ = now;
     if (watch_.signaled()) pollData();
   }
-  if (emerged_) return;  // 静止：不 step 不重绘不挪窗
+  if (emerged_) {
+    // 弹簧静止后：材质仍有进行中的光效动画（粒子/柔光/光晕）时持续重绘
+    if (material_ && material_->wantsTick()) render();
+    return;
+  }
 #if defined(OKM_ANIM_DIAG)
   diagFrameBegin(emergeTarget_);
   const LARGE_INTEGER q0 = qpcNow();
@@ -447,10 +457,27 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
       emerged_ = true;
       setWide(true);
       updatePosition();
+      // 模拟指针在悬停球左上方：跟手光/镜面高光/光感汇聚在截图里可见
+      {
+        const int screenH = GetSystemMetrics(SM_CYSCREEN);
+        const DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
+        if (hoverIdx_ >= 0 && hoverIdx_ < (int)g.items.size()) {
+          const ItemGeom& it = g.items[(size_t)hoverIdx_];
+          const float dx = (cfg_.edge == "right") ? (float)kCardZoneW : 0.0f;
+          material_->onPointer((float)it.x + dx - 55.0f, (float)it.y - 70.0f);
+          // glow 附加模拟按压：scale .9 下沉 + 扩散环起点帧（按压光晕自检）
+          if (material_->id() == "glow") {
+            pressIdx_ = hoverIdx_;
+            material_->onPress((float)it.x + dx, (float)it.y);
+          }
+        }
+      }
       rebuildCard();
       render();
       render();  // setWide 触发的 resize 可能让首帧 EndDraw 返回 RECREATE_TARGET
                  // 被丢弃（end 内重建设备），第二帧才落到新设备 back buffer
+      Sleep(240);  // glow 按压环推进到中段（scale≈1.1，越出球缘可见）
+      render();    // 第三帧：glow 柔光/粒子/按压环经 wantsTick 平滑到位后稳定
       (void)d3d_.saveFrame(shotPath_);
       DestroyWindow(hwnd_);
       return 0;
@@ -488,12 +515,38 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
   }
   case WM_MOUSELEAVE:
     trackingLeave_ = false;
+    material_->onPointerLeave();  // 光感熄灭/高光复位/粒子消散
+    if (pressIdx_ != -1) { pressIdx_ = -1; render(); }
     if (hoverIdx_ != -1) {
       hoverIdx_ = -1;
       rebuildCard();  // 移出即隐
       render();
     }
     SetTimer(hwnd_, kTimerRetract, 600, nullptr);  // 600ms 迟滞后收回
+    return 0;
+  case WM_LBUTTONDOWN: {
+    // 按压反馈（沉浸光感：scale .9 + 扩散环）：命中检测同悬停（按 y 最近项）
+    const int y = (int)(short)HIWORD(lp);
+    const int screenH = GetSystemMetrics(SM_CYSCREEN);
+    const DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
+    int idx = -1;
+    double best = kHoverHitY;
+    for (size_t i = 0; i < g.items.size(); ++i) {
+      const double d = std::abs((double)y - g.items[i].y);
+      if (d < best) { best = d; idx = (int)i; }
+    }
+    if (idx != -1) {
+      pressIdx_ = idx;
+      material_->onPress((float)(int)(short)LOWORD(lp), (float)y);
+      render();
+    }
+    return 0;
+  }
+  case WM_LBUTTONUP:
+    if (pressIdx_ != -1) {
+      pressIdx_ = -1;
+      render();
+    }
     return 0;
   case WM_RBUTTONUP: {
     HMENU menu = CreatePopupMenu();

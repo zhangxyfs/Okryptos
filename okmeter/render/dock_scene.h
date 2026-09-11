@@ -27,12 +27,13 @@ class DockScene {
 public:
   // g 须先经 applyHover 处理；mid 为中心项下标（accent 高亮）；e=弹簧滑出进度；
   // dx 为球区整体水平偏移（窗口含卡区时右缘 +268，球区贴屏缘不动）；
-  // backdropDX/DY 为背景纹理→窗口坐标平移（材质玻璃取样对齐用）
+  // backdropDX/DY 为背景纹理→窗口坐标平移（材质玻璃取样对齐用）；
+  // pressIdx ≥0 时该项烘焙 scale×0.9（沉浸光感按压下沉，原型 .pressed 同款）
   void draw(D3DContext& d3d, IForm& form, IMaterial& material,
             BackdropCapture* backdrop, const DockGeom& g,
             const std::vector<DockItem>& items, int mid,
             double e, const std::string& edge, float dx = 0,
-            float backdropDX = 0, float backdropDY = 0);
+            float backdropDX = 0, float backdropDY = 0, int pressIdx = -1);
 
   // 悬停详情卡：宽 252、圆角 12、卡底委托 material.drawCardBack；位于球区屏内侧
   // （右缘：卡区在左 x∈[8,260]；左缘镜像 x=ballZoneW+8）；垂直居中 anchorY 并

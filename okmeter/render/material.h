@@ -35,9 +35,18 @@ public:
   virtual void drawCardBack(ID2D1DeviceContext*, const D2D1_RECT_F&, float radius) const = 0;
   virtual void drawArcStroke(ID2D1DeviceContext*, const DockGeom&) const = 0;
   virtual void onPointer(float x, float y) const = 0;    // 跟手光/镜面高光的光源位置
+  virtual void onPointerLeave() const {}                 // 指针离开（光感熄灭/粒子消散）
+  virtual void onPress(float, float) const {}            // 按下触点（按压光晕）
+  virtual void onPulse() const {}                        // 新数据到达（粒子迸散触发）
+  // 有进行中的光效动画（粒子/光晕/柔光过渡）需持续重绘时返回 true；
+  // app 在弹簧静止后仍按动画帧率调 render（默认 false：纯事件驱动）
+  virtual bool wantsTick() const { return false; }
 };
 
-// 注册内建材质（render/materials/dark.cpp）
+// 注册内建材质（render/materials/*.cpp）
 void registerDarkMaterial(Registry<IMaterial>& reg);
+void registerFrostMaterial(Registry<IMaterial>& reg);
+void registerLiquidMaterial(Registry<IMaterial>& reg);
+void registerGlowMaterial(Registry<IMaterial>& reg);
 
 } // namespace okmeter::render
