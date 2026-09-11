@@ -27,6 +27,10 @@ public:
   bool ok() const { return dc_ != nullptr; }
   // 设备代际：每次 init 重建成功 +1；资源缓存方应比较代际而非裸指针（防 ABA）
   unsigned generation() const { return generation_; }
+  // 诊断：end() 内 init 重入次数与触发错误码/设备移除原因（捕获重启风暴取证）
+  unsigned rebuilds() const { return rebuilds_; }
+  HRESULT lastRebuildErr() const { return lastRebuildErr_; }
+  HRESULT lastRemovedReason() const { return lastRemovedReason_; }
   // 共享 DXGI 设备（WGC 背景捕获互操作用；设备重建后代际变化，需重新获取）
   Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice() const;
 
@@ -52,6 +56,9 @@ private:
   Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_;
   Microsoft::WRL::ComPtr<ID2D1Bitmap1> frame_;
   unsigned generation_ = 0;
+  unsigned rebuilds_ = 0;         // end() 内 init 重入次数（设备丢失重建）
+  HRESULT lastRebuildErr_ = S_OK;     // 触发重建的 EndDraw/Present 错误码
+  HRESULT lastRemovedReason_ = S_OK;  // GetDeviceRemovedReason（若可查询）
 };
 
 } // namespace okmeter::render

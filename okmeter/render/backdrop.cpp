@@ -68,6 +68,15 @@ void BackdropCapture::log(const wchar_t* fmt, ...) {
   OutputDebugStringW(L"\n");
 }
 
+void BackdropCapture::note(const wchar_t* fmt, ...) {
+  wchar_t msg[512];
+  va_list ap;
+  va_start(ap, fmt);
+  _vsnwprintf_s(msg, _TRUNCATE, fmt, ap);
+  va_end(ap);
+  log(L"NOTE %s", msg);
+}
+
 bool BackdropCapture::failAt(const wchar_t* where, HRESULT hr) {
   log(L"FAIL %s hr=0x%08lX → backdropOk=false", where, (unsigned long)hr);
   ok_ = false;
@@ -195,8 +204,10 @@ bool BackdropCapture::start(HWND hwnd, IDXGIDevice* dxgi) {
   }
 
   AcquireSRWLockExclusive(&lock_);
-  latest_.Reset();
-  dirty_ = false;
+  // latest_ 故意保留：stop→start 重建期间材质继续画最后一帧背景（旧坐标系），
+  // 杜绝"重建窗口期无帧 → 退化纯色深底（黑边观感）"；新会话首帧到达即替换。
+  // 有存货则置脏——设备代际重建后材质的 bgBmp_ 缓存已失效，需从保留帧重建
+  dirty_ = (latest_ != nullptr);
   capW_ = size.Width;
   capH_ = size.Height;
   capX_ = mi.rcMonitor.left;
@@ -243,7 +254,7 @@ void BackdropCapture::stop() {
   frameTokenValue_ = 0;
 
   AcquireSRWLockExclusive(&lock_);
-  latest_.Reset();
+  // latest_ 同理保留（stop 不再清帧）：会话关闭后材质仍有最后一帧可画
   device_.Reset();
   dirty_ = false;
   ReleaseSRWLockExclusive(&lock_);
@@ -302,6 +313,8 @@ void BackdropCapture::onFrame(IUnknown* poolSender) {
     }
   }
   ReleaseSRWLockExclusive(&lock_);
+  // 唤醒 UI 线程：停摆（按需帧）状态下新背景帧需触发一次渲染，否则玻璃底滞留
+  if (tex && hwnd_) (void)PostMessageW(hwnd_, kMsgDirty, 0, 0);
   // 内容尺寸变化（分辨率/DPI/拓扑）→ 回调线程 Recreate（FreeThreaded 池契约允许）
   if (resized && dev)
     (void)pool->Recreate(dev.Get(), wgd::DirectXPixelFormat_B8G8R8A8UIntNormalized, 1, size);

@@ -166,6 +166,9 @@ bool D3DContext::begin() {
 bool D3DContext::end() {
   HRESULT hr = dc_->EndDraw();
   if (hr == D2DERR_RECREATE_TARGET || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+    ++rebuilds_;
+    lastRebuildErr_ = hr;
+    if (d3d_) lastRemovedReason_ = d3d_->GetDeviceRemovedReason();
     return init(hwnd_, w_, h_);  // 本帧丢弃，init 重入重建，下一帧重绘
   }
   if (FAILED(hr)) return false;
@@ -173,6 +176,9 @@ bool D3DContext::end() {
   // 空转、WM_TIMER 合并（动画抖动放大源）；Present(0,0) 非阻塞提交即可。
   hr = swap_->Present(0, 0);
   if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+    ++rebuilds_;
+    lastRebuildErr_ = hr;
+    if (d3d_) lastRemovedReason_ = d3d_->GetDeviceRemovedReason();
     return init(hwnd_, w_, h_);
   }
   if (FAILED(hr)) return false;

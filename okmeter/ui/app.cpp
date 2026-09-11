@@ -544,6 +544,7 @@ bool DockApp::needsFrames() const {
   if (menu_.open) return true;                         // 弹出动画 + 沿检测
   if (settings_.open) return true;                     // 滑入动画 + Escape 沿检测
   if (card_.valid && cardAnimT() < 1.0) return true;     // cardin 140ms
+  if (backdrop_.ok() && backdrop_.dirty()) return true;  // 新背景帧到达（切窗/壁纸变）→ 唤醒一帧
   return false;
 }
 
@@ -647,6 +648,10 @@ void DockApp::render() {
   if (!d3d_.begin()) return;
   if (d3d_.generation() != backdropGen_) {
     // 设备丢失重建（end() 内 init 重入）后：用新 DXGI 设备重启捕获
+    backdrop_.note(L"render: 代际 %u→%u（重建 #%u lastErr=0x%08lX removed=0x%08lX）→ 重启捕获",
+                   backdropGen_, d3d_.generation(), d3d_.rebuilds(),
+                   (unsigned long)d3d_.lastRebuildErr(),
+                   (unsigned long)d3d_.lastRemovedReason());
     backdropGen_ = d3d_.generation();
     startCapture();
   }
@@ -792,8 +797,12 @@ void DockApp::animTick() {
     if ((material_ && material_->wantsTick()) || (form_ && form_->wantsTick()) ||
         (menu_.open && menuAnimT() < 1.0) ||
         (settings_.open && panelAnimT() < 1.0) ||
-        (card_.valid && cardAnimT() < 1.0))
+        (card_.valid && cardAnimT() < 1.0) ||
+        (backdrop_.ok() && backdrop_.dirty()))
       render();
+    // 兜底清脏：本帧无任何材质消费背景帧（如收缩细条不采样）时，防 dirty 常置
+    // 导致帧时钟空转；与 onFrame 写脏竞争的最坏代价是少渲染一帧背景
+    if (backdrop_.dirty()) backdrop_.markClean();
     syncFrames();  // 全部静止 → 停帧时钟（菜单/面板打开期沿检测需要 → 保持）
     return;
   }
@@ -1145,6 +1154,7 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     return 0;
   }
   case WM_DISPLAYCHANGE:
+    backdrop_.note(L"WM_DISPLAYCHANGE → 重建捕获");
     startCapture();   // 显示器拓扑/尺寸变化 → 重建捕获（HMONITOR/池尺寸）
     rebuildLayout();  // 屏高/DPI 变化 → 几何重建
     render();
@@ -1185,6 +1195,7 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
   }
   case WM_WTSSESSION_CHANGE:
     if (wp == WTS_SESSION_UNLOCK) {
+      backdrop_.note(L"WTS_SESSION_UNLOCK → retry 重建捕获");
       backdrop_.retry();  // 锁屏/安全桌面期间捕获被中止 → 解锁重建
       render();
     }
@@ -1261,6 +1272,7 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   }
 
   // 背景捕获管线（WGC）：affinity 排除自身 + 实时抓屏；失败仅降级不影响 dock
+  backdrop_.note(L"init: 首次启动捕获");
   startCapture();
   backdropGen_ = d3d_.generation();
   // 会话解锁通知：锁屏/安全桌面中止捕获，解锁后重建

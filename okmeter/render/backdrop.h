@@ -12,7 +12,8 @@
 namespace okmeter::render {
 
 // 线程契约：FrameArrived 回调运行在 WGC 线程池线程，只交换"最新帧纹理 + dirty
-// 标志"（SRWLOCK 保护），严禁触碰 Aggregator/Store/Config 等 UI 线程对象；
+// 标志"（SRWLOCK 保护）并向 UI 线程 PostMessage 唤醒（kMsgDirty，线程安全），
+// 严禁触碰 Aggregator/Store/Config 等 UI 线程对象；
 // start/stop/retry 与 acquire/dirty/markClean 均由 UI 线程调用。
 // 降级链：affinity 缺失 → degraded()=true；CreateForMonitor/CreateFreeThreaded/
 // StartCapture 任一失败 → ok()=false，均记录 backdrop.log（调用点 + HRESULT）。
@@ -38,6 +39,10 @@ public:
   bool dirty() const;
   void markClean();
   unsigned long long frameCount() const;  // 累计到达帧数（验收/诊断）
+  void note(const wchar_t* fmt, ...);  // 诊断：往 backdrop.log 追加一条（调用点自证）
+
+  // 新背景帧到达时 PostMessage 唤醒 UI 线程的消息号（onMessage 包装器接手 syncFrames）
+  static constexpr UINT kMsgDirty = WM_APP + 0x4B;
 
   // 内部入口（由 cpp 内 FrameHandler 转发，勿直接调用）：FrameArrived，WGC 线程池线程
   void onFrame(IUnknown* poolSender);
