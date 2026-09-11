@@ -35,6 +35,9 @@ TEST(geom_hover_enlarge_and_squeeze) {
   CHECK(g.items[1].dy < 0);   // 中心上方项被向上挤
   CHECK(g.items[3].dy > 0);   // 中心下方项被向下挤
   CHECK(std::abs(g.items[1].dy) > std::abs(g.items[0].dy));  // 近者挤得多
+  CHECK(std::abs(g.items[1].scale - 1.0) < 1e-9);   // 相邻项只让位不回缩
+  CHECK(std::abs(g.items[0].scale - 0.92) < 1e-9);  // 远端项略微回缩（规格 §3.4）
+  CHECK(std::abs(g.items[4].scale - 0.92) < 1e-9);
   applyHover(g, 2, 1.34, 10.0);   // 恢复悬停态，验证越界索引的复位语义
   applyHover(g, 99, 1.34, 10.0);   // 越界正索引 → 复位
   CHECK(std::abs(g.items[2].scale - 1.0) < 1e-9);

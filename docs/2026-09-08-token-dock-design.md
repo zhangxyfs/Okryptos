@@ -176,3 +176,5 @@ Kimi Code CLI 的 token 用量只能进 TUI 敲 `/usage` 看，hooks 事件不�
 - **置顶窗与全屏独占应用共存**：全屏独占（游戏等）场景 dock 会被盖住，属可接受行为，不做穿透强求。
 - **MSVC 工具链进入构建链**：构建机需装 Build Tools + Windows SDK 并钉版本；`sync-version.sh` 对 `version.rc` 的适配是已知的 sed 易碎点，改版本号后要验证资源字段确实更新。
 - 透明 + 置顶 + 穿透三个标志位在 Windows 各版本组合行为有差异，需在 Win10/Win11 各验一遍。
+- **WGC 显示器捕获触发 Win11 黄色捕获提示边框**（全屏四缘常亮黄框，Plan 2b 实测）：必须 `IGraphicsCaptureSession3::put_IsBorderRequired(false)`（Win11 22H2+）；旧版 Windows 无此接口则保留黄框并记 backdrop.log，不降级。光标捕获同步关闭（`IGraphicsCaptureSession2`），玻璃底不含指针。
+- **`WDA_EXCLUDEFROMCAPTURE` 的副作用**：GDI `BitBlt`/`CopyFromScreen` 截图与 WGC 录屏都看不到 dock 本体——自检截图必须走 `--shot`/`--shotcap`/`--shotmenu`/`--shotsettings` 的回读 backbuffer 路径，不能用系统截屏验收。

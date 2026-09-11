@@ -63,6 +63,9 @@ int main(int argc, char** argv) {
   DockApp app;
   if (argc > 2 && std::string(argv[1]) == "--shot")
     return app.run(GetModuleHandleW(nullptr), argWide(argv[2]));
+  // --shotcap <png>：自检收缩态截图（e=0 露出条，无悬停）
+  if (argc > 2 && std::string(argv[1]) == "--shotcap")
+    return app.run(GetModuleHandleW(nullptr), argWide(argv[2]), -2, false, -1, true);
   // --shotmenu <png> [slot]：自检截图前打开自绘菜单（slot -1=空白菜单，缺省中心球）
   if (argc > 2 && std::string(argv[1]) == "--shotmenu") {
     const int slot = argc > 3 ? std::atoi(argv[3]) : -1;

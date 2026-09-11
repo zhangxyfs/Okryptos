@@ -166,12 +166,27 @@ bool BackdropCapture::start(HWND hwnd, IDXGIDevice* dxgi) {
   hr = pool->add_FrameArrived(handler.Get(), &token);
   if (FAILED(hr)) return failAt(L"add_FrameArrived", hr);
 
-  // 7. 会话 + StartCapture
+  // 7. 会话：关捕获提示黄框（IGraphicsCaptureSession3，Win11 22H2+；缺接口/拒绝仅记
+  //    日志不降级）与光标捕获（IGraphicsCaptureSession2，玻璃底不需要光标），再 StartCapture
   ComPtr<wgc::IGraphicsCaptureSession> session;
   hr = pool->CreateCaptureSession(item.Get(), &session);
   if (FAILED(hr)) {
     (void)pool->remove_FrameArrived(token);
     return failAt(L"CreateCaptureSession", hr);
+  }
+  ComPtr<wgc::IGraphicsCaptureSession3> session3;
+  if (SUCCEEDED(session.As(&session3)) && session3) {
+    hr = session3->put_IsBorderRequired(false);
+    if (FAILED(hr))
+      log(L"put_IsBorderRequired(false) hr=0x%08lX → 保留系统黄框", (unsigned long)hr);
+  } else {
+    log(L"IGraphicsCaptureSession3 缺失（旧版 Windows）→ 保留系统黄框");
+  }
+  ComPtr<wgc::IGraphicsCaptureSession2> session2;
+  if (SUCCEEDED(session.As(&session2)) && session2) {
+    hr = session2->put_IsCursorCaptureEnabled(false);
+    if (FAILED(hr))
+      log(L"put_IsCursorCaptureEnabled(false) hr=0x%08lX（忽略）", (unsigned long)hr);
   }
   hr = session->StartCapture();
   if (FAILED(hr)) {

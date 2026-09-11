@@ -54,7 +54,8 @@ public:
   // shotSettings=true 时截图前打开背板设置面板（180ms 滑入播完后落盘）；
   // shotDropSlot ≥0 时同时打开该槽位的指标下拉浮层
   int run(HINSTANCE inst, const std::wstring& shotPath = L"", int shotMenuSlot = -2,
-          bool shotSettings = false, int shotDropSlot = -1);
+          bool shotSettings = false, int shotDropSlot = -1,
+          bool shotCollapsed = false);
 
 private:
   static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
@@ -136,6 +137,7 @@ private:
   bool prevRmb_ = false;      // 上一帧右键状态（同上）
   int shotMenuSlot_ = -2;     // --shotmenu 自检：截图前打开的菜单槽位（-2=不开）
   bool shotSettings_ = false;  // --shotsettings 自检：截图前打开设置面板
+  bool shotCollapsed_ = false; // --shotcap 自检：收缩态（e=0 露出条）截图
   int shotDropSlot_ = -1;      // --shotsettings 自检：同时打开的下拉槽位（-1=不开）
   int winY_ = 0;              // 垂直居中 y（rebuildLayout 重算）
   int winH_ = 0;              // 窗口高（卡垂直夹取/宽度切换用）

@@ -813,6 +813,20 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     case kTimerShot: {
       KillTimer(hwnd_, kTimerShot);
+      if (shotCollapsed_) {
+        // --shotcap 自检：静止在收缩终态（e=0，无悬停），露出条球帽+细边落盘
+        hoverIdx_ = -1;
+        emerge_.snap(0);
+        emergeTarget_ = 0;
+        emerged_ = false;
+        updatePosition();
+        render();
+        render();   // resize 首帧可能 RECREATE_TARGET 被丢弃
+        render();   // FLIP_SEQUENTIAL 双缓冲：saveFrame 读倒数第二帧
+        (void)d3d_.saveFrame(shotPath_);
+        DestroyWindow(hwnd_);
+        return 0;
+      }
       if (shotSettings_) {
         // --shotsettings 自检：强制展开 + 打开背板设置面板（滑入动画播完后落盘）
         hoverIdx_ = -1;
@@ -869,6 +883,8 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
                  // 被丢弃（end 内重建设备），第二帧才落到新设备 back buffer
       Sleep(240);  // glow 按压环推进到中段（scale≈1.1，越出球缘可见）
       render();    // 第三帧：glow 柔光/粒子/按压环经 wantsTick 平滑到位后稳定
+      render();    // 第四帧：FLIP_SEQUENTIAL 下 saveFrame 读倒数第二帧——
+                   // cardin 140ms 已在 Sleep 内播完，末两帧须同为卡满透明度终态
       if (shotMenuSlot_ != -2) {
         // --shotmenu 自检：在目标球中心（-1=空白区）打开自绘菜单后落盘
         int cx = (int)(dockW_ * 0.5) + zoneDX_;
@@ -1139,11 +1155,12 @@ LRESULT CALLBACK DockApp::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
-                 bool shotSettings, int shotDropSlot) {
+                 bool shotSettings, int shotDropSlot, bool shotCollapsed) {
   shotPath_ = shotPath;
   shotMenuSlot_ = shotMenuSlot;
   shotSettings_ = shotSettings;
   shotDropSlot_ = shotDropSlot;
+  shotCollapsed_ = shotCollapsed;
   // DPI 感知（失败忽略，按系统缩放继续）
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 

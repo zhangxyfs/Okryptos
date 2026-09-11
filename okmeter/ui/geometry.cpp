@@ -81,7 +81,8 @@ void applyHover(DockGeom& g, int hoverIdx, double hoverScale, double push) {
     }
     const double d = std::abs((double)i - hoverIdx);
     const double amount = push * std::exp(-0.9 * (d - 1));  // 近多远少
-    it.scale = 1.0;
+    // 规格 §3.4：相邻球让位（dy），其余球略微回缩（d≥2 收 0.92，原型 .orb.dim 同款）
+    it.scale = d >= 2.0 ? 0.92 : 1.0;
     it.dy = ((int)i < hoverIdx ? -amount : amount);
   }
 }

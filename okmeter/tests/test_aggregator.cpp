@@ -62,6 +62,33 @@ TEST(agg_session_is_latest_active) {
   CHECK_EQ(a.modelSession("m/b").total(), 20);
 }
 
+TEST(agg_week_monday_boundary) {
+  // 周一起界：周日 23:59 归上一周，周一 00:00 归新一周
+  Aggregator a;
+  a.add(ev("m/a", "s1", 10, 0, 0, 0, msOf(2026, 9, 6, 23, 59)));  // 周日 → 上周(08-31 起)
+  a.add(ev("m/a", "s1", 20, 0, 0, 0, msOf(2026, 9, 7, 0, 0)));    // 周一 → 本周(09-07 起)
+  const int64_t mon = msOf(2026, 9, 7, 12, 0);   // 周一中午
+  const int64_t sun = msOf(2026, 9, 13, 23, 59); // 本周日深夜（同一周）
+  const int64_t prevSun = msOf(2026, 9, 6, 12, 0);
+  CHECK_EQ(a.week(mon).total(), 20);
+  CHECK_EQ(a.week(sun).total(), 20);              // 周日仍属本周
+  CHECK_EQ(a.week(prevSun).total(), 10);          // 上周口径只含周日那笔
+  CHECK_EQ(a.week(msOf(2026, 9, 14, 0, 0)).total(), 0);  // 下周一 → 新一周为空
+}
+
+TEST(agg_modelweek_respects_monday_boundary) {
+  Aggregator a;
+  a.add(ev("m/a", "s1", 10, 0, 0, 0, msOf(2026, 9, 6, 23, 59)));  // 上周
+  a.add(ev("m/a", "s1", 20, 0, 0, 0, msOf(2026, 9, 7, 0, 0)));    // 本周
+  a.add(ev("m/a", "s1", 40, 0, 0, 0, msOf(2026, 9, 11, 9, 30)));  // 本周五
+  a.add(ev("m/b", "s1", 5, 0, 0, 0, msOf(2026, 9, 8, 10, 0)));    // 本周，另一模型
+  const int64_t now = msOf(2026, 9, 12, 12, 0);  // 周六
+  CHECK_EQ(a.modelWeek("m/a", now).total(), 60);  // 本周两笔，上周不计
+  CHECK_EQ(a.modelWeek("m/b", now).total(), 5);
+  CHECK_EQ(a.modelWeek("m/ghost", now).total(), 0);  // 未观测模型 → 0
+  CHECK_EQ(a.week(now).total(), 65);                 // 全局口径同界
+}
+
 TEST(agg_json_roundtrip) {
   const int64_t now = msOf(2026, 9, 9, 12, 0);
   Aggregator a;
