@@ -160,32 +160,50 @@ void DockScene::drawCard(D3DContext& d3d, IMaterial& material,
     if (x > maxX) x = maxX;
   }
   const double anchorY = it.y + it.dy;
-  float y = (float)anchorY - cardH * 0.5f;
-  const float maxY = (float)winH - cardH - 12.0f;
+  // 垂直夹取负 maxY 兜底：窗口装不下整卡（winH-24 < cardH → maxY<12）时截底保头——
+  // 卡高收到 winH-24（超出的尾部行整行弃画，标题/大数必可见），maxY 恒 ≥12
+  const float availH = (float)winH - 24.0f;
+  const float drawH = cardH > availH ? availH : cardH;
+  float y = (float)anchorY - drawH * 0.5f;
+  const float maxY = (float)winH - drawH - 12.0f;
   if (y > maxY) y = maxY;
   if (y < 12.0f) y = 12.0f;
 
-  material.drawCardBack(dc, D2D1::RectF(x, y, x + kCardW, y + cardH), 12.0f);
+  material.drawCardBack(dc, D2D1::RectF(x, y, x + kCardW, y + drawH), 12.0f);
 
   const float cx0 = x + kPadX;
   const float cx1 = x + kCardW - kPadX;
+  const float contentBot = y + drawH - 4.0f;  // 截底卡的可见下界（行整行弃画判定）
   float ty = y + kPadTop;
   auto text = [&](const std::wstring& s, IDWriteTextFormat* fmt,
                   float top, float bot, D2D1_COLOR_F color) {
-    if (s.empty()) return;
+    if (s.empty() || bot > contentBot) return;
     brush_->SetColor(color);
     const D2D1_RECT_F tr = D2D1::RectF(cx0, top, cx1, bot);
     dc->DrawText(s.c_str(), (UINT32)s.size(), fmt, &tr, brush_.Get());
   };
 
-  text(card.title, cardTitleFmt_.Get(), ty, ty + kTitleH,
-       D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.55f));
+  // 标题：长模型 id 省略号裁剪（DrawText 无裁剪能力；CreateTextLayout +
+  // 逐字符 trimming 省略号，原型 .d-name text-overflow:ellipsis 同款）
+  if (!card.title.empty() && ty + kTitleH <= contentBot) {
+    ComPtr<IDWriteTextLayout> tl;
+    if (SUCCEEDED(d3d.dwrite()->CreateTextLayout(
+            card.title.c_str(), (UINT32)card.title.size(), cardTitleFmt_.Get(),
+            cx1 - cx0, kTitleH, &tl))) {
+      DWRITE_TRIMMING trim{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+      (void)tl->SetTrimming(&trim, nullptr);
+      (void)tl->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+      brush_->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.55f));
+      dc->DrawTextLayout(D2D1::Point2F(cx0, ty), tl.Get(), brush_.Get());
+    }
+  }
   ty += kTitleH + 3.0f;
   text(card.big, cardBigFmt_.Get(), ty, ty + kBigH,
        D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.95f));
   ty += kBigH + 10.0f;
 
   for (const auto& row : card.rows) {
+    if (ty + kRowH > contentBot) break;  // 截底卡：放不下的行整行弃画
     brush_->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.07f));  // 行间分隔 hairline
     dc->DrawLine(D2D1::Point2F(cx0, ty), D2D1::Point2F(cx1, ty), brush_.Get(), 1.0f);
     text(row.first, cardRowFmt_.Get(), ty, ty + kRowH,

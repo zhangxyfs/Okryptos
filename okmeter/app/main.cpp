@@ -68,5 +68,11 @@ int main(int argc, char** argv) {
     const int slot = argc > 3 ? std::atoi(argv[3]) : -1;
     return app.run(GetModuleHandleW(nullptr), argWide(argv[2]), slot);
   }
+  // --shotsettings <png> [dropSlot]：自检截图前打开背板设置面板（dropSlot ≥0 时
+  // 同时打开该槽位的指标下拉浮层）
+  if (argc > 2 && std::string(argv[1]) == "--shotsettings") {
+    const int dropSlot = argc > 3 ? std::atoi(argv[3]) : -1;
+    return app.run(GetModuleHandleW(nullptr), argWide(argv[2]), -2, true, dropSlot);
+  }
   return app.run(GetModuleHandleW(nullptr));
 }

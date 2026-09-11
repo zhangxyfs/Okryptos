@@ -13,7 +13,7 @@
 namespace okmeter {
 
 // 菜单条目：Title 标题行（不可点）/ Item 映射项或动作项 / Separator 分隔线 /
-// Disabled 灰化项（设置…，Task 7 点亮）
+// Disabled 灰化项（预留的灰化样式；设置… 已于 Task 7 点亮为 Item）
 struct MenuEntry {
   enum Kind { Title, Item, Separator, Disabled } kind = Item;
   std::wstring label;
