@@ -340,6 +340,19 @@ void SettingsPanel::layout(render::D3DContext& d3d) {
   y += 36.0f;
   secEnd();
 
+  // ── pinned 保持显示开关（switch-row，无节标题）──
+  secBegin(nullptr);
+  pinText_ = D2D1::RectF(0.0f, y, kContentW - kSwitchW - 16.0f, y + 18.0f);
+  pinSmall_ = D2D1::RectF(0.0f, y + 20.0f, kContentW - kSwitchW - 16.0f, y + 36.0f);
+  {
+    Ctrl c;
+    c.kind = Ctrl::PinSwitch;
+    c.rc = D2D1::RectF(kContentW - kSwitchW, y + 6.0f, kContentW, y + 6.0f + kSwitchH);
+    ctrls_.push_back(c);
+  }
+  y += 36.0f;
+  secEnd();
+
   contentH_ = (int)std::ceil(y + 16.0f - 12.0f);  // p-bd padding-bottom 16 换底 padding
   saveBtnW_ = mwidth(btnFmt_.Get(), L"保存并生效") + 28.0f;  // btn padding 8 14
   cancelBtnW_ = mwidth(btnFmt_.Get(), L"取消") + 28.0f;
@@ -439,6 +452,9 @@ int SettingsPanel::click(render::D3DContext& d3d, int idx) {
     return 1;
   case Ctrl::MergeSwitch:
     draft.mergeCache = !draft.mergeCache;
+    return 1;
+  case Ctrl::PinSwitch:
+    draft.pinned = !draft.pinned;
     return 1;
   case Ctrl::Gsel:
     if (dropGsel_ == idx) closeDrop();
@@ -729,6 +745,9 @@ void SettingsPanel::draw(render::D3DContext& d3d, render::IMaterial& material) {
     smallFmt_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
     txt(L"关闭后，详情卡将 input 拆为 常规 / cache 读 / cache 新建 三行",
         smallFmt_.Get(), swSmall_, gfx::ink(0.50f));
+    txt(L"保持显示", bodyFmt_.Get(), pinText_, gfx::ink(0.90f));
+    txt(L"开启后，鼠标移开不再自动收回，dock 常显展开",
+        smallFmt_.Get(), pinSmall_, gfx::ink(0.50f));
     smallFmt_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
 
     // 控件（体区内容坐标）
@@ -810,8 +829,9 @@ void SettingsPanel::draw(render::D3DContext& d3d, render::IMaterial& material) {
                      brush_.Get(), 1.3f);
         break;
       }
-      case Ctrl::MergeSwitch: {
-        const bool on = draft.mergeCache;
+      case Ctrl::MergeSwitch:
+      case Ctrl::PinSwitch: {
+        const bool on = c.kind == Ctrl::MergeSwitch ? draft.mergeCache : draft.pinned;
         brush_->SetColor(on ? gfx::accentC(0.55f) : gfx::ink(0.07f));
         const D2D1_ROUNDED_RECT rr =
             D2D1::RoundedRect(c.rc, kSwitchH * 0.5f, kSwitchH * 0.5f);

@@ -12,6 +12,7 @@ struct Config {
   int count = 3;                   // 仅奇数 1/3/5/7
   std::string edge = "right";      // right / left（v1 不做顶底）
   bool mergeCache = true;
+  bool pinned = false;             // 保持显示：不自动隐藏（迟滞/离开收回均禁用）
   std::vector<std::string> mapping;  // "auto" | "total:session|today|week|all" | "model:<id>"
 
   void normalize();  // 非法值回退默认；count 钳奇数集；mapping 长度对齐 count

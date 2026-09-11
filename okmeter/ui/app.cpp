@@ -522,7 +522,7 @@ void DockApp::closeMenu() {
   GetCursorPos(&pt);
   RECT wr{};
   GetWindowRect(hwnd_, &wr);
-  if (!PtInRect(&wr, pt)) {  // 指针已在窗外：恢复 600ms 迟滞收回
+  if (!PtInRect(&wr, pt) && !cfg_.pinned) {  // 指针已在窗外：恢复 600ms 迟滞收回（保持显示除外）
     KillTimer(hwnd_, kTimerRetract);
     SetTimer(hwnd_, kTimerRetract, 600, nullptr);
   }
@@ -651,7 +651,9 @@ void DockApp::closeSettings(bool apply) {
   GetCursorPos(&pt);
   RECT wr{};
   GetWindowRect(hwnd_, &wr);
-  if (!PtInRect(&wr, pt)) {  // 指针已在窗外：恢复 600ms 迟滞收回
+  if (cfg_.pinned) {
+    setEmergeTarget(1);  // 保持显示：关面板后仍常显展开
+  } else if (!PtInRect(&wr, pt)) {  // 指针已在窗外：恢复 600ms 迟滞收回
     KillTimer(hwnd_, kTimerRetract);
     SetTimer(hwnd_, kTimerRetract, 600, nullptr);
   }
@@ -930,7 +932,7 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     case kTimerRetract:
       KillTimer(hwnd_, kTimerRetract);
-      setEmergeTarget(0);
+      if (!cfg_.pinned) setEmergeTarget(0);  // 保持显示：收回禁用
       return 0;
     case kTimerShot: {
       KillTimer(hwnd_, kTimerShot);
@@ -1111,6 +1113,7 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       rebuildCard();  // 移出即隐
       render();
     }
+    if (cfg_.pinned) return 0;  // 保持显示：不安排迟滞收回
     SetTimer(hwnd_, kTimerRetract, 600, nullptr);  // 600ms 迟滞后收回
     return 0;
   case WM_LBUTTONDOWN: {
@@ -1344,6 +1347,7 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
                           kClassName, L"OkMeter", WS_POPUP,
                           x, winY_, dockW_, h, nullptr, nullptr, inst, this);
   if (!hwnd_) return 1;
+  if (cfg_.pinned) setEmergeTarget(1);  // 保持显示：启动即常显展开（弹簧滑出）
   if (!d3d_.init(hwnd_, dockW_, h)) {
     DestroyWindow(hwnd_);
     return 2;

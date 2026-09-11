@@ -44,6 +44,7 @@ TEST(config_roundtrip) {
   c.material = "liquid";
   c.edge = "left";
   c.mergeCache = false;
+  c.pinned = true;
   c.mapping = {"auto", "model:kimi-code/k3", "total:all", "auto", "auto"};
   CHECK(saveConfig(d, c));
   Config back;
@@ -52,6 +53,7 @@ TEST(config_roundtrip) {
   CHECK(back.material == "liquid");
   CHECK(back.edge == "left");
   CHECK(!back.mergeCache);
+  CHECK(back.pinned);
   CHECK_EQ(back.mapping.size(), (size_t)5);
   CHECK(back.mapping[1] == "model:kimi-code/k3");
   std::error_code ec;

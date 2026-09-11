@@ -24,7 +24,8 @@ public:
     enum Kind {
       CloseX, CancelBtn, SaveBtn,                       // 头/尾按钮（面板坐标，前三个固定）
       FormTab, MaterialTab, CountChip, EdgeChip,        // 选项卡/chips（体区内容坐标）
-      MergeSwitch, Gsel,                                // 开关/下拉钮（体区内容坐标）
+      MergeSwitch, PinSwitch,                           // 开关/下拉钮（体区内容坐标）
+      Gsel,
       DropItem                                          // 下拉浮层项（面板坐标）
     } kind = FormTab;
     int a = 0, b = 0;   // 选项卡/chips: a=选项下标；Gsel: a=槽位；DropItem: a=槽位 b=选项下标
@@ -82,6 +83,7 @@ private:
   std::vector<Sec> secs_;                // 节标题/分隔（内容坐标）
   std::vector<std::pair<std::wstring, D2D1_RECT_F>> posLabels_;  // 映射行位置标签
   D2D1_RECT_F swText_{}, swSmall_{};     // 开关行文案（内容坐标）
+  D2D1_RECT_F pinText_{}, pinSmall_{};   // 保持显示开关行文案（内容坐标）
   int contentH_ = 0;                     // 体区内容总高（layout 填充）
   int dropGsel_ = -1;                    // 打开的下拉所属 ctrls_ 下标（-1=无）
   size_t dropStart_ = 0;                 // DropItem 控件在 ctrls_ 的起始下标

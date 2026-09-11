@@ -35,6 +35,7 @@ bool loadConfig(const std::filesystem::path& dir, Config& out) {
   if (const json::Value* x = v.find("count")) out.count = (int)x->num(3);
   if (const json::Value* x = v.find("edge")) out.edge = x->str();
   if (const json::Value* x = v.find("mergeCache")) out.mergeCache = x->boolean(true);
+  if (const json::Value* x = v.find("pinned")) out.pinned = x->boolean(false);
   if (const json::Value* m = v.find("mapping"); m && m->isArray()) {
     out.mapping.clear();
     for (const auto& val : m->arr()) out.mapping.push_back(val.str());
@@ -52,6 +53,7 @@ bool saveConfig(const std::filesystem::path& dir, const Config& cfg) {
   root["count"] = json::num(c.count);
   root["edge"] = json::str(c.edge);
   root["mergeCache"] = json::num(c.mergeCache ? 1 : 0);
+  root["pinned"] = json::num(c.pinned ? 1 : 0);
   json::Array arr;
   for (const auto& m : c.mapping) arr.push_back(json::str(m));
   json::Value av;
