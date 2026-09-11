@@ -66,7 +66,8 @@ private:
   LRESULT onMessage(UINT msg, WPARAM wp, LPARAM lp);        // 分发 + syncFrames 收尾
   LRESULT dispatchMessage(UINT msg, WPARAM wp, LPARAM lp);  // 各消息实际处理
 
-  void render();          // 布局 → applyHover → dock_scene 一帧（形态/材质委托，含详情卡）
+  void render();          // 掉帧补呈包装：renderOnce 触发设备重建丢帧时有界重试（防黑窗滞留）
+  void renderOnce();      // 布局 → applyHover → dock_scene 一帧（形态/材质委托，含详情卡）
   void animTick();        // 动画帧：RDCW 检查 + 形态 tick + 弹簧 step（真实 dt）+ 挪窗 + 重绘
   // 按需渲染（静止帧 CPU≈0）：needsFrames 集中判定"是否需要持续帧"——弹簧未稳 /
   // 材质自主动画（glow 粒子气态漂移）/ 形态自主动画（罗盘收缩态旋转）/ 菜单/面板

@@ -648,7 +648,7 @@ void DockApp::startCapture() {
   (void)backdrop_.start(hwnd_, dxgi.Get());
 }
 
-void DockApp::render() {
+void DockApp::renderOnce() {
   if (!d3d_.begin()) return;
   if (d3d_.generation() != backdropGen_) {
     // 设备丢失重建（end() 内 init 重入）后：用新 DXGI 设备重启捕获
@@ -751,12 +751,24 @@ void DockApp::render() {
 #if defined(OKM_ANIM_DIAG)
   const LARGE_INTEGER drawEnd = qpcNow();
 #endif
-  d3d_.end();
+  const bool presented = d3d_.end();
 #if defined(OKM_ANIM_DIAG)
   if (g_diag.active) {
     g_diag.framesDrawMs_ = g_diag.ms(g_diag.drawBegin, drawEnd);
   }
 #endif
+  (void)presented;  // 掉帧判定由外层 render() 经 rebuilds 计数完成
+}
+
+// 掉帧补呈：resize/设备重建丢帧后若无人补画，停摆期窗口滞留黑色（"设置开两次/
+// 切程序黑边"根因）。有界重试 3 次，仍败则等下一事件帧。
+void DockApp::render() {
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    const unsigned before = d3d_.rebuilds();
+    renderOnce();
+    if (d3d_.rebuilds() == before) return;  // 无重建：要么已呈现要么硬失败，不重试
+    if (!d3d_.ok()) return;                 // 重建失败，等下个事件
+  }
 }
 
 // 动画帧 tick：HR 可等待定时器（主路径）或 16ms WM_TIMER（回退）驱动，按需启停
@@ -1215,18 +1227,19 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     }
     return 0;
   case WM_APP + 0x4C: {  // 在线诊断：转储当前 backbuffer + 布局状态到 okmeter 目录
-    if (wp == 1) openSettings();  // 诊断便捷：wp=1 先开设置面板（免菜单导航）
+    if (wp == 1) openSettings();        // 诊断便捷：wp=1 开设置面板（免菜单导航）
+    else if (wp == 2) closeSettings(false);  // wp=2 丢弃关闭（配合复现"开两次黑边"）
     const std::wstring p = (okmeterDir() / L"dump-live.png").wstring();
     const bool okDump = d3d_.saveFrame(p);
     RECT wr2{};
     GetWindowRect(hwnd_, &wr2);
     backdrop_.note(
         L"DUMP ok=%d win=(%ld,%ld,%ld,%ld) zone=(%d,%d) wide=%d hover=%d emerge=%.2f "
-        L"menu=%d settings=%d card=%d frames=%llu",
+        L"menu=%d settings=%d card=%d frames=%llu rebuilds=%u",
         okDump ? 1 : 0, (long)wr2.left, (long)wr2.top, (long)wr2.right,
         (long)wr2.bottom, zoneDX_, zoneDY_, wide_ ? 1 : 0, hoverIdx_, emerge_.value,
         menu_.open ? 1 : 0, settings_.open ? 1 : 0, card_.valid ? 1 : 0,
-        backdrop_.frameCount());
+        backdrop_.frameCount(), d3d_.rebuilds());
     return 0;
   }
   case WM_DPICHANGED:

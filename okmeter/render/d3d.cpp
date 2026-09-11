@@ -169,7 +169,8 @@ bool D3DContext::end() {
     ++rebuilds_;
     lastRebuildErr_ = hr;
     if (d3d_) lastRemovedReason_ = d3d_->GetDeviceRemovedReason();
-    return init(hwnd_, w_, h_);  // 本帧丢弃，init 重入重建，下一帧重绘
+    (void)init(hwnd_, w_, h_);  // 本帧丢弃，重建设备；返回 false 让调用方补画补呈
+    return false;  // 关键：帧丢弃必须显式 false——DComp 窗口无已呈内容会被 DWM 合成黑色
   }
   if (FAILED(hr)) return false;
   // DComp 内容由 DWM 在 vsync 合成上屏，Present(1,0) 的 vsync 阻塞只会让消息泵
@@ -179,7 +180,8 @@ bool D3DContext::end() {
     ++rebuilds_;
     lastRebuildErr_ = hr;
     if (d3d_) lastRemovedReason_ = d3d_->GetDeviceRemovedReason();
-    return init(hwnd_, w_, h_);
+    (void)init(hwnd_, w_, h_);
+    return false;  // 同上：帧未呈现，调用方须重试
   }
   if (FAILED(hr)) return false;
   return SUCCEEDED(dcomp_->Commit());
