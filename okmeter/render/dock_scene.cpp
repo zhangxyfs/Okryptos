@@ -80,7 +80,7 @@ void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
     if ((int)i == pressIdx) baked.items[i].scale *= 0.9;  // 按压下沉（球与文本同步）
   }
 
-  material.drawArcStroke(dc, baked);
+  material.drawArcStroke(dc, baked, edge);
 
   DrawContext ctx;
   ctx.d3d = &d3d;

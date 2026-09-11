@@ -144,17 +144,21 @@ public:
     if (!sat_ && FAILED(dc->CreateEffect(kClsidSaturation, &sat_))) return false;
     (void)blur_->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, stddev);
     (void)sat_->SetValue(D2D1_SATURATION_PROP_SATURATION, saturation);
+    // 先接通主链再挂可选亮度节点：CreateEffect(ColorMatrix) 失败时 bright_ 保持
+    // null，输出落到已接线的 sat_（丢提亮不丢帧）；杜绝 sat_ 输入悬空导致
+    // ready() 判真却 DrawImage WRONG_STATE 的回归（排障期实测 0x8899001E）
+    sat_->SetInputEffect(0, blur_.Get());
     if (brightness != 1.0f && !bright_) {
-      if (FAILED(dc->CreateEffect(kClsidColorMatrix, &bright_))) return false;
-      D2D1_MATRIX_5X4_F m{};
-      m._11 = brightness;
-      m._22 = brightness;
-      m._33 = brightness;
-      m._44 = 1.0f;
-      (void)bright_->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, m);
+      if (SUCCEEDED(dc->CreateEffect(kClsidColorMatrix, &bright_))) {
+        D2D1_MATRIX_5X4_F m{};
+        m._11 = brightness;
+        m._22 = brightness;
+        m._33 = brightness;
+        m._44 = 1.0f;
+        (void)bright_->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, m);
+      }
     }
     if (brightness == 1.0f) bright_.Reset();
-    sat_->SetInputEffect(0, blur_.Get());
     if (bright_) bright_->SetInputEffect(0, sat_.Get());
     return true;
   }

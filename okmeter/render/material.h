@@ -33,7 +33,8 @@ public:
   virtual std::string id() const = 0;                    // "dark"
   virtual void drawOrbBack(ID2D1DeviceContext*, const OrbStyleCtx&) const = 0;  // 球体底（玻璃/折射/光）
   virtual void drawCardBack(ID2D1DeviceContext*, const D2D1_RECT_F&, float radius) const = 0;
-  virtual void drawArcStroke(ID2D1DeviceContext*, const DockGeom&) const = 0;
+  virtual void drawArcStroke(ID2D1DeviceContext*, const DockGeom&,
+                             const std::string& edge) const = 0;  // edge="left"/"right"
   virtual void onPointer(float x, float y) const = 0;    // 跟手光/镜面高光的光源位置
   virtual void onPointerLeave() const {}                 // 指针离开（光感熄灭/粒子消散）
   virtual void onPress(float, float) const {}            // 按下触点（按压光晕）

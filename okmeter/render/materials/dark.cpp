@@ -131,7 +131,9 @@ public:
 
   // 弧线描边：hairline 白 13% 底 + accent 30% 微光叠层（原型 .dock-arc .glow 同款）。
   // g.items 已是烘焙后的最终位置（tuck/让位由场景并入）。
-  void drawArcStroke(ID2D1DeviceContext* dc, const DockGeom& g) const override {
+  void drawArcStroke(ID2D1DeviceContext* dc, const DockGeom& g,
+                     const std::string& edge) const override {
+    (void)edge;
     if (!dc || g.items.size() < 2) return;
     ComPtr<ID2D1SolidColorBrush> brush;
     if (FAILED(dc->CreateSolidColorBrush(D2D1::ColorF(0, 0), &brush))) return;

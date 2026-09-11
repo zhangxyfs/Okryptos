@@ -17,9 +17,15 @@ namespace {
 constexpr UINT kMapSize = 128;      // 预烘法线位移图边长
 constexpr float kMapInner = 0.58f;  // 中心零位移半径（原型 INNER=0.58）
 constexpr float kDispScale = 14.0f; // 位移幅度（原型 feDisplacementMap scale=14）
-constexpr float kCropPad = 9.0f;    // 裁剪外扩 ≥ 最大位移 7px + 模糊渗边
+// 裁剪外扩与球半径成固定比例（0.32r，r∈[30,40] → 9.6~12.9px ≥ 最大位移 7px），
+// 位移图单位圆因此对齐球缘 r 而非裁剪缘：球缘处 band=1 拿满幅位移。
+//（修复前 pad 固定 9px，单位圆对到 r+9，球缘只剩 ~1/3 位移强度——偏离原型）
+constexpr float kCropPadRatio = 0.32f;
+constexpr float kMapUnit = 1.0f / (1.0f + kCropPadRatio);  // 单位圆在图内的归一半径
 
-// 预烘圆形法线位移图：中心 58% 中性灰（零位移），边缘环带沿径向平滑外推。
+// 预烘圆形法线位移图：以球缘为单位圆（图内归一半径 kMapUnit），中心 58% 中性灰
+//（零位移），边缘环带沿径向平滑外推，球缘以外（裁剪外扩区）保持满幅——球缘
+// 输出像素向外采样 ≤7px 始终落在裁剪区内（原型 backdrop 采样球外真实内容同款）。
 // R/G 通道编码 X/Y 位移（128=零），与原型 JS 超椭圆场同算法（圆球 P=2）。
 ComPtr<ID2D1Bitmap> bakeNormalMap(ID2D1DeviceContext* dc) {
   std::vector<BYTE> px((size_t)kMapSize * kMapSize * 4);
@@ -27,11 +33,12 @@ ComPtr<ID2D1Bitmap> bakeNormalMap(ID2D1DeviceContext* dc) {
     for (UINT x = 0; x < kMapSize; ++x) {
       const float nx = ((float)x / (kMapSize - 1)) * 2.0f - 1.0f;
       const float ny = ((float)y / (kMapSize - 1)) * 2.0f - 1.0f;
-      const float dd = std::hypot(nx, ny);
+      const float du = std::hypot(nx, ny);   // 图内归一距离
+      const float dd = du / kMapUnit;        // 球径归一距离（球缘=1）
       float band = (dd - kMapInner) / (1.0f - kMapInner);
       band = std::clamp(band, 0.0f, 1.0f);
       band = band * band * (3.0f - 2.0f * band);  // smoothstep
-      const float len = dd > 1e-6f ? dd : 1.0f;
+      const float len = du > 1e-6f ? du : 1.0f;
       BYTE* p = px.data() + ((size_t)y * kMapSize + x) * 4;
       p[2] = (BYTE)std::clamp(128.0f + (nx / len) * band * 127.0f, 0.0f, 255.0f);
       p[1] = (BYTE)std::clamp(128.0f + (ny / len) * band * 127.0f, 0.0f, 255.0f);
@@ -95,15 +102,19 @@ public:
       refreshBackdrop(dc, ctx.backdrop);
       if (refractReady() && glassfx::pushCircleClip(dc, c, r)) {
         // 球区背景（纹理坐标）→ 位移折射 → 微模糊 → 提饱和 → 提亮 → 平移回原点
-        const float l = c.x - r - kCropPad - ctx.backdropDX;
-        const float t = c.y - r - kCropPad - ctx.backdropDY;
+        const float pad = std::ceil(r * kCropPadRatio);
+        const float l = c.x - r - pad - ctx.backdropDX;
+        const float t = c.y - r - pad - ctx.backdropDY;
         (void)crop_->SetValue(D2D1_CROP_PROP_RECT,
-                              D2D1::Vector4F(l, t, c.x + r + kCropPad - ctx.backdropDX,
-                                             c.y + r + kCropPad - ctx.backdropDY));
+                              D2D1::Vector4F(l, t, c.x + r + pad - ctx.backdropDX,
+                                             c.y + r + pad - ctx.backdropDY));
         (void)move_->SetValue(D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX,
                               D2D1::Matrix3x2F::Translation(-l, -t));
-        dc->DrawImage(move_.Get(),
-                      D2D1::Point2F(c.x - r - kCropPad, c.y - r - kCropPad),
+        // 位移图自然尺寸采样 → 缩放到当前裁剪尺寸（单位圆随之对齐球缘 r）
+        const float mapK = 2.0f * (r + pad) / (float)kMapSize;
+        (void)mapScale_->SetValue(D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX,
+                                  D2D1::Matrix3x2F::Scale(mapK, mapK));
+        dc->DrawImage(move_.Get(), D2D1::Point2F(c.x - r - pad, c.y - r - pad),
                       D2D1_INTERPOLATION_MODE_LINEAR);
         // 环境色染色：desk-deep 9% + 左上 ink 15% 径向（原型 .orb background）
         ctx.brush->SetColor(glassfx::deskDeep(0.09f * dim));
@@ -188,7 +199,9 @@ public:
   }
 
   // 弧线描边：ink 22% 双pass（原型 liquid 下 path stroke ink 22%）
-  void drawArcStroke(ID2D1DeviceContext* dc, const DockGeom& g) const override {
+  void drawArcStroke(ID2D1DeviceContext* dc, const DockGeom& g,
+                     const std::string& edge) const override {
+    (void)edge;
     if (!dc || g.items.size() < 2) return;
     ComPtr<ID2D1SolidColorBrush> brush;
     if (FAILED(dc->CreateSolidColorBrush(D2D1::ColorF(0, 0), &brush))) return;
@@ -236,7 +249,9 @@ private:
     }
   }
 
-  bool refractReady() const { return bgBmp_ && crop_ && disp_ && mapBmp_ && move_; }
+  bool refractReady() const {
+    return bgBmp_ && crop_ && disp_ && mapBmp_ && mapScale_ && move_;
+  }
 
   void ensure(ID2D1DeviceContext* dc, const D3DContext* d3d) const {
     if (dc == seenDc_ && gen_ == d3d->generation()) return;
@@ -248,6 +263,7 @@ private:
     sat_.Reset();
     bright_.Reset();
     move_.Reset();
+    mapScale_.Reset();
     mapBmp_.Reset();
     bgBmp_.Reset();
     frostPipe_.reset();
@@ -260,16 +276,26 @@ private:
     specular_.Reset();
 
     // 折射链：Crop → DisplacementMap(scale 14) → Blur σ0.75 → Saturation 0.9
-    // → ColorMatrix 1.12 提亮 → Affine2D 平移回原点
+    // → ColorMatrix 1.12 提亮 → Affine2D 平移回原点。
+    // 位移图经 Affine2D 从 128² 放大到当前裁剪尺寸——实测 D2D DisplacementMap
+    // 按"自然尺寸原点对齐"采样位移图（不随主输入拉伸），不缩放会采到图的左上
+    // 角区域，球缘位移场全错。
     const bool okChain =
         SUCCEEDED(dc->CreateEffect(glassfx::kClsidCrop, &crop_)) &&
         SUCCEEDED(dc->CreateEffect(glassfx::kClsidDisplacement, &disp_)) &&
         SUCCEEDED(dc->CreateEffect(glassfx::kClsidBlur, &blurSm_)) &&
         SUCCEEDED(dc->CreateEffect(glassfx::kClsidSaturation, &sat_)) &&
         SUCCEEDED(dc->CreateEffect(glassfx::kClsidColorMatrix, &bright_)) &&
-        SUCCEEDED(dc->CreateEffect(glassfx::kClsidAffine2D, &move_));
+        SUCCEEDED(dc->CreateEffect(glassfx::kClsidAffine2D, &move_)) &&
+        SUCCEEDED(dc->CreateEffect(glassfx::kClsidAffine2D, &mapScale_));
     if (okChain) {
       (void)disp_->SetValue(D2D1_DISPLACEMENTMAP_PROP_SCALE, kDispScale);
+      // 通道选择器默认 A（同 SVG 规范）——必须显式指定 R/G，否则位移图被
+      // 当作全 255 常数（A 通道），退化成整区恒定 +7px 平移（离线验证台实测）
+      (void)disp_->SetValue(D2D1_DISPLACEMENTMAP_PROP_X_CHANNEL_SELECT,
+                            D2D1_CHANNEL_SELECTOR_R);
+      (void)disp_->SetValue(D2D1_DISPLACEMENTMAP_PROP_Y_CHANNEL_SELECT,
+                            D2D1_CHANNEL_SELECTOR_G);
       (void)blurSm_->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, 0.75f);
       (void)blurSm_->SetValue(D2D1_GAUSSIANBLUR_PROP_BORDER_MODE,
                               D2D1_BORDER_MODE_SOFT);
@@ -286,7 +312,10 @@ private:
       bright_->SetInputEffect(0, sat_.Get());
       move_->SetInputEffect(0, bright_.Get());
       mapBmp_ = bakeNormalMap(dc);
-      if (mapBmp_) disp_->SetInput(1, mapBmp_.Get());
+      if (mapBmp_) {
+        mapScale_->SetInput(0, mapBmp_.Get());
+        disp_->SetInputEffect(1, mapScale_.Get());
+      }
     } else {
       crop_.Reset();  // refractReady() 判空 → 自动退化毛玻璃
     }
@@ -338,6 +367,7 @@ private:
   mutable unsigned gen_ = 0;
   // 折射链资源
   mutable ComPtr<ID2D1Effect> crop_, disp_, blurSm_, sat_, bright_, move_;
+  mutable ComPtr<ID2D1Effect> mapScale_;  // 位移图 128² → 裁剪尺寸 缩放
   mutable ComPtr<ID2D1Bitmap> mapBmp_;    // 预烘法线位移图
   mutable ComPtr<ID2D1Bitmap1> bgBmp_;    // 最新背景帧
   mutable glassfx::BackdropPipe frostPipe_;  // 退化毛玻璃管线

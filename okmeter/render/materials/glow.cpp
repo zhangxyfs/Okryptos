@@ -60,7 +60,8 @@ public:
 
   // 球底层（drawItems 之前）：环境气态光 → 汇聚柔光 → 粒子（加法）→ 按压环
   // → 弧线描边。同时承担粒子/柔光状态推进（按真实墙钟 dt）。
-  void drawArcStroke(ID2D1DeviceContext* dc, const DockGeom& g) const override {
+  void drawArcStroke(ID2D1DeviceContext* dc, const DockGeom& g,
+                     const std::string& edge) const override {
     if (!dc) return;
     const double now = nowSeconds();
     float dt = lastT_ > 0 ? (float)(now - lastT_) : 0.016f;
@@ -92,12 +93,16 @@ public:
     gy_ += (gyT_ - gy_) * kMove;
     litA_ += ((lit_ ? 1.0f : 0.0f) - litA_) * kFade;
 
-    // 屏缘侧判定：球群平均 x 靠右 → 光源在右缘之外
-    float meanX = 0;
-    for (const ItemGeom& it : g.items) meanX += (float)it.x;
-    meanX = g.items.empty() ? (float)g.w * 0.5f : meanX / (float)g.items.size();
-    const float side = meanX > (float)g.w * 0.5f ? 1.0f : -1.0f;
-    const float gasX = side > 0 ? (float)g.w + 170.0f : -170.0f;
+    // 屏缘方向由 app 显式传入（不猜）；光源锚点取球群实际屏缘侧外 170px——
+    // 宽窗态（含卡区）g.w 只是球区宽，直接 g.w+170 会把亮心画进窗口内部
+    const float side = edge == "left" ? -1.0f : 1.0f;
+    float edgeX = side > 0 ? 0.0f : (float)g.w;
+    for (const ItemGeom& it : g.items) {  // windows.h min/max 宏冲突，手写比较
+      if (side > 0 ? (float)it.x > edgeX : (float)it.x < edgeX)
+        edgeX = (float)it.x;
+    }
+    edgeX += side * 30.0f;  // 球半径 → 窗口屏缘
+    const float gasX = edgeX + side * 170.0f;
     const float h = (float)g.h;
 
     ensureBrushes(dc);
