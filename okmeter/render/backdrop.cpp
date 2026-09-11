@@ -200,22 +200,26 @@ bool BackdropCapture::start(HWND hwnd, IDXGIDevice* dxgi) {
 }
 
 void BackdropCapture::stop() {
-  ComPtr<wgc::IGraphicsCaptureSession> session;
-  ComPtr<wgc::IDirect3D11CaptureFramePool> pool;
-  if (session_) (void)session_.As(&session);
-  if (pool_) (void)pool_.As(&pool);
+  {
+    // 局部引用须先于 RoUninitialize 释放（RoUninitialize 之后 Release WinRT
+    // 对象会卡死/崩溃——退出路径实测死锁于此），内层作用域保证析构顺序
+    ComPtr<wgc::IGraphicsCaptureSession> session;
+    ComPtr<wgc::IDirect3D11CaptureFramePool> pool;
+    if (session_) (void)session_.As(&session);
+    if (pool_) (void)pool_.As(&pool);
 
-  if (session) {
-    ComPtr<wf::IClosable> c;
-    if (SUCCEEDED(session.As(&c)) && c) (void)c->Close();
-  }
-  if (pool && handlerAdded_) {
-    const EventRegistrationToken token{ frameTokenValue_ };
-    (void)pool->remove_FrameArrived(token);
-  }
-  if (pool) {
-    ComPtr<wf::IClosable> c;
-    if (SUCCEEDED(pool.As(&c)) && c) (void)c->Close();
+    if (session) {
+      ComPtr<wf::IClosable> c;
+      if (SUCCEEDED(session.As(&c)) && c) (void)c->Close();
+    }
+    if (pool && handlerAdded_) {
+      const EventRegistrationToken token{ frameTokenValue_ };
+      (void)pool->remove_FrameArrived(token);
+    }
+    if (pool) {
+      ComPtr<wf::IClosable> c;
+      if (SUCCEEDED(pool.As(&c)) && c) (void)c->Close();
+    }
   }
   session_.Reset();
   pool_.Reset();

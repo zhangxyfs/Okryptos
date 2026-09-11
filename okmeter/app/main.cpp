@@ -7,6 +7,7 @@
 #include "../ui/app.h"
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 
 #define WIN32_LEAN_AND_MEAN
@@ -50,14 +51,22 @@ static int runSmoke() {
   return 0;
 }
 
+static std::wstring argWide(const char* s) {
+  const int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, nullptr, 0);
+  std::wstring p(n > 0 ? (size_t)n - 1 : 0, L'\0');
+  if (n > 0) MultiByteToWideChar(CP_UTF8, 0, s, -1, p.data(), n);
+  return p;
+}
+
 int main(int argc, char** argv) {
   if (argc > 1 && std::string(argv[1]) == "--scan") return runSmoke();
   DockApp app;
-  if (argc > 2 && std::string(argv[1]) == "--shot") {
-    const int n = MultiByteToWideChar(CP_UTF8, 0, argv[2], -1, nullptr, 0);
-    std::wstring p(n > 0 ? (size_t)n - 1 : 0, L'\0');
-    if (n > 0) MultiByteToWideChar(CP_UTF8, 0, argv[2], -1, p.data(), n);
-    return app.run(GetModuleHandleW(nullptr), p);
+  if (argc > 2 && std::string(argv[1]) == "--shot")
+    return app.run(GetModuleHandleW(nullptr), argWide(argv[2]));
+  // --shotmenu <png> [slot]：自检截图前打开自绘菜单（slot -1=空白菜单，缺省中心球）
+  if (argc > 2 && std::string(argv[1]) == "--shotmenu") {
+    const int slot = argc > 3 ? std::atoi(argv[3]) : -1;
+    return app.run(GetModuleHandleW(nullptr), argWide(argv[2]), slot);
   }
   return app.run(GetModuleHandleW(nullptr));
 }
