@@ -26,7 +26,7 @@ namespace {
 constexpr wchar_t kClassName[] = L"OkMeterDock";
 constexpr int kCardZoneW = 268;     // 展开态卡区宽（卡 252 + 两侧边距）
 constexpr UINT_PTR kTimerAnim = 1;    // 动画帧 16ms
-constexpr UINT_PTR kTimerPoll = 2;    // 数据轮询 2000ms
+constexpr UINT_PTR kTimerPoll = 2;    // 数据兜底轮询 2000ms（RDCW 健康时退避 30s）
 constexpr UINT_PTR kTimerRel = 3;     // 相对时间/口径文本刷新 30s
 constexpr UINT_PTR kTimerRetract = 4; // 离开迟滞 600ms（一次性）
 constexpr UINT_PTR kTimerShot = 5;    // --shot 自检：启动 2.5s 后截图退出（一次性）
@@ -266,6 +266,7 @@ void DockApp::rebuildCard() {
 void DockApp::pollData() {
   Aggregator& agg = store_->agg();
   const int arrived = kimi_->poll([&](const UsageEvent& e) { agg.add(e); });
+  lastPollMs_ = nowMs();
   if (arrived > 0) {
     store_->flush();            // 零新事件不落盘（state.json 无变化，省一次原子写）
     material_->onPulse();       // 数据到达 → 沉浸光感粒子迸散
@@ -530,6 +531,48 @@ double DockApp::cardAnimT() const {
   return t >= 1.0 ? 1.0 : easeDock(t);
 }
 
+// ── 按需渲染：静止定义 = 无任何随时间自变的视觉元素且无进行中动画 ──
+// 4 材质 × 3 形态逐一核对：dark/frost/liquid 指针光/高光为即时态（无时间缓动，
+// wantsTick 默认 false）；glow 粒子/柔光/气态漂移常驻（wantsTick 常真）→ 常帧；
+// arc/capsule 无形态动画；罗盘收缩态 3.6°/s 旋转（e<0.999 时 wantsTick 真）→ 常帧，
+// 展开静止。菜单/面板打开期需常帧：Escape/窗外点击沿检测在 animTick（NOACTIVATE
+// 窗口收不到键盘/窗外点击消息）。拖拽为事件驱动（WM_MOUSEMOVE 内渲染），不计入。
+bool DockApp::needsFrames() const {
+  if (!emerged_) return true;                          // 弹簧未稳
+  if (material_ && material_->wantsTick()) return true;  // glow 常驻动画
+  if (form_ && form_->wantsTick()) return true;          // 罗盘收缩态旋转
+  if (menu_.open) return true;                         // 弹出动画 + 沿检测
+  if (settings_.open) return true;                     // 滑入动画 + Escape 沿检测
+  if (card_.valid && cardAnimT() < 1.0) return true;     // cardin 140ms
+  return false;
+}
+
+void DockApp::startFrames() {
+  if (framesOn_ || !hwnd_) return;
+  framesOn_ = true;
+  lastTickQpc_ = LARGE_INTEGER{};  // 停摆期墙钟不计入：重启首帧 dt 按 16ms，弹簧/罗盘不跳变
+  if (animTimer_) {
+    LARGE_INTEGER due{};
+    due.QuadPart = -160000LL;  // 16ms（相对，100ns 单位）
+    (void)SetWaitableTimerEx(animTimer_, &due, 0, nullptr, nullptr, nullptr, 0);
+  } else {
+    SetTimer(hwnd_, kTimerAnim, 16, nullptr);
+  }
+}
+
+void DockApp::stopFrames() {
+  if (!framesOn_) return;
+  framesOn_ = false;
+  if (animTimer_)
+    (void)CancelWaitableTimer(animTimer_);  // manual-reset：取消并复位信号态，防空转
+  else if (hwnd_)
+    KillTimer(hwnd_, kTimerAnim);
+}
+
+void DockApp::syncFrames() {
+  if (needsFrames()) startFrames(); else stopFrames();
+}
+
 // 打开设置面板：draft=cfg 副本 + 模型枚举（下拉"模型 · id"）+ 停靠 dock 对侧屏缘
 //（原型 openSettings：顶 14 底 58 边距 14，classList left=edge==right）；
 // 并集扩窗 + 保持展开（holdOpen）；面板皮肤跟随当前生效材质（草稿不即时换肤）
@@ -702,7 +745,8 @@ void DockApp::render() {
 #endif
 }
 
-// 动画帧 tick：HR 可等待定时器（主路径）或 16ms WM_TIMER（回退）驱动。
+// 动画帧 tick：HR 可等待定时器（主路径）或 16ms WM_TIMER（回退）驱动，按需启停
+//（syncFrames；静止期帧时钟停摆，本函数不运行）。
 // RDCW 目录监听检查 + 弹簧 step（真实 elapsed dt）+ 挪窗 + 重绘。
 void DockApp::animTick() {
   // 真实 elapsed dt：每个 tick（含静止 tick）刷新采样点，弹簧按实际墙钟推进；
@@ -750,6 +794,7 @@ void DockApp::animTick() {
         (settings_.open && panelAnimT() < 1.0) ||
         (card_.valid && cardAnimT() < 1.0))
       render();
+    syncFrames();  // 全部静止 → 停帧时钟（菜单/面板打开期沿检测需要 → 保持）
     return;
   }
 #if defined(OKM_ANIM_DIAG)
@@ -775,9 +820,17 @@ void DockApp::animTick() {
                g_diag.framesDrawMs_, g_diag.ms(q2, q3) - g_diag.framesDrawMs_);
   if (emerged_) diagFlush();
 #endif
+  syncFrames();  // 弹簧落定且无余下动画 → 停帧时钟
 }
 
 LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
+  const LRESULT r = dispatchMessage(msg, wp, lp);
+  // 任何事件都可能翻转动画状态（弹簧目标/菜单/面板/卡片/材质切换）→ 按需启停帧时钟
+  if (msg != WM_DESTROY) syncFrames();
+  return r;
+}
+
+LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
   switch (msg) {
   case WM_DESTROY:
     if (sessionNotif_) {
@@ -801,7 +854,9 @@ LRESULT DockApp::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
       animTick();  // 回退路径（HR 定时器不可用时）
       return 0;
     case kTimerPoll:
-      pollData();
+      // RDCW 健康：事件已即时 poll，2s tick 退避为 30s 兜底（防 RDCW 缓冲溢出丢事件；
+      // 全量枚举 1095 个 wire.jsonl 实测 ~180ms/次，是静置 CPU 主源）。监听失效不退避。
+      if (!watchActive_ || nowMs() - lastPollMs_ >= 30000) pollData();
       return 0;
     case kTimerRel:
       rebuildItems();  // 仅刷新文本缓存（口径随 now 变化）
@@ -1180,8 +1235,8 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   cfg_.normalize();
   createModules();  // 形态/材质注册表创建（布局与渲染都经 form_）
 
-  // 目录变更监听：RDCW 提前触发 poll；失败静默回落纯 2s 轮询
-  watch_.start(kimiHome() / "sessions");
+  // 目录变更监听：RDCW 即时触发 poll；失败则 2s 轮询维持原行为（不退避）
+  watchActive_ = watch_.start(kimiHome() / "sessions");
 
   // 初始窗口：收缩态（e=0，右缘露出 24px）；起始落主屏工作区（hwnd 未创建，
   // workArea() 回退 SPI_GETWORKAREA），多屏位置由后续拖拽/重建接管
@@ -1229,7 +1284,8 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
 
   // 动画时钟：高分辨率可等待定时器（~0.5ms 粒度；实测 timeBeginPeriod(1) 对本
   // 进程无效——Win11 对非前台窗口压制计时器粒度请求，16ms WM_TIMER 仍量化到
-  // 15.6ms 阶梯）。失败回退 16ms WM_TIMER。
+  // 15.6ms 阶梯）。失败回退 16ms WM_TIMER。按需启停（syncFrames）：先武装一次
+  // 验证可用性即取消，随后由 syncFrames 按 needsFrames 决定是否真正起帧。
   animTimer_ = CreateWaitableTimerExW(nullptr, nullptr,
       CREATE_WAITABLE_TIMER_MANUAL_RESET | CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
       TIMER_MODIFY_STATE | SYNCHRONIZE);
@@ -1240,7 +1296,8 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
     CloseHandle(animTimer_);
     animTimer_ = nullptr;
   }
-  if (!animTimer_) SetTimer(hwnd_, kTimerAnim, 16, nullptr);
+  if (animTimer_) (void)CancelWaitableTimer(animTimer_);
+  syncFrames();  // 起始按需：罗盘收缩态/glow 常驻动画立即起帧，静态组合停摆
   SetTimer(hwnd_, kTimerPoll, 2000, nullptr);
   SetTimer(hwnd_, kTimerRel, 30000, nullptr);
   if (!shotPath_.empty()) SetTimer(hwnd_, kTimerShot, 2500, nullptr);  // 等 WGC 帧流稳定
@@ -1252,14 +1309,22 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
       DispatchMessageW(&msg);
     }
   } else {
+    // 等待集 = 动画定时器 + RDCW 完成事件：帧时钟停摆期目录变更仍能即时唤醒 poll
+    HANDLE waitHandles[2] = { animTimer_, watch_.eventHandle() };
+    const DWORD nWait = waitHandles[1] ? 2 : 1;
     for (;;) {
-      MsgWaitForMultipleObjectsEx(1, &animTimer_, INFINITE, QS_ALLINPUT,
+      MsgWaitForMultipleObjectsEx(nWait, waitHandles, INFINITE, QS_ALLINPUT,
                                   MWMO_INPUTAVAILABLE);
       if (WaitForSingleObject(animTimer_, 0) == WAIT_OBJECT_0) {
-        // 先重整相位再处理帧：帧间隔恒定 16ms，与单帧耗时解耦
-        SetWaitableTimerEx(animTimer_, &due, 0, nullptr, nullptr, nullptr, 0);
-        animTick();
+        if (framesOn_) {
+          // 先重整相位再处理帧：帧间隔恒定 16ms，与单帧耗时解耦
+          SetWaitableTimerEx(animTimer_, &due, 0, nullptr, nullptr, nullptr, 0);
+          animTick();  // 内部 syncFrames 停帧时 CancelWaitableTimer 撤销本次重整
+        } else {
+          (void)CancelWaitableTimer(animTimer_);  // 防御：stopFrames 已取消，不应到达
+        }
       }
+      if (watch_.signaled()) pollData();  // RDCW 触发提前 poll（signaled 内含复位+重投）
       bool quit = false;
       while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
         if (msg.message == WM_QUIT) { quit = true; break; }

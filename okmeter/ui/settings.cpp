@@ -165,6 +165,8 @@ void SettingsPanel::begin(const Config& cur, std::vector<std::string> models) {
   hover = -1;
   dropGsel_ = -1;
   dropScroll_ = 0;
+  wheelResBody_ = 0;
+  wheelResDrop_ = 0;
 }
 
 std::vector<std::pair<std::string, std::wstring>>
@@ -366,6 +368,7 @@ void SettingsPanel::closeDrop() {
   ctrls_.resize(dropStart_);
   dropGsel_ = -1;
   dropScroll_ = 0;
+  wheelResDrop_ = 0;
 }
 
 void SettingsPanel::openDrop(render::D3DContext& d3d, int gselCtrl) {
@@ -413,6 +416,7 @@ void SettingsPanel::openDrop(render::D3DContext& d3d, int gselCtrl) {
   }
   dropGsel_ = gselCtrl;
   dropScroll_ = 0;
+  wheelResDrop_ = 0;
 }
 
 int SettingsPanel::click(render::D3DContext& d3d, int idx) {
@@ -510,9 +514,13 @@ bool SettingsPanel::wheelAt(int x, int y, int delta) {
   if (!open) return false;
   const float px = (float)x - rect.left;
   const float py = (float)y - rect.top;
-  const int step = (delta / 120) * 44;  // 上滚 delta>0 → scrollY 减
+  // 小 delta 残差累积：wheelRes += delta 后按 120 取整行数、余数留存，
+  // 高精度触摸板/无极滚轮的逐事件小 delta 不再被整除丢弃（上滚 delta>0 → scrollY 减）
   if (dropGsel_ >= 0 && px >= dropRc_.left && px < dropRc_.right &&
       py >= dropRc_.top && py < dropRc_.bottom) {
+    wheelResDrop_ += delta;
+    const int step = (wheelResDrop_ / 120) * 44;
+    wheelResDrop_ %= 120;
     const int n = (int)(ctrls_.size() - dropStart_);
     const int maxS =
         (std::max)(0, (int)(10.0f + (float)n * kDropItemH -
@@ -526,6 +534,9 @@ bool SettingsPanel::wheelAt(int x, int y, int delta) {
   if (px < 0 || px >= rect.right - rect.left || py < kHdH || py >= panelH - kFtH)
     return false;
   closeDrop();  // 体区滚动即关浮层（原型 .p-bd scroll → closeDrop 同款）
+  wheelResBody_ += delta;
+  const int step = (wheelResBody_ / 120) * 44;
+  wheelResBody_ %= 120;
   const int ns = (std::min)((std::max)(0, scrollY - step), maxScroll());
   if (ns == scrollY) return false;
   scrollY = ns;

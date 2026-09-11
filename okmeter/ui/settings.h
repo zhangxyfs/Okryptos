@@ -85,6 +85,11 @@ private:
   int dropGsel_ = -1;                    // 打开的下拉所属 ctrls_ 下标（-1=无）
   size_t dropStart_ = 0;                 // DropItem 控件在 ctrls_ 的起始下标
   int dropScroll_ = 0;                   // 下拉浮层内部滚动
+  // 滚轮残差（体区/浮层各一份）：高精度触摸板/无极滚轮逐事件 delta<120，
+  // 累积满 120 才滚一行，余数留存（WM_MOUSEWHEEL 文档标准处理）；
+  // 面板重开（begin）双清，浮层开合（openDrop/closeDrop）清浮层份
+  int wheelResBody_ = 0;
+  int wheelResDrop_ = 0;
   D2D1_RECT_F dropRc_{};                 // 下拉浮层矩形（面板坐标）
   float saveBtnW_ = 100.0f, cancelBtnW_ = 72.0f;  // layout 测量，place 布矩形
 

@@ -24,10 +24,14 @@ class KimiAdapter;
 
 // 单线程契约：poll 与渲染读都在 UI 线程，由定时器串行驱动（aggregator.h 约定）。
 // 动画时钟为高分辨率可等待定时器 16ms（MsgWaitForMultipleObjectsEx 消息循环；
-// 不支持时回退 16ms WM_TIMER），驱动弹簧 step（真实 elapsed dt）+ 需要时重绘 +
-// SetWindowPos + 每 500ms 检查 RDCW 目录监听 → 触发则提前 poll；另有两个
-// WM_TIMER：数据轮询 2000ms（poll→flush→重建 bindings/文本缓存→重绘）、相对时间
-// 刷新 30s；离开迟滞 600ms 一次性 WM_TIMER。
+// 不支持时回退 16ms WM_TIMER），按需驱动（needsFrames 集中判定，syncFrames 在状态
+// 翻转沿启/停）：弹簧 step（真实 elapsed dt）+ 需要时重绘 + SetWindowPos + 每 500ms
+// 检查 RDCW 目录监听 → 触发则提前 poll。静止期（无任何自变元素且无进行中动画）
+// 帧时钟整体停摆，RDCW 完成事件仍在等待集里可直接唤醒 poll；鼠标/定时器事件单帧
+// 渲染后按需再评估。数据刷新：RDCW 事件即时 poll；2s WM_TIMER 在监听健康时退避为
+// 30s 兜底（防 RDCW 缓冲溢出静默丢事件；全量递归枚举实测 ~180ms/次，1095 个
+// wire.jsonl 下 2s 常轮是静置 CPU 主源），监听失效则保持 2s 纯轮询（原行为）。
+// 另有 30s WM_TIMER 刷新相对时间文本；离开迟滞 600ms 一次性 WM_TIMER。
 // 右键菜单：自绘玻璃菜单（ui/menu.*，原生 TrackPopupMenu 已废除——其模态泵会冻结
 // 动画且观感不达标）：球上右键出映射子项组（改 mapping → saveConfig → rebuild 立即
 // 生效）+ 设置…（打开背板设置面板）+ 换边（edge 互换 + saveConfig + 重建几何）+
@@ -59,10 +63,20 @@ public:
 
 private:
   static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
-  LRESULT onMessage(UINT msg, WPARAM wp, LPARAM lp);
+  LRESULT onMessage(UINT msg, WPARAM wp, LPARAM lp);        // 分发 + syncFrames 收尾
+  LRESULT dispatchMessage(UINT msg, WPARAM wp, LPARAM lp);  // 各消息实际处理
 
   void render();          // 布局 → applyHover → dock_scene 一帧（形态/材质委托，含详情卡）
   void animTick();        // 动画帧：RDCW 检查 + 形态 tick + 弹簧 step（真实 dt）+ 挪窗 + 重绘
+  // 按需渲染（静止帧 CPU≈0）：needsFrames 集中判定"是否需要持续帧"——弹簧未稳 /
+  // 材质自主动画（glow 粒子气态漂移）/ 形态自主动画（罗盘收缩态旋转）/ 菜单/面板
+  // 打开（滑入动画 + Escape·窗外点击沿检测在 animTick）/ 详情卡 cardin 未播完；
+  // syncFrames 在状态翻转沿启/停帧时钟（HR 定时器 Cancel/重武装，回退路 SetTimer/
+  // KillTimer），静止期事件（鼠标/滚轮/30s 刷新/RDCW 唤醒/配置变更）单帧渲染
+  bool needsFrames() const;
+  void syncFrames();
+  void startFrames();
+  void stopFrames();
   void pollData();        // kimi.poll→agg.add→flush→rebuildItems→重绘
   void rebuildItems();    // resolveBindings + 文本缓存（值/短名/占比）+ 详情卡重组
   void rebuildCard();     // 按 hoverIdx 组装详情卡（hover 变化/数据刷新时调用）
@@ -146,6 +160,9 @@ private:
   int64_t lastWatchMs_ = 0;   // 上次 RDCW 检查时刻（动画帧里每 500ms 一次）
   LARGE_INTEGER lastTickQpc_{};  // 上一动画 tick 的 QPC（真实 dt 采样点，含静止 tick）
   HANDLE animTimer_ = nullptr;  // HR 可等待定时器动画时钟（NULL → WM_TIMER 回退）
+  bool framesOn_ = false;       // 帧时钟运行中（syncFrames 按需启/停；静止期停摆）
+  bool watchActive_ = false;    // RDCW 监听已建立（健康时 2s 轮询退避为 30s 兜底）
+  int64_t lastPollMs_ = 0;      // 上次 poll 时刻（退避判定；RDCW 触发的 poll 同样刷新）
 };
 
 } // namespace okmeter
