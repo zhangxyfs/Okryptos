@@ -151,8 +151,8 @@ private:
 
 } // namespace
 
-void registerFrostMaterial(Registry<IMaterial>& reg) {
-  reg.add("frost", [] { return std::unique_ptr<IMaterial>(new FrostMaterial()); });
+std::unique_ptr<IMaterial> createFrostMaterial() {
+  return std::unique_ptr<IMaterial>(new FrostMaterial());
 }
 
 } // namespace okmeter::render

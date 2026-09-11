@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "../render/catalog.h"
 #include "../render/materials/glassfx.h"
 #include <algorithm>
 #include <cmath>
@@ -28,18 +29,8 @@ constexpr float kDropMaxH = 280.0f;   // drop max-height
 constexpr float kSwitchW = 40.0f, kSwitchH = 22.0f;  // .sw
 constexpr float kContentW = kSettingsPanelW - 2 * 15.0f;  // 298
 
-struct NamedId { const char* id; const wchar_t* name; const wchar_t* sub; };
-constexpr NamedId kForms[] = {
-    {"arc", L"球体弧线", nullptr},
-    {"capsule", L"胶囊量表", nullptr},
-    {"compass", L"星环罗盘", nullptr},
-};
-constexpr NamedId kMaterials[] = {
-    {"dark", L"暗夜仪表", L"纯暗色 · 发丝线"},
-    {"frost", L"毛玻璃", L"乳白磨砂 · 强模糊"},
-    {"liquid", L"液态玻璃", L"边缘折射 · 高光随指针"},
-    {"glow", L"沉浸光感", L"通透毛玻璃 · 按压光晕 · 粒子汇聚"},
-};
+// 形态/材质选项卡内容全部来自渲染模块目录（render/catalog.h kFormCatalog/
+// kMaterialCatalog：id/显示名/副标题/缩略图种类），新增模块无需改本文件
 constexpr int kCounts[] = {1, 3, 5, 7};
 
 std::wstring wide(const std::string& s) {
@@ -242,11 +233,12 @@ void SettingsPanel::layout(render::D3DContext& d3d) {
     secs_.back().y1 = y;
   };
 
-  // ── 视觉形态：3 选项卡 2 列（原型 choice-grid）──
+  // ── 视觉形态：目录项 2 列选项卡（原型 choice-grid）──
   secBegin(L"视觉形态");
   {
     const float iw = (kContentW - kChoiceGap) * 0.5f;
-    for (int i = 0; i < 3; ++i) {
+    const int rows = (render::kFormCount + 1) / 2;
+    for (int i = 0; i < render::kFormCount; ++i) {
       const float cx = (float)(i % 2) * (iw + kChoiceGap);
       const float cy = y + (float)(i / 2) * (kFormTabH + kChoiceGap);
       Ctrl c;
@@ -255,15 +247,16 @@ void SettingsPanel::layout(render::D3DContext& d3d) {
       c.rc = D2D1::RectF(cx, cy, cx + iw, cy + kFormTabH);
       ctrls_.push_back(c);
     }
-    y += 2.0f * kFormTabH + kChoiceGap;
+    y += (float)rows * kFormTabH + (float)(rows - 1) * kChoiceGap;
   }
   secEnd();
 
-  // ── 材质效果：4 选项卡 2 列（带副标）──
+  // ── 材质效果：目录项 2 列选项卡（带副标）──
   secBegin(L"材质效果");
   {
     const float iw = (kContentW - kChoiceGap) * 0.5f;
-    for (int i = 0; i < 4; ++i) {
+    const int rows = (render::kMaterialCount + 1) / 2;
+    for (int i = 0; i < render::kMaterialCount; ++i) {
       const float cx = (float)(i % 2) * (iw + kChoiceGap);
       const float cy = y + (float)(i / 2) * (kMatTabH + kChoiceGap);
       Ctrl c;
@@ -272,7 +265,7 @@ void SettingsPanel::layout(render::D3DContext& d3d) {
       c.rc = D2D1::RectF(cx, cy, cx + iw, cy + kMatTabH);
       ctrls_.push_back(c);
     }
-    y += 2.0f * kMatTabH + kChoiceGap;
+    y += (float)rows * kMatTabH + (float)(rows - 1) * kChoiceGap;
   }
   secEnd();
 
@@ -427,10 +420,10 @@ int SettingsPanel::click(render::D3DContext& d3d, int idx) {
   const Ctrl& c = ctrls_[(size_t)idx];
   switch (c.kind) {
   case Ctrl::FormTab:
-    draft.form = kForms[c.a].id;
+    draft.form = render::kFormCatalog[c.a].id;
     return 1;
   case Ctrl::MaterialTab:
-    draft.material = kMaterials[c.a].id;
+    draft.material = render::kMaterialCatalog[c.a].id;
     return 1;
   case Ctrl::CountChip:
     draft.count = kCounts[c.a];
@@ -730,8 +723,10 @@ void SettingsPanel::draw(render::D3DContext& d3d, render::IMaterial& material) {
       switch (c.kind) {
       case Ctrl::FormTab:
       case Ctrl::MaterialTab: {
+        const render::ModuleMeta& meta = c.kind == Ctrl::FormTab
+            ? render::kFormCatalog[c.a] : render::kMaterialCatalog[c.a];
         const bool on = c.kind == Ctrl::FormTab
-            ? draft.form == kForms[c.a].id : draft.material == kMaterials[c.a].id;
+            ? draft.form == meta.id : draft.material == meta.id;
         brush_->SetColor(on ? gfx::accentC(0.13f)
                             : gfx::ink(hov ? 0.08f : 0.04f));
         const D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(c.rc, 10.0f, 10.0f);
@@ -741,16 +736,15 @@ void SettingsPanel::draw(render::D3DContext& d3d, render::IMaterial& material) {
         dc->DrawRoundedRectangle(&rr, brush_.Get(), 1.0f);
         const D2D1_RECT_F tb = D2D1::RectF(c.rc.left + 8.0f, c.rc.top + 10.0f,
                                            c.rc.right - 8.0f, c.rc.top + 48.0f);
-        drawThumb(dc, c.kind == Ctrl::FormTab ? 0 : 1, c.a, tb,
+        drawThumb(dc, c.kind == Ctrl::FormTab ? 0 : 1, meta.thumb, tb,
                   on ? gfx::accentC(1.0f) : gfx::ink(0.50f));
         const D2D1_RECT_F nr = D2D1::RectF(c.rc.left, c.rc.top + 52.0f, c.rc.right,
                                            c.rc.top + 69.0f);
-        txt(c.kind == Ctrl::FormTab ? kForms[c.a].name : kMaterials[c.a].name,
-            nameFmt_.Get(), nr, gfx::ink(0.90f));
-        if (c.kind == Ctrl::MaterialTab) {
+        txt(meta.name, nameFmt_.Get(), nr, gfx::ink(0.90f));
+        if (c.kind == Ctrl::MaterialTab && meta.sub) {
           const D2D1_RECT_F sr = D2D1::RectF(c.rc.left, c.rc.top + 72.0f, c.rc.right,
                                              c.rc.top + 88.0f);
-          drawTextTrimmed(d3d, kMaterials[c.a].sub, smallFmt_.Get(), sr,
+          drawTextTrimmed(d3d, meta.sub, smallFmt_.Get(), sr,
                           gfx::ink(0.50f));
         }
         break;

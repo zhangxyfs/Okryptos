@@ -395,9 +395,8 @@ private:
 
 } // namespace
 
-void registerLiquidMaterial(Registry<IMaterial>& reg) {
-  reg.add("liquid",
-          [] { return std::unique_ptr<IMaterial>(new LiquidMaterial()); });
+std::unique_ptr<IMaterial> createLiquidMaterial() {
+  return std::unique_ptr<IMaterial>(new LiquidMaterial());
 }
 
 } // namespace okmeter::render

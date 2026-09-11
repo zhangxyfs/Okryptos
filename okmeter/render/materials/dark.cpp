@@ -225,8 +225,8 @@ private:
 
 } // namespace
 
-void registerDarkMaterial(Registry<IMaterial>& reg) {
-  reg.add("dark", [] { return std::unique_ptr<IMaterial>(new DarkMaterial()); });
+std::unique_ptr<IMaterial> createDarkMaterial() {
+  return std::unique_ptr<IMaterial>(new DarkMaterial());
 }
 
 } // namespace okmeter::render

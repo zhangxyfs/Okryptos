@@ -512,8 +512,8 @@ private:
 
 } // namespace
 
-void registerGlowMaterial(Registry<IMaterial>& reg) {
-  reg.add("glow", [] { return std::unique_ptr<IMaterial>(new GlowMaterial()); });
+std::unique_ptr<IMaterial> createGlowMaterial() {
+  return std::unique_ptr<IMaterial>(new GlowMaterial());
 }
 
 } // namespace okmeter::render

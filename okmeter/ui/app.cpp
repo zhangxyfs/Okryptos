@@ -2,8 +2,8 @@
 #include "../adapters/kimi/adapter.h"
 #include "../core/fmt.h"
 #include "../core/paths.h"
-#include "../core/registry.h"
 #include "../core/store.h"
+#include "../render/catalog.h"
 #include <chrono>
 #include <cmath>
 #include <string>
@@ -180,22 +180,12 @@ Sums scopeSums(const Aggregator& agg, Scope s, int64_t now) {
 
 DockApp::~DockApp() = default;
 
-// 形态/材质：注册表按 cfg 创建，未知名称回退 arc/dark
+// 形态/材质：模块目录（render/catalog.h）按 id 创建，未知 id 回退目录首项（arc/dark）
 void DockApp::createModules() {
-  Registry<render::IForm> forms;
-  render::registerArcForm(forms);
-  render::registerCapsuleForm(forms);
-  render::registerCompassForm(forms);
-  form_ = forms.create(cfg_.form);
-  if (!form_) form_ = forms.create("arc");
-
-  Registry<render::IMaterial> materials;
-  render::registerDarkMaterial(materials);
-  render::registerFrostMaterial(materials);
-  render::registerLiquidMaterial(materials);
-  render::registerGlowMaterial(materials);
-  material_ = materials.create(cfg_.material);
-  if (!material_) material_ = materials.create("dark");
+  form_ = render::createForm(cfg_.form);
+  if (!form_) form_ = render::createForm(render::kFormCatalog[0].id);
+  material_ = render::createMaterial(cfg_.material);
+  if (!material_) material_ = render::createMaterial(render::kMaterialCatalog[0].id);
 }
 
 void DockApp::rebuildItems() {

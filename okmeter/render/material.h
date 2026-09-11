@@ -3,8 +3,8 @@
 #pragma once
 
 #include "d3d.h"
-#include "../core/registry.h"
 #include "../ui/geometry.h"
+#include <memory>
 #include <string>
 
 namespace okmeter::render {
@@ -47,10 +47,10 @@ public:
   virtual bool wantsTick() const { return false; }
 };
 
-// 注册内建材质（render/materials/*.cpp）
-void registerDarkMaterial(Registry<IMaterial>& reg);
-void registerFrostMaterial(Registry<IMaterial>& reg);
-void registerLiquidMaterial(Registry<IMaterial>& reg);
-void registerGlowMaterial(Registry<IMaterial>& reg);
+// 各材质工厂（render/materials/*.cpp 实现；catalog.cpp 与 kMaterialCatalog 一一配对）
+std::unique_ptr<IMaterial> createDarkMaterial();
+std::unique_ptr<IMaterial> createFrostMaterial();
+std::unique_ptr<IMaterial> createLiquidMaterial();
+std::unique_ptr<IMaterial> createGlowMaterial();
 
 } // namespace okmeter::render

@@ -68,8 +68,8 @@ public:
 
 } // namespace
 
-void registerArcForm(Registry<IForm>& reg) {
-  reg.add("arc", [] { return std::unique_ptr<IForm>(new ArcForm()); });
+std::unique_ptr<IForm> createArcForm() {
+  return std::unique_ptr<IForm>(new ArcForm());
 }
 
 } // namespace okmeter::render

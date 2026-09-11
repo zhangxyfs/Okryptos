@@ -135,8 +135,8 @@ private:
 
 } // namespace
 
-void registerCompassForm(Registry<IForm>& reg) {
-  reg.add("compass", [] { return std::unique_ptr<IForm>(new CompassForm()); });
+std::unique_ptr<IForm> createCompassForm() {
+  return std::unique_ptr<IForm>(new CompassForm());
 }
 
 } // namespace okmeter::render

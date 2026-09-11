@@ -3,8 +3,8 @@
 #pragma once
 
 #include "d3d.h"
-#include "../core/registry.h"
 #include "../ui/geometry.h"
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -57,9 +57,9 @@ public:
   virtual double cardRadius(int idx, int mid) const { (void)idx; (void)mid; return 30; }
 };
 
-// 注册内建形态（render/forms/*.cpp）
-void registerArcForm(Registry<IForm>& reg);
-void registerCapsuleForm(Registry<IForm>& reg);
-void registerCompassForm(Registry<IForm>& reg);
+// 各形态工厂（render/forms/*.cpp 实现；catalog.cpp 与 kFormCatalog 一一配对）
+std::unique_ptr<IForm> createArcForm();
+std::unique_ptr<IForm> createCapsuleForm();
+std::unique_ptr<IForm> createCompassForm();
 
 } // namespace okmeter::render

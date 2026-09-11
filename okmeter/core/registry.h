@@ -1,4 +1,5 @@
-// core/registry.h —— 模块注册表：采集适配器与渲染模块（Plan 2 形态/材质）通用
+// core/registry.h —— 通用"名称→工厂"注册表（渲染形态/材质的分发已改走
+// render/catalog.h 模块目录，目录元数据与工厂配对同源）
 #pragma once
 #include <functional>
 #include <map>

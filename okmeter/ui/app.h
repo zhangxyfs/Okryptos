@@ -75,7 +75,7 @@ private:
   void flipEdge();        // 换边：edge 互换 → saveConfig → 重建位置几何
   void exitApp();         // 退出：flush 游标落盘 → DestroyWindow
   void startCapture();    // 背景捕获：取当前 DXGI 设备 → backdrop_.start（可重入）
-  void createModules();   // 按 cfg_.form/material 从注册表创建形态/材质（未知回退 arc/dark）
+  void createModules();   // 按 cfg_.form/material 从模块目录创建形态/材质（未知回退 arc/dark）
   RECT workArea() const;  // 窗口中心所在屏的 MONITORINFO.rcWork（无窗口/失败回退主屏）
   // 自绘玻璃右键菜单：组装内容（映射组当前值 ✓）→ 测量 → 屏缘内侧定位（不出屏）
   // → 并集扩窗；收起即收回基础矩形，指针已在窗外则恢复 600ms 迟滞

@@ -99,8 +99,8 @@ public:
 
 } // namespace
 
-void registerCapsuleForm(Registry<IForm>& reg) {
-  reg.add("capsule", [] { return std::unique_ptr<IForm>(new CapsuleForm()); });
+std::unique_ptr<IForm> createCapsuleForm() {
+  return std::unique_ptr<IForm>(new CapsuleForm());
 }
 
 } // namespace okmeter::render
