@@ -7,8 +7,8 @@
 namespace okmeter {
 
 struct Config {
-  std::string form = "arc";        // arc（v1 渲染）；capsule/compass 属 Plan 2b
-  std::string material = "dark";   // dark（v1 渲染）；frost/liquid/glow 属 Plan 2b
+  std::string form = "arc";        // arc / capsule / compass
+  std::string material = "dark";   // dark / frost / liquid / glow
   int count = 3;                   // 仅奇数 1/3/5/7
   std::string edge = "right";      // right / left（v1 不做顶底）
   bool mergeCache = true;

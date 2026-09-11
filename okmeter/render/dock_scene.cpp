@@ -23,13 +23,18 @@ bool DockScene::ensure(D3DContext& d3d) {
   ID2D1DeviceContext* dc = d3d.dc();
   if (!dc || !d3d.dwrite()) return false;
   if (dc == seen_ && seenGen_ == d3d.generation() && brush_ && valueFmt_ &&
-      labelFmt_ && cardTitleFmt_ && cardBigFmt_ && cardRowFmt_ && cardValFmt_ &&
+      labelFmt_ && capNameFmt_ && capValFmt_ && hubFmt_ && satFmt_ &&
+      cardTitleFmt_ && cardBigFmt_ && cardRowFmt_ && cardValFmt_ &&
       cardFootFmt_) return true;
   seen_ = dc;
   seenGen_ = d3d.generation();
   brush_.Reset();
   valueFmt_.Reset();
   labelFmt_.Reset();
+  capNameFmt_.Reset();
+  capValFmt_.Reset();
+  hubFmt_.Reset();
+  satFmt_.Reset();
   cardTitleFmt_.Reset();
   cardBigFmt_.Reset();
   cardRowFmt_.Reset();
@@ -37,11 +42,20 @@ bool DockScene::ensure(D3DContext& d3d) {
   cardFootFmt_.Reset();
   if (FAILED(dc->CreateSolidColorBrush(D2D1::ColorF(0, 0), &brush_))) return false;
   IDWriteFactory* dw = d3d.dwrite();
-  // 数值字号校准原型：值 13px 600 字重、短名 8.5px
+  // 数值字号校准原型：值 13px 600 字重、短名 8.5px；
+  // 胶囊左名 10px / 右值 11px 600、罗盘中心 15px / 卫星 9.5px（原型 .cap/.hub/.sat）
   return makeFmt(dw, L"Consolas", 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
                  DWRITE_TEXT_ALIGNMENT_CENTER, &valueFmt_) &&
          makeFmt(dw, L"Consolas", 8.5f, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_CENTER, &labelFmt_) &&
+         makeFmt(dw, L"Segoe UI", 10.0f, DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_LEADING, &capNameFmt_) &&
+         makeFmt(dw, L"Consolas", 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                 DWRITE_TEXT_ALIGNMENT_TRAILING, &capValFmt_) &&
+         makeFmt(dw, L"Consolas", 15.0f, DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_CENTER, &hubFmt_) &&
+         makeFmt(dw, L"Consolas", 9.5f, DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_CENTER, &satFmt_) &&
          makeFmt(dw, L"Segoe UI", 10.5f, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_LEADING, &cardTitleFmt_) &&
          makeFmt(dw, L"Consolas", 21.0f, DWRITE_FONT_WEIGHT_NORMAL,
@@ -67,14 +81,15 @@ void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
   const size_t n = g.items.size();
   if (n == 0) return;
 
-  // 位置烘焙：收缩 tuck（e=0 球心收拢到露出侧，球帽露出 kCollapsedCapPx）+
-  // 悬停让位 dy + 卡区偏移 dx，全部并入 geom，形态/材质直读最终坐标
+  // 位置烘焙：收缩 tuck（e=0 项心收拢到露出侧，帽露出 kCollapsedCapPx；胶囊按
+  // 半宽 hw 计帽）+ 悬停让位 dy + 卡区偏移 dx，全部并入 geom，形态/材质直读最终坐标
   DockGeom baked = g;
   for (size_t i = 0; i < n; ++i) {
     const ItemGeom& it = g.items[i];
+    const double extent = it.hw > 0 ? it.hw : it.r;
     const double collapsedX =
-        edge == "right" ? ((double)kCollapsedCapPx - it.r)
-                        : (g.w - kCollapsedCapPx + it.r);
+        edge == "right" ? ((double)kCollapsedCapPx - extent)
+                        : (g.w - kCollapsedCapPx + extent);
     baked.items[i].x = it.x + (1.0 - e) * (collapsedX - it.x) + dx;
     baked.items[i].y = it.y + it.dy;
     if ((int)i == pressIdx) baked.items[i].scale *= 0.9;  // 按压下沉（球与文本同步）
@@ -93,6 +108,10 @@ void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
   ctx.brush = brush_.Get();
   ctx.valueFmt = valueFmt_.Get();
   ctx.labelFmt = labelFmt_.Get();
+  ctx.capNameFmt = capNameFmt_.Get();
+  ctx.capValFmt = capValFmt_.Get();
+  ctx.hubFmt = hubFmt_.Get();
+  ctx.satFmt = satFmt_.Get();
   ctx.backdrop = backdrop;
   ctx.backdropDX = backdropDX;
   ctx.backdropDY = backdropDY;
@@ -101,21 +120,46 @@ void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
 
 void DockScene::drawCard(D3DContext& d3d, IMaterial& material,
                          const DetailCard& card, const std::string& edge,
-                         double ballZoneW, double winH, double anchorY) {
-  if (!card.valid || !ensure(d3d)) return;
+                         const DockGeom& g, float dx, double winH,
+                         int hoverIdx, double cardRadius) {
+  if (!card.valid || !ensure(d3d) || hoverIdx < 0 ||
+      hoverIdx >= (int)g.items.size())
+    return;
   ID2D1DeviceContext* dc = d3d.dc();
   dc->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
   dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
 
   constexpr float kCardW = 252.0f;
+  constexpr float kCardZoneW = 268.0f;  // 展开态卡区宽（app.cpp kCardZoneW 同款）
   constexpr float kPadX = 16.0f, kPadTop = 14.0f, kPadBot = 12.0f;
   constexpr float kTitleH = 15.0f, kBigH = 27.0f, kRowH = 22.0f;
   const float footH = card.foot.empty() ? 0.0f : 22.0f;  // 8 间距 + 14 行高
   const float cardH = kPadTop + kTitleH + 3.0f + kBigH + 10.0f +
                       kRowH * (float)card.rows.size() + footH + kPadBot;
 
-  // 卡区在球区屏内侧：右缘靠左（x=8），左缘镜像（球区右侧）
-  const float x = edge == "right" ? 8.0f : (float)ballZoneW + 8.0f;
+  // 水平定位（原型 hotSlot 的 RADII 规则）：卡内缘 = 悬停项中心 ∓ (cardRadius+12)；
+  // 再夹到项列最内缘 ∓12（规格 §3.4 不遮挡其他球），最后夹进窗口 [8, g.w+268-252-8]
+  const ItemGeom& it = g.items[(size_t)hoverIdx];
+  double colMin = 1e9, colMax = -1e9;
+  for (const ItemGeom& o : g.items) {
+    const double half = o.hw > 0 ? o.hw : o.r;
+    if (o.x + dx - half < colMin) colMin = o.x + dx - half;
+    if (o.x + dx + half > colMax) colMax = o.x + dx + half;
+  }
+  float x;
+  if (edge == "right") {
+    const double desired = it.x + dx - cardRadius - 12.0 - kCardW;
+    const double limit = colMin - 12.0 - kCardW;
+    x = (float)(desired < limit ? desired : limit);  // windows.h min/max 宏冲突，手写比较
+    if (x < 8.0f) x = 8.0f;
+  } else {
+    const double desired = it.x + dx + cardRadius + 12.0;
+    const double limit = colMax + 12.0;
+    x = (float)(desired > limit ? desired : limit);
+    const float maxX = (float)g.w + kCardZoneW - kCardW - 8.0f;
+    if (x > maxX) x = maxX;
+  }
+  const double anchorY = it.y + it.dy;
   float y = (float)anchorY - cardH * 0.5f;
   const float maxY = (float)winH - cardH - 12.0f;
   if (y > maxY) y = maxY;

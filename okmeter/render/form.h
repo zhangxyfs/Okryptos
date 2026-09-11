@@ -16,6 +16,7 @@ class BackdropCapture;
 struct DockItem {
   std::wstring value;  // 紧凑值（球内主文本，Consolas 13px 半粗 白 93%）
   std::wstring label;  // 模型短名 / 口径名（Consolas 8.5px 白 66%）
+  double ratio = 0;    // 该项值/全部项最大值（胶囊底部占比条；clamp 4%~100%）
 };
 
 // 形态绘制的每帧输入。geom 已由场景烘焙最终位置（tuck/让位/dx 已并入），
@@ -32,6 +33,10 @@ struct DrawContext {
   ID2D1SolidColorBrush* brush = nullptr;     // 共享画刷
   IDWriteTextFormat* valueFmt = nullptr;     // Consolas 13 半粗 居中
   IDWriteTextFormat* labelFmt = nullptr;     // Consolas 8.5 居中
+  IDWriteTextFormat* capNameFmt = nullptr;   // 胶囊左名：Segoe UI 10 左对齐
+  IDWriteTextFormat* capValFmt = nullptr;    // 胶囊右值：Consolas 11 半粗 右对齐
+  IDWriteTextFormat* hubFmt = nullptr;       // 罗盘中心值：Consolas 15 居中
+  IDWriteTextFormat* satFmt = nullptr;       // 罗盘卫星值：Consolas 9.5 居中
   BackdropCapture* backdrop = nullptr;       // 背景捕获（传给材质取玻璃底）
   float backdropDX = 0, backdropDY = 0;      // 背景纹理→窗口坐标平移
 };
@@ -42,9 +47,19 @@ public:
   virtual std::string id() const = 0;                    // "arc"
   virtual DockGeom layout(int n, int screenH, const std::string& edge) const = 0;
   virtual void drawItems(ID2D1DeviceContext* dc, const DrawContext& ctx) const = 0;
+  // 动画帧推进（罗盘收缩态旋转用；e=弹簧滑出进度）。默认无持续动画
+  virtual void tick(double dt, double e) { (void)dt; (void)e; }
+  // 有进行中的形态动画（罗盘收缩态旋转）需持续重绘时返回 true（默认 false）
+  virtual bool wantsTick() const { return false; }
+  virtual double hoverScale() const { return 1.34; }  // 悬停放大（胶囊 1.08 / 罗盘 1.22）
+  virtual double hoverPush() const { return 10; }     // 邻项让位 px（罗盘 0：环形不推挤）
+  // 详情卡卡半径（原型 RADII 表：arc 30 / capsule 22 / 罗盘中心 43 卫星 23）
+  virtual double cardRadius(int idx, int mid) const { (void)idx; (void)mid; return 30; }
 };
 
-// 注册内建形态（render/forms/arc.cpp）
+// 注册内建形态（render/forms/*.cpp）
 void registerArcForm(Registry<IForm>& reg);
+void registerCapsuleForm(Registry<IForm>& reg);
+void registerCompassForm(Registry<IForm>& reg);
 
 } // namespace okmeter::render

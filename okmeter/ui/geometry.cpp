@@ -26,6 +26,50 @@ DockGeom layoutArc(int n, int radius, int gap, int screenH, const std::string& e
   return g;
 }
 
+DockGeom layoutCapsule(int n, const std::string& edge) {
+  DockGeom g;
+  if (n < 1) return g;
+  const int mid = (n - 1) / 2;
+  const double step = 56;  // 原型 geom() capsule：step 56
+  g.w = 196;               // 原型 W=196（胶囊 174 + 两侧各 11）
+  g.h = 2 * (mid * step + 48);
+  g.connector = false;     // 胶囊无项间连线（原型 capsule 隐藏 arcSvg）
+  g.items.resize((size_t)n);
+  for (int i = 0; i < n; ++i) {
+    g.items[(size_t)i].x = g.w / 2;  // 左右缘对称，edge 只影响 tuck 方向
+    g.items[(size_t)i].y = g.h / 2 + (i - mid) * step;
+    g.items[(size_t)i].r = 19;       // 胶囊半高（174×38，padding 8+9 含 3px 占比条）
+    g.items[(size_t)i].hw = 87;      // 胶囊半宽（174/2）
+  }
+  (void)edge;
+  return g;
+}
+
+DockGeom layoutCompass(int n, double rotDeg) {
+  DockGeom g;
+  if (n < 1) return g;
+  const int mid = (n - 1) / 2;
+  g.w = 236;  // 原型 geom() compass：W=236 H=252 R=84
+  g.h = 252;
+  g.connector = false;  // 罗盘轨道由形态自绘虚线圆环，不走项间连线
+  g.items.resize((size_t)n);
+  const double cx = g.w / 2, cy = g.h / 2, R = 84;
+  const double pi = 3.14159265358979323846;
+  int k = 0;
+  for (int i = 0; i < n; ++i) {
+    if (i == mid) continue;
+    const double a = (-90 + k * 360.0 / (n - 1) + rotDeg) * pi / 180;
+    g.items[(size_t)i].x = cx + R * std::cos(a);
+    g.items[(size_t)i].y = cy + R * std::sin(a);
+    g.items[(size_t)i].r = 23;  // 卫星 46px
+    ++k;
+  }
+  g.items[(size_t)mid].x = cx;  // 中心罗盘 86px
+  g.items[(size_t)mid].y = cy;
+  g.items[(size_t)mid].r = 43;
+  return g;
+}
+
 void applyHover(DockGeom& g, int hoverIdx, double hoverScale, double push) {
   if (hoverIdx >= (int)g.items.size()) hoverIdx = -1;  // 越界正索引按复位处理
   for (size_t i = 0; i < g.items.size(); ++i) {

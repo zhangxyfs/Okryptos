@@ -70,31 +70,35 @@ public:
     ensure(dc, ctx.d3d);
     const D2D1_POINT_2F c = ctx.center;
     const float r = ctx.r;
+    const float hw = ctx.halfW > 0 ? ctx.halfW : ctx.r;
+    const bool pill = glassfx::isPill(hw, r);  // 胶囊：圆形折射/环带不适用，走毛玻璃底
     const float dim = ctx.dimmed;
-    const bool fullGlass =
+    const bool fullGlass = !pill &&
         ctx.backdrop && ctx.backdrop->ok() && !ctx.backdrop->degraded();
 
     // 悬停外发光（原型 .orb.hot）
     if (ctx.isHot && hotGlow_) {
       hotGlow_->SetCenter(c);
-      hotGlow_->SetRadiusX(r + 22.0f);
+      hotGlow_->SetRadiusX(glassfx::shapeRX(hw, r, 22.0f));
       hotGlow_->SetRadiusY(r + 22.0f);
-      dc->FillEllipse(D2D1::Ellipse(c, r + 22.0f, r + 22.0f), hotGlow_.Get());
+      dc->FillEllipse(
+          D2D1::Ellipse(c, glassfx::shapeRX(hw, r, 22.0f), r + 22.0f), hotGlow_.Get());
     }
 
     // 浮动阴影（原型 0 14px 34px black 38%：中心下移 14，大而柔）
     if (floatShadow_) {
       floatShadow_->SetCenter(D2D1::Point2F(c.x, c.y + 14.0f));
-      floatShadow_->SetRadiusX(r + 17.0f);
+      floatShadow_->SetRadiusX(glassfx::shapeRX(hw, r, 17.0f));
       floatShadow_->SetRadiusY(r + 17.0f);
-      dc->FillEllipse(D2D1::Ellipse(c, r + 17.0f, r + 17.0f), floatShadow_.Get());
+      dc->FillEllipse(D2D1::Ellipse(c, glassfx::shapeRX(hw, r, 17.0f), r + 17.0f),
+                      floatShadow_.Get());
     }
 
     // 中心项光晕环（原型 .orb.center）
     const D2D1_ELLIPSE ball = D2D1::Ellipse(c, r, r);
     if (ctx.isCenter) {
       ctx.brush->SetColor(glassfx::accentC(0.10f * dim));
-      dc->DrawEllipse(D2D1::Ellipse(c, r + 3.0f, r + 3.0f), ctx.brush, 6.0f);
+      glassfx::drawShape(dc, c, hw, r, ctx.brush, 6.0f, 3.0f);
     }
 
     // 玻璃底：全折射路径 / 退化毛玻璃 / 纯色兜底
@@ -131,16 +135,26 @@ public:
       drawFrostFallback(dc, ctx);
     }
 
-    // 不均匀边缘光（全玻璃与退化毛玻璃都画）：上/左亮、下/右暗，
-    // 环带几何直接填双向线性渐变（原型 inset 四向 box-shadow 组合）
+    // 不均匀边缘光（全玻璃与退化毛玻璃都画）：上/左亮、下/右暗。
+    // 圆：环带几何直接填双向线性渐变（原型 inset 四向 box-shadow 组合）；
+    // 胶囊：圆角矩形 2.5px 渐变描边两 pass（环带几何是圆专用）
     if (edgeBright_ && edgeDark_) {
-      if (ComPtr<ID2D1Geometry> band = glassfx::ring(dc, c, r + 0.5f, r - 2.0f)) {
-        edgeBright_->SetStartPoint(D2D1::Point2F(c.x - r, c.y - r));
-        edgeBright_->SetEndPoint(D2D1::Point2F(c.x + 0.5f * r, c.y + 0.5f * r));
-        dc->FillGeometry(band.Get(), edgeBright_.Get());
-        edgeDark_->SetStartPoint(D2D1::Point2F(c.x + r, c.y + r));
-        edgeDark_->SetEndPoint(D2D1::Point2F(c.x - 0.4f * r, c.y - 0.4f * r));
-        dc->FillGeometry(band.Get(), edgeDark_.Get());
+      if (!pill) {
+        if (ComPtr<ID2D1Geometry> band = glassfx::ring(dc, c, r + 0.5f, r - 2.0f)) {
+          edgeBright_->SetStartPoint(D2D1::Point2F(c.x - r, c.y - r));
+          edgeBright_->SetEndPoint(D2D1::Point2F(c.x + 0.5f * r, c.y + 0.5f * r));
+          dc->FillGeometry(band.Get(), edgeBright_.Get());
+          edgeDark_->SetStartPoint(D2D1::Point2F(c.x + r, c.y + r));
+          edgeDark_->SetEndPoint(D2D1::Point2F(c.x - 0.4f * r, c.y - 0.4f * r));
+          dc->FillGeometry(band.Get(), edgeDark_.Get());
+        }
+      } else {
+        edgeBright_->SetStartPoint(D2D1::Point2F(c.x - hw, c.y - r));
+        edgeBright_->SetEndPoint(D2D1::Point2F(c.x + 0.5f * hw, c.y + 0.5f * r));
+        glassfx::drawShape(dc, c, hw, r, edgeBright_.Get(), 2.5f, -1.25f);
+        edgeDark_->SetStartPoint(D2D1::Point2F(c.x + hw, c.y + r));
+        edgeDark_->SetEndPoint(D2D1::Point2F(c.x - 0.4f * hw, c.y - 0.4f * r));
+        glassfx::drawShape(dc, c, hw, r, edgeDark_.Get(), 2.5f, -1.25f);
       }
     }
 
@@ -167,11 +181,11 @@ public:
 
     // 边缘 1px 色散：红/蓝 1px 描边横向错位 ±0.6px
     ctx.brush->SetColor(D2D1::ColorF(1.0f, 0.30f, 0.25f, 0.20f * dim));
-    dc->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c.x - 0.6f, c.y), r - 0.5f, r - 0.5f),
-                    ctx.brush, 1.0f);
+    glassfx::drawShape(dc, D2D1::Point2F(c.x - 0.6f, c.y), hw, r, ctx.brush, 1.0f,
+                       -0.5f);
     ctx.brush->SetColor(D2D1::ColorF(0.30f, 0.55f, 1.0f, 0.20f * dim));
-    dc->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c.x + 0.6f, c.y), r - 0.5f, r - 0.5f),
-                    ctx.brush, 1.0f);
+    glassfx::drawShape(dc, D2D1::Point2F(c.x + 0.6f, c.y), hw, r, ctx.brush, 1.0f,
+                       -0.5f);
 
     // 1px 描边：悬停 accent > 中心 accent 60% > ink 16%（原型 liquid border）
     if (ctx.isHot)
@@ -180,7 +194,7 @@ public:
       ctx.brush->SetColor(glassfx::accentC(0.60f * dim));
     else
       ctx.brush->SetColor(glassfx::ink(0.16f * dim));
-    dc->DrawEllipse(&ball, ctx.brush, 1.0f);
+    glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f);
   }
 
   // 详情卡底：82% 深玻璃 + 白 6% 提亮 + ink 17% 描边（v1 卡不做 backdrop blur）
@@ -198,11 +212,12 @@ public:
     dc->DrawRoundedRectangle(&rr, brush.Get(), 1.0f);
   }
 
-  // 弧线描边：ink 22% 双pass（原型 liquid 下 path stroke ink 22%）
+  // 弧线描边：ink 22% 双pass（原型 liquid 下 path stroke ink 22%）；
+  // connector=false（胶囊/罗盘）不画
   void drawArcStroke(ID2D1DeviceContext* dc, const DockGeom& g,
                      const std::string& edge) const override {
     (void)edge;
-    if (!dc || g.items.size() < 2) return;
+    if (!dc || !g.connector || g.items.size() < 2) return;
     ComPtr<ID2D1SolidColorBrush> brush;
     if (FAILED(dc->CreateSolidColorBrush(D2D1::ColorF(0, 0), &brush))) return;
     brush->SetColor(glassfx::ink(0.22f));
@@ -216,36 +231,36 @@ public:
 
 private:
   // 退化毛玻璃：强模糊 σ11 + 提饱和 0.75 + 白 12% + 顶部内高光（frost 同款；
-  // 捕获完全不可用时纯色兜底）
+  // 捕获完全不可用时纯色兜底）。胶囊项也走此路径（圆形折射不适用）
   void drawFrostFallback(ID2D1DeviceContext* dc, const OrbStyleCtx& ctx) const {
     const D2D1_POINT_2F c = ctx.center;
     const float r = ctx.r;
+    const float hw = ctx.halfW > 0 ? ctx.halfW : ctx.r;
     const float dim = ctx.dimmed;
-    const D2D1_ELLIPSE ball = D2D1::Ellipse(c, r, r);
     bool drawn = false;
     if (ctx.backdrop && ctx.backdrop->ok()) {
       frostPipe_.refresh(dc, ctx.backdrop);
-      if (frostPipe_.ready() && glassfx::pushCircleClip(dc, c, r)) {
+      if (frostPipe_.ready() && glassfx::pushShapeClip(dc, c, hw, r)) {
         dc->DrawImage(frostPipe_.output(),
                       D2D1::Point2F(ctx.backdropDX, ctx.backdropDY),
                       D2D1_INTERPOLATION_MODE_LINEAR);
         ctx.brush->SetColor(glassfx::ink(0.12f * dim));
-        dc->FillEllipse(&ball, ctx.brush);
+        glassfx::fillShape(dc, c, hw, r, ctx.brush);
         dc->PopLayer();
         drawn = true;
       }
     }
     if (!drawn) {
       ctx.brush->SetColor(glassfx::deskDeep(0.55f * dim));
-      dc->FillEllipse(&ball, ctx.brush);
+      glassfx::fillShape(dc, c, hw, r, ctx.brush);
       ctx.brush->SetColor(glassfx::ink(0.12f * dim));
-      dc->FillEllipse(&ball, ctx.brush);
+      glassfx::fillShape(dc, c, hw, r, ctx.brush);
     }
     if (hlTop_) {
       hlTop_->SetCenter(D2D1::Point2F(c.x - 0.36f * r, c.y - 0.48f * r));
-      hlTop_->SetRadiusX(1.3f * r);
+      hlTop_->SetRadiusX(1.3f * hw);
       hlTop_->SetRadiusY(1.3f * r);
-      dc->FillEllipse(&ball, hlTop_.Get());
+      glassfx::fillShape(dc, c, hw, r, hlTop_.Get());
     }
   }
 

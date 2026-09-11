@@ -3,6 +3,7 @@
 // 背景捕获不可用（未启动/失败/affinity 降级）时退化为纯色 74% 透明底（无模糊）。
 #include "../material.h"
 #include "../backdrop.h"
+#include "glassfx.h"
 #include <algorithm>
 #include <d2d1effects.h>
 #include <dxgi.h>
@@ -33,63 +34,55 @@ public:
 
   // 球体底：悬停外发光 → 底部外阴影 → 中心光晕环 → 玻璃底（模糊背景 + 74% 染色）
   // → 顶部内高光 → 1px 描边。画刷用 ctx.brush；渐变/模糊资源按设备代际缓存。
+  // halfW>r 时项为胶囊：填充/裁剪/描边走圆角矩形，光晕/阴影/高光按椭圆横向外扩。
   void drawOrbBack(ID2D1DeviceContext* dc, const OrbStyleCtx& ctx) const override {
     if (!dc || !ctx.d3d || !ctx.brush || ctx.r <= 0) return;
     ensure(dc, ctx.d3d);
     const D2D1_POINT_2F c = ctx.center;
     const float r = ctx.r;
+    const float hw = ctx.halfW > 0 ? ctx.halfW : ctx.r;
     const float dim = ctx.dimmed;
 
     // 悬停外发光（原型 .orb.hot box-shadow 0 0 22px accent 32%）
     if (ctx.isHot && hotGlow_) {
       hotGlow_->SetCenter(c);
-      hotGlow_->SetRadiusX(r + 22.0f);
+      hotGlow_->SetRadiusX(glassfx::shapeRX(hw, r, 22.0f));
       hotGlow_->SetRadiusY(r + 22.0f);
-      dc->FillEllipse(D2D1::Ellipse(c, r + 22.0f, r + 22.0f), hotGlow_.Get());
+      dc->FillEllipse(
+          D2D1::Ellipse(c, glassfx::shapeRX(hw, r, 22.0f), r + 22.0f), hotGlow_.Get());
     }
 
     // 底部外阴影（柔和径向渐变，中心下移 5px 模拟下方投影）
     if (shadow_) {
       shadow_->SetCenter(D2D1::Point2F(c.x, c.y + 5.0f));
-      shadow_->SetRadiusX(r + 9.0f);
+      shadow_->SetRadiusX(glassfx::shapeRX(hw, r, 9.0f));
       shadow_->SetRadiusY(r + 9.0f);
-      dc->FillEllipse(D2D1::Ellipse(c, r + 9.0f, r + 9.0f), shadow_.Get());
+      dc->FillEllipse(D2D1::Ellipse(c, glassfx::shapeRX(hw, r, 9.0f), r + 9.0f),
+                      shadow_.Get());
     }
 
     // 中心项：半径+3 accent 10% 光晕环（原型 box-shadow 0 0 0 3px accent 10%）
-    const D2D1_ELLIPSE ball = D2D1::Ellipse(c, r, r);
     if (ctx.isCenter) {
       ctx.brush->SetColor(D2D1::ColorF(kAccent, 0.10f * dim));
-      dc->DrawEllipse(D2D1::Ellipse(c, r + 3.0f, r + 3.0f), ctx.brush, 6.0f);
+      glassfx::drawShape(dc, c, hw, r, ctx.brush, 6.0f, 3.0f);
     }
 
-    // 玻璃底：圆域裁剪层 → 高斯模糊背景（屏幕对齐）→ desk-deep 74% 染色
+    // 玻璃底：形状域裁剪层 → 高斯模糊背景（屏幕对齐）→ desk-deep 74% 染色
     bool glassDrawn = false;
     if (ctx.backdrop && ctx.backdrop->ok() && !ctx.backdrop->degraded()) {
       refreshBackdrop(dc, ctx.backdrop);
-      if (bgBmp_ && blur_) {
-        ComPtr<ID2D1Factory> factory;
-        dc->GetFactory(&factory);
-        ComPtr<ID2D1EllipseGeometry> clip;
-        if (factory &&
-            SUCCEEDED(factory->CreateEllipseGeometry(ball, &clip)) && clip) {
-          const D2D1_RECT_F bounds =
-              D2D1::RectF(c.x - r - 1.0f, c.y - r - 1.0f, c.x + r + 1.0f, c.y + r + 1.0f);
-          dc->PushLayer(D2D1::LayerParameters1(bounds, clip.Get(),
-                                               D2D1_ANTIALIAS_MODE_PER_PRIMITIVE),
-                        nullptr);
-          dc->DrawImage(blur_.Get(), D2D1::Point2F(ctx.backdropDX, ctx.backdropDY),
-                        D2D1_INTERPOLATION_MODE_LINEAR);
-          ctx.brush->SetColor(kDeskDeep(0.74f * dim));
-          dc->FillEllipse(&ball, ctx.brush);
-          dc->PopLayer();
-          glassDrawn = true;
-        }
+      if (bgBmp_ && blur_ && glassfx::pushShapeClip(dc, c, hw, r)) {
+        dc->DrawImage(blur_.Get(), D2D1::Point2F(ctx.backdropDX, ctx.backdropDY),
+                      D2D1_INTERPOLATION_MODE_LINEAR);
+        ctx.brush->SetColor(kDeskDeep(0.74f * dim));
+        glassfx::fillShape(dc, c, hw, r, ctx.brush);
+        dc->PopLayer();
+        glassDrawn = true;
       }
     }
     if (!glassDrawn) {  // 退化：纯色 74% 透明底（无模糊）
       ctx.brush->SetColor(kDeskDeep(0.74f * dim));
-      dc->FillEllipse(&ball, ctx.brush);
+      glassfx::fillShape(dc, c, hw, r, ctx.brush);
     }
 
     // 顶部内高光（原型 radial-gradient at 32% 26% ink 14% → transparent 62%；
@@ -101,9 +94,9 @@ public:
         sy = std::clamp((py_ - c.y) * 0.15f, -5.0f, 5.0f);
       }
       hl_->SetCenter(D2D1::Point2F(c.x - 0.36f * r + sx, c.y - 0.48f * r + sy));
-      hl_->SetRadiusX(1.3f * r);
+      hl_->SetRadiusX(1.3f * hw);
       hl_->SetRadiusY(1.3f * r);
-      dc->FillEllipse(&ball, hl_.Get());
+      glassfx::fillShape(dc, c, hw, r, hl_.Get());
     }
 
     // 1px 描边：悬停 accent 100% > 中心 accent 60% > hairline 白 13%
@@ -113,7 +106,7 @@ public:
       ctx.brush->SetColor(D2D1::ColorF(kAccent, 0.60f * dim));
     else
       ctx.brush->SetColor(kHairline(0.13f * dim));
-    dc->DrawEllipse(&ball, ctx.brush, 1.0f);
+    glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f);
   }
 
   // 详情卡底：90% 深玻璃 + 1px hairline（v1 卡不做 backdrop blur）
@@ -130,11 +123,11 @@ public:
   }
 
   // 弧线描边：hairline 白 13% 底 + accent 30% 微光叠层（原型 .dock-arc .glow 同款）。
-  // g.items 已是烘焙后的最终位置（tuck/让位由场景并入）。
+  // g.items 已是烘焙后的最终位置（tuck/让位由场景并入）；connector=false 不画。
   void drawArcStroke(ID2D1DeviceContext* dc, const DockGeom& g,
                      const std::string& edge) const override {
     (void)edge;
-    if (!dc || g.items.size() < 2) return;
+    if (!dc || !g.connector || g.items.size() < 2) return;
     ComPtr<ID2D1SolidColorBrush> brush;
     if (FAILED(dc->CreateSolidColorBrush(D2D1::ColorF(0, 0), &brush))) return;
     for (int pass = 0; pass < 2; ++pass) {

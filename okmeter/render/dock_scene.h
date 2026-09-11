@@ -35,12 +35,13 @@ public:
             double e, const std::string& edge, float dx = 0,
             float backdropDX = 0, float backdropDY = 0, int pressIdx = -1);
 
-  // 悬停详情卡：宽 252、圆角 12、卡底委托 material.drawCardBack；位于球区屏内侧
-  // （右缘：卡区在左 x∈[8,260]；左缘镜像 x=ballZoneW+8）；垂直居中 anchorY 并
-  // 夹进 [12, winH-12]。ballZoneW = 布局 g.w，winH = 窗口高。
+  // 悬停详情卡：宽 252、圆角 12、卡底委托 material.drawCardBack；水平位置按原型
+  // RADII 规则（卡内缘 = 悬停项内缘 ∓ (cardRadius+12)），并夹取到不遮挡任何项
+  //（项列最内缘再让 12px）；垂直居中 anchorY 并夹进 [12, winH-12]。
+  // g 为经 applyHover 的布局几何（未烘焙 tuck），dx 为球区整体水平偏移。
   void drawCard(D3DContext& d3d, IMaterial& material, const DetailCard& card,
-                const std::string& edge, double ballZoneW, double winH,
-                double anchorY);
+                const std::string& edge, const DockGeom& g, float dx, double winH,
+                int hoverIdx, double cardRadius);
 
 private:
   bool ensure(D3DContext& d3d);  // dc 指针/代际变化（设备重建）时重建全部资源
@@ -50,6 +51,10 @@ private:
   Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush_;
   Microsoft::WRL::ComPtr<IDWriteTextFormat> valueFmt_;
   Microsoft::WRL::ComPtr<IDWriteTextFormat> labelFmt_;
+  Microsoft::WRL::ComPtr<IDWriteTextFormat> capNameFmt_;  // 胶囊左名 Segoe UI 10 左
+  Microsoft::WRL::ComPtr<IDWriteTextFormat> capValFmt_;   // 胶囊右值 Consolas 11 半粗右
+  Microsoft::WRL::ComPtr<IDWriteTextFormat> hubFmt_;      // 罗盘中心值 Consolas 15
+  Microsoft::WRL::ComPtr<IDWriteTextFormat> satFmt_;      // 罗盘卫星值 Consolas 9.5
   Microsoft::WRL::ComPtr<IDWriteTextFormat> cardTitleFmt_;  // Segoe UI 10.5
   Microsoft::WRL::ComPtr<IDWriteTextFormat> cardBigFmt_;    // Consolas 21
   Microsoft::WRL::ComPtr<IDWriteTextFormat> cardRowFmt_;    // Segoe UI 11 左对齐

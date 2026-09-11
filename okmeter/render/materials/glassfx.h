@@ -90,6 +90,64 @@ inline bool pushCircleClip(ID2D1DeviceContext* dc, D2D1_POINT_2F c, float r) {
   return true;
 }
 
+// ── 项形状抽象：halfW > r 时胶囊（圆角矩形 半宽 halfW 半高 r 角半径 r），否则圆 ──
+inline bool isPill(float halfW, float r) { return halfW > r + 0.01f; }
+
+inline D2D1_ROUNDED_RECT pillRR(D2D1_POINT_2F c, float halfW, float r,
+                                float grow = 0.0f) {
+  return D2D1::RoundedRect(
+      D2D1::RectF(c.x - halfW - grow, c.y - r - grow,
+                  c.x + halfW + grow, c.y + r + grow),
+      r + grow, r + grow);
+}
+
+// 形状填充（胶囊→圆角矩形，圆→椭圆）
+inline void fillShape(ID2D1DeviceContext* dc, D2D1_POINT_2F c, float halfW, float r,
+                      ID2D1Brush* brush) {
+  if (isPill(halfW, r)) {
+    const D2D1_ROUNDED_RECT rr = pillRR(c, halfW, r);
+    dc->FillRoundedRectangle(&rr, brush);
+  } else {
+    const D2D1_ELLIPSE e = D2D1::Ellipse(c, r, r);
+    dc->FillEllipse(&e, brush);
+  }
+}
+
+// 形状描边（grow 外扩用于中心项光晕环）
+inline void drawShape(ID2D1DeviceContext* dc, D2D1_POINT_2F c, float halfW, float r,
+                      ID2D1Brush* brush, float strokeW = 1.0f, float grow = 0.0f) {
+  if (isPill(halfW, r)) {
+    const D2D1_ROUNDED_RECT rr = pillRR(c, halfW, r, grow);
+    dc->DrawRoundedRectangle(&rr, brush, strokeW);
+  } else {
+    const D2D1_ELLIPSE e = D2D1::Ellipse(c, r + grow, r + grow);
+    dc->DrawEllipse(&e, brush, strokeW);
+  }
+}
+
+// 形状裁剪层（胶囊→圆角矩形几何，圆→pushCircleClip）
+inline bool pushShapeClip(ID2D1DeviceContext* dc, D2D1_POINT_2F c, float halfW,
+                          float r) {
+  if (!isPill(halfW, r)) return pushCircleClip(dc, c, r);
+  Microsoft::WRL::ComPtr<ID2D1Factory> factory;
+  dc->GetFactory(&factory);
+  Microsoft::WRL::ComPtr<ID2D1RoundedRectangleGeometry> clip;
+  if (!factory ||
+      FAILED(factory->CreateRoundedRectangleGeometry(pillRR(c, halfW, r), &clip)))
+    return false;
+  const D2D1_RECT_F bounds = D2D1::RectF(c.x - halfW - 1.0f, c.y - r - 1.0f,
+                                         c.x + halfW + 1.0f, c.y + r + 1.0f);
+  dc->PushLayer(D2D1::LayerParameters1(bounds, clip.Get(),
+                                       D2D1_ANTIALIAS_MODE_PER_PRIMITIVE),
+                nullptr);
+  return true;
+}
+
+// 光晕/阴影的椭圆半径：胶囊横向按 halfW 外扩（椭圆圆角近似胶囊外发光）
+inline float shapeRX(float halfW, float r, float grow) {
+  return (isPill(halfW, r) ? halfW : r) + grow;
+}
+
 // 边缘环带几何（外圆 - 内圆，ALTERNATE 填充）：边缘光/镜面高光/色散的绘制域
 inline Microsoft::WRL::ComPtr<ID2D1Geometry> ring(ID2D1DeviceContext* dc,
                                                   D2D1_POINT_2F c, float rOut,

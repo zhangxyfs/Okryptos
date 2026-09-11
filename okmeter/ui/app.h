@@ -27,7 +27,11 @@ class KimiAdapter;
 // WM_TIMER：数据轮询 2000ms（poll→flush→重建 bindings/文本缓存→重绘）、相对时间
 // 刷新 30s；离开迟滞 600ms 一次性 WM_TIMER。
 // 右键菜单：换边（edge 互换 + saveConfig 持久化 + 重建几何）、退出（flush 游标）。
-// 两态：emerge 弹簧 e∈[0,1]，右缘窗口 x = 屏宽 - lerp(24, g.w, e) - (wide?268:0)；
+// 拖拽换边（规格 §3.2）：WM_LBUTTONDOWN 起拖（SetCapture，阈值内视为按压/点击），
+// 拖动实时跟随；松手按窗口中心所在屏的工作区中线判定左/右缘，换边则 saveConfig。
+// 多显示器：几何/定位一律按"窗口中心所在屏"的 MONITORINFO.rcWork（workArea()），
+// WM_DPICHANGED/WM_DISPLAYCHANGE 重建布局。
+// 两态：emerge 弹簧 e∈[0,1]，右缘窗口 x = 工作区右 - lerp(24, g.w, e) - (wide?268:0)；
 // 展开态窗口宽 g.w+268（卡区在球区屏内侧，右缘靠左），收缩态宽 g.w；
 // 鼠标进入 e→1，离开 600ms 迟滞后 e→0。
 class DockApp {
@@ -41,11 +45,11 @@ private:
   LRESULT onMessage(UINT msg, WPARAM wp, LPARAM lp);
 
   void render();          // 布局 → applyHover → dock_scene 一帧（形态/材质委托，含详情卡）
-  void animTick();        // 动画帧：RDCW 检查 + 弹簧 step（真实 dt）+ 挪窗 + 重绘
+  void animTick();        // 动画帧：RDCW 检查 + 形态 tick + 弹簧 step（真实 dt）+ 挪窗 + 重绘
   void pollData();        // kimi.poll→agg.add→flush→rebuildItems→重绘
-  void rebuildItems();    // resolveBindings + 文本缓存（值/短名）+ 详情卡重组
+  void rebuildItems();    // resolveBindings + 文本缓存（值/短名/占比）+ 详情卡重组
   void rebuildCard();     // 按 hoverIdx 组装详情卡（hover 变化/数据刷新时调用）
-  void rebuildLayout();   // 屏高/边 → 窗口矩形 + SetWindowPos
+  void rebuildLayout();   // 工作区/边 → 窗口矩形 + SetWindowPos
   void updatePosition();  // 按弹簧 e 移动窗口 x（SetWindowPos）
   void setEmergeTarget(double t);
   void setWide(bool w);   // 展开态窗口宽 g.w+268（卡区）；收缩态回 g.w
@@ -53,6 +57,9 @@ private:
   void exitApp();         // 退出：flush 游标落盘 → DestroyWindow
   void startCapture();    // 背景捕获：取当前 DXGI 设备 → backdrop_.start（可重入）
   void createModules();   // 按 cfg_.form/material 从注册表创建形态/材质（未知回退 arc/dark）
+  RECT workArea() const;  // 窗口中心所在屏的 MONITORINFO.rcWork（无窗口/失败回退主屏）
+  // 悬停/按压命中：烘焙坐标（tuck+dy+卡区偏移）下的 2D 归一化距离 ≤1 最近项
+  int hitItem(const DockGeom& g, int mx, int my, float dx) const;
 
   render::D3DContext d3d_;
   render::DockScene scene_;
@@ -76,6 +83,10 @@ private:
   int hoverIdx_ = -1;
   int pressIdx_ = -1;           // 左键按住项（沉浸光感按压下沉/光晕；仅 glow 生效）
   bool trackingLeave_ = false;
+  bool dragArmed_ = false;      // 左键已按下未越阈值（拖拽预备；阈值内=按压/点击）
+  bool dragging_ = false;       // 拖拽进行中（窗口实时跟随，松手按半屏判定换边）
+  POINT dragGrab_{};            // 起拖时指针相对窗口左上角的偏移（屏幕坐标系）
+  POINT dragStart_{};           // 起拖指针屏幕坐标（拖拽阈值判定）
   bool wide_ = false;         // 窗口含 268px 卡区（展开态）
   render::DetailCard card_;   // 悬停详情卡缓存（rebuildCard 重组）
   int winY_ = 0;              // 垂直居中 y（rebuildLayout 重算）

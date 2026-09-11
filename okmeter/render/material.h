@@ -21,6 +21,7 @@ struct OrbStyleCtx {
   ID2D1SolidColorBrush* brush = nullptr;  // 共享画刷（染色/描边填充）
   D2D1_POINT_2F center{};
   float r = 0;
+  float halfW = 0;                        // >r 时项为胶囊（圆角矩形 半宽 halfW 半高 r）；否则圆
   bool isCenter = false;                  // 中心项：accent 描边 + 光晕环
   bool isHot = false;                     // 悬停项：accent 描边 + 外发光
   float dimmed = 1.0f;
@@ -33,6 +34,8 @@ public:
   virtual std::string id() const = 0;                    // "dark"
   virtual void drawOrbBack(ID2D1DeviceContext*, const OrbStyleCtx&) const = 0;  // 球体底（玻璃/折射/光）
   virtual void drawCardBack(ID2D1DeviceContext*, const D2D1_RECT_F&, float radius) const = 0;
+  // 项间连线/底层光效；g.connector=false（胶囊/罗盘）时不画项间折线
+  //（glow 材质的环境光/粒子层不受 connector 影响，照常绘制）
   virtual void drawArcStroke(ID2D1DeviceContext*, const DockGeom&,
                              const std::string& edge) const = 0;  // edge="left"/"right"
   virtual void onPointer(float x, float y) const = 0;    // 跟手光/镜面高光的光源位置
