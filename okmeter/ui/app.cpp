@@ -633,7 +633,10 @@ void DockApp::activateSettings(int idx) {
     return;
   }
   const int r = settings_.click(d3d_, idx);
-  if (r == 2) settings_.layout(d3d_);  // 球数变化 → 映射行重排
+  if (r == 2) {
+    settings_.layout(d3d_);  // 球数变化 → 映射行重排
+    applyWindowPos();        // layout 重建 ctrls_（头尾按钮矩形清零）→ 重新落窗填充
+  }
   if (r >= 1) render();
 }
 
@@ -900,9 +903,14 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
         setWide(true);
         updatePosition();
         openSettings();  // 内部并集扩窗 + render
-        if (shotDropSlot_ >= 0) {
+        if (shotDropSlot_ >= 0 && shotDropSlot_ < 1000) {
           const int gi = settings_.gselCtrl(shotDropSlot_);
           if (gi >= 0) (void)settings_.click(d3d_, gi);  // 打开指标下拉浮层
+        }
+        if (shotDropSlot_ >= 1000) {
+          // --shotcount 自检：走 activateSettings 真实路径点球数 chip（值为球数）
+          const int ci = settings_.countChipCtrl(shotDropSlot_ - 1000);
+          if (ci >= 0) activateSettings(ci);
         }
         // 跟手光落面板中部：玻璃面板高光/光感在截图里可见
         RECT wr0{};

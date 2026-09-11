@@ -72,10 +72,14 @@ int main(int argc, char** argv) {
     return app.run(GetModuleHandleW(nullptr), argWide(argv[2]), slot);
   }
   // --shotsettings <png> [dropSlot]：自检截图前打开背板设置面板（dropSlot ≥0 时
-  // 同时打开该槽位的指标下拉浮层）
+  // 同时打开该槽位的指标下拉浮层；dropSlot ≥1000 时改为点击球数 chip（值=dropSlot-1000））
   if (argc > 2 && std::string(argv[1]) == "--shotsettings") {
     const int dropSlot = argc > 3 ? std::atoi(argv[3]) : -1;
     return app.run(GetModuleHandleW(nullptr), argWide(argv[2]), -2, true, dropSlot);
   }
+  // --shotcount <png> <count>：自检——打开设置面板后点球数 chip（走 activateSettings 真实路径）
+  if (argc > 3 && std::string(argv[1]) == "--shotcount")
+    return app.run(GetModuleHandleW(nullptr), argWide(argv[2]), -2, true,
+                   1000 + std::atoi(argv[3]));
   return app.run(GetModuleHandleW(nullptr));
 }

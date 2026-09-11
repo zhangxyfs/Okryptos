@@ -510,6 +510,12 @@ int SettingsPanel::gselCtrl(int slot) const {
   return -1;
 }
 
+int SettingsPanel::countChipCtrl(int count) const {
+  for (size_t i = 3; i < ctrls_.size(); ++i)
+    if (ctrls_[i].kind == Ctrl::CountChip && ctrls_[i].a * 2 + 1 == count) return (int)i;
+  return -1;
+}
+
 bool SettingsPanel::wheelAt(int x, int y, int delta) {
   if (!open) return false;
   const float px = (float)x - rect.left;

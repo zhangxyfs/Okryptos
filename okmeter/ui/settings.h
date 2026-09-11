@@ -50,6 +50,7 @@ public:
   // 滚轮：浮层上滚浮层、体区上滚体区（体区滚动即关浮层，原型同款）；返回是否有变化
   bool wheelAt(int x, int y, int delta);
   int gselCtrl(int slot) const;          // 槽位 slot 的 Gsel 控件下标（-1=无；自检截图用）
+  int countChipCtrl(int count) const;    // 球数值 count 的 CountChip 控件下标（-1=无；自检用）
   // 控件激活（仅改 draft / 开合下拉；CloseX/Cancel/Save 由 app 处理）。
   // 返回 0=无变化 1=需重绘 2=需重排+重绘
   int click(render::D3DContext& d3d, int idx);
