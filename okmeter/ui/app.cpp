@@ -1268,6 +1268,16 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
   case WM_APP + 0x4C: {  // 在线诊断：转储当前 backbuffer + 布局状态到 okmeter 目录
     if (wp == 1) openSettings();        // 诊断便捷：wp=1 开设置面板（免菜单导航）
     else if (wp == 2) closeSettings(false);  // wp=2 丢弃关闭（配合复现"开两次黑边"）
+    else if (wp == 3 || wp == 4) {      // wp=3/4：临时关/开截图排除（黑边取证用——
+      using AffinityFn = BOOL(WINAPI*)(HWND, DWORD);  // 关掉后普通截图能拍到 dock 实际显示）
+      const auto fn = reinterpret_cast<AffinityFn>(
+          GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowDisplayAffinity"));
+      if (fn) {
+        const BOOL ok = fn(hwnd_, wp == 3 ? 0x0 : 0x11);  // WDA_NONE / WDA_EXCLUDEFROMCAPTURE
+        backdrop_.note(L"诊断: affinity %s → %s", wp == 3 ? L"OFF" : L"ON",
+                       ok ? L"ok" : L"FAIL");
+      }
+    }
     const std::wstring p = (okmeterDir() / L"dump-live.png").wstring();
     const bool okDump = d3d_.saveFrame(p);
     RECT wr2{};
