@@ -76,12 +76,14 @@ func (e Embedding) ActiveProfile() *EmbeddingProfile {
 	return nil
 }
 
-// LLMProfile 一个大模型服务配置（生成场景：条目优化、检索过滤等）。Kind 三种：
+// LLMProfile 一个大模型服务配置（生成场景：条目优化、检索过滤等）。Kind 四种：
 // openai（/chat/completions 兼容）| anthropic（/v1/messages 兼容）|
-// ollama（本地，OpenAI 兼容协议，免 api_key，base_url 留空默认 localhost:11434）。
+// ollama（本地，OpenAI 兼容协议，免 api_key，base_url 留空默认 localhost:11434）|
+// builtin（内置托管模型：Model 填 chatx 清单 id，llmx 经 chatsc 状态文件发现
+// sidecar 端口，未就绪时返回"启动中"错误并请求拉起）。
 type LLMProfile struct {
 	Name        string `toml:"name"`
-	Kind        string `toml:"kind"` // openai | anthropic | ollama
+	Kind        string `toml:"kind"` // openai | anthropic | ollama | builtin
 	BaseURL     string `toml:"base_url"`
 	Model       string `toml:"model"`
 	APIKey      string `toml:"api_key,omitempty"`

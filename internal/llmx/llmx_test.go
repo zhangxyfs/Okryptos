@@ -4,12 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"okryptos/internal/chatsc"
 	"okryptos/internal/config"
 )
 
@@ -247,6 +252,54 @@ func TestNormalizeOllamaBase(t *testing.T) {
 		if got := normalizeOllamaBase(in); got != want {
 			t.Errorf("normalizeOllamaBase(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestChatBuiltinNotReady：无状态文件（sidecar 未就绪）时 Chat 立即返回
+// "启动中"错误，且 RequestStart 生效（want 标记落盘，等 daemon 拉起）。
+func TestChatBuiltinNotReady(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	c := New(config.LLMProfile{Kind: "builtin", Model: "qwen3-1.7b"}, 0)
+	if c == nil {
+		t.Fatal("New 契约：永不返回 nil")
+	}
+	if _, err := c.Chat(context.Background(), "s", "u", 10); err == nil ||
+		!strings.Contains(err.Error(), "启动中") {
+		t.Fatalf("未就绪应返回启动中错误, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "chat-sidecar.want")); err != nil {
+		t.Fatalf("want 标记应被写入: %v", err)
+	}
+}
+
+// TestChatBuiltinReady：状态文件指向 healthy sidecar（httptest 伪装
+// /health + /v1/chat/completions）时，按 openai 协议正常对话。
+func TestChatBuiltinReady(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": "pong"}}},
+		})
+	}))
+	defer srv.Close()
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	p, _ := strconv.Atoi(port)
+	st := chatsc.State{PID: 1, Port: p, ModelID: "qwen3-1.7b", StartedAt: time.Now(), LastUsed: time.Now()}
+	data, _ := json.Marshal(st)
+	if err := os.WriteFile(filepath.Join(home, "chat-sidecar.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := New(config.LLMProfile{Kind: "builtin", Model: "qwen3-1.7b"}, 0)
+	rep, err := c.Chat(context.Background(), "sys", "usr", 100)
+	if err != nil || rep.Text != "pong" {
+		t.Fatalf("got (%q, %v)", rep.Text, err)
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Fatalf("path = %q（应走 openai 协议）", gotPath)
 	}
 }
 
