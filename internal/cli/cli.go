@@ -832,7 +832,12 @@ func Propose(args []string, stdout, stderr io.Writer) int {
 	// 同域候选提示（TencentDB A6 形式）：给新草稿召回 top-N 同域条目展示给
 	// 审批者，不做自动合并裁决——人审闸门不变。纯关键词检索（nil 向量，
 	// 不调 embedding）；分支未知传空串（分支过滤恒等）；失败仅警告不影响主流程。
-	cands, _, qerr := db.QueryExBranch(retrieve.Terms(*title+" "+sum), nil, pc.Config.Retrieve, "", nil)
+	// 同域候选提示是召回导向（误报仅多一行建议，人审闸门不变），覆盖度准入
+	// （为注入/搜索精度设计）在此不适用——CJK 标题查询会被误杀（实证：
+	// TestProposeShowsSimilarEntries）。
+	simCfg := pc.Config.Retrieve
+	simCfg.Coverage.Enabled = false
+	cands, _, qerr := db.QueryExBranch(retrieve.Terms(*title+" "+sum), nil, simCfg, "", nil)
 	if qerr != nil {
 		fmt.Fprintln(stderr, qerr)
 	} else if len(cands) > 0 {
