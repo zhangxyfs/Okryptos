@@ -83,7 +83,7 @@ public:
 
   double hoverScale() const override { return 1.14; }  // 原型 .nx.hot scale(1.14)
   double hoverPush() const override { return 0; }
-  double cardRadius(int, int) const override { return 54; }  // 原型 RADII nixie
+  double cardRadius(int, int) const override { return 20; }  // 卡片部分压条目（用户裁决，对齐 wave/level 观感；原型 RADII nixie=54 不压）
 
   void drawItems(ID2D1DeviceContext* dc, const DrawContext& ctx) const override {
     if (!dc || !ctx.geom || !ctx.items || !ctx.material || !ctx.brush ||
