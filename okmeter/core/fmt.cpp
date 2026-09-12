@@ -28,8 +28,8 @@ std::string fmtExact(int64_t v) {
 std::string fmtYi(int64_t v) {
   if (v < 0) v = 0;
   char buf[24];
-  if (v >= 100000000) { std::snprintf(buf, sizeof buf, "%.2f亿", v / 1e8); return buf; }
-  if (v >= 10000)     { std::snprintf(buf, sizeof buf, "%.1f万", v / 1e4); return buf; }
+  if (v >= 100000000) { std::snprintf(buf, sizeof buf, "%.4f亿", v / 1e8); return buf; }
+  if (v >= 10000)     { std::snprintf(buf, sizeof buf, "%.2f万", v / 1e4); return buf; }
   std::snprintf(buf, sizeof buf, "%lld", (long long)v);
   return buf;
 }
