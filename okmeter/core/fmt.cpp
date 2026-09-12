@@ -27,11 +27,19 @@ std::string fmtExact(int64_t v) {
 
 std::string fmtYi(int64_t v) {
   if (v < 0) v = 0;
-  char buf[24];
-  if (v >= 100000000) { std::snprintf(buf, sizeof buf, "%.4f亿", v / 1e8); return buf; }
-  if (v >= 10000)     { std::snprintf(buf, sizeof buf, "%.2f万", v / 1e4); return buf; }
-  std::snprintf(buf, sizeof buf, "%lld", (long long)v);
-  return buf;
+  char digits[24];
+  std::snprintf(digits, sizeof digits, "%lld", (long long)v);
+  std::string d = digits;
+  // 单位只作分隔：亿=右数 8 位、万=右数 4 位处插小数点，全位数保留，尾部零修剪
+  const char* unit = nullptr;
+  size_t cut = 0;
+  if (v >= 100000000 && d.size() > 8) { unit = "亿"; cut = d.size() - 8; }
+  else if (v >= 10000 && d.size() > 4) { unit = "万"; cut = d.size() - 4; }
+  if (!unit) return d;
+  std::string out = d.substr(0, cut) + "." + d.substr(cut);
+  while (!out.empty() && out.back() == '0') out.pop_back();  // 21.00000000 → 21
+  if (!out.empty() && out.back() == '.') out.pop_back();
+  return out + unit;
 }
 
 std::string relTime(int64_t thenMs, int64_t nowMs) {
