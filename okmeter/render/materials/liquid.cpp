@@ -97,7 +97,7 @@ public:
 
     // 中心项光晕环（原型 .orb.center）
     const D2D1_ELLIPSE ball = D2D1::Ellipse(c, r, r);
-    if (ctx.isCenter) {
+    if (ctx.isCenter && !glassfx::isPill(hw, r)) {  // 中心光晕环仅圆项（原型 .orb.center 专属）
       ctx.brush->SetColor(glassfx::accentC(0.10f * dim));
       glassfx::drawShape(dc, c, hw, r, ctx.brush, 6.0f, 3.0f, ctx.cornerR);
     }

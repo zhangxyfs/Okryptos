@@ -63,7 +63,7 @@ public:
     }
 
     // 中心项：半径+3 accent 10% 光晕环（原型 box-shadow 0 0 0 3px accent 10%）
-    if (ctx.isCenter) {
+    if (ctx.isCenter && !glassfx::isPill(hw, r)) {  // 中心光晕环仅圆项（原型 .orb.center 专属）
       ctx.brush->SetColor(D2D1::ColorF(kAccent, 0.10f * dim));
       glassfx::drawShape(dc, c, hw, r, ctx.brush, 6.0f, 3.0f, ctx.cornerR);
     }
