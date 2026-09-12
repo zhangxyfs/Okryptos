@@ -39,7 +39,6 @@ public:
     return g;
   }
 
-  double hoverScale() const override { return 1.07; }  // 原型 .lvl.hot scale(1.07)
   double hoverPush() const override { return 0; }      // 块间距已大，推挤只会抖
   double cardRadius(int, int) const override { return 20; }  // 原型 RADII level
 

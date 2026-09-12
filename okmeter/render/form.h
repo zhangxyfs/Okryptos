@@ -71,7 +71,7 @@ public:
   virtual void tick(double dt, double e) { (void)dt; (void)e; }
   // 有进行中的形态动画（罗盘收缩态旋转）需持续重绘时返回 true（默认 false）
   virtual bool wantsTick() const { return false; }
-  virtual double hoverScale() const { return 1.34; }  // 悬停放大（胶囊 1.08 / 罗盘 1.22）
+  virtual double hoverScale() const { return 1.0; }  // 用户裁决：悬停不缩放（反馈=他项降暗）
   virtual double hoverPush() const { return 10; }     // 邻项让位 px（罗盘 0：环形不推挤）
   virtual double hoverDimShrink() const { return 1.0; }  // 非悬停项回缩（原型 .orb.dim scale(.9) 仅球体弧线；块状项不回缩）
   virtual double hoverDimOpacity() const { return 0.55; }  // 非悬停项降不透明度（原型 .dim .55；球体 .6）

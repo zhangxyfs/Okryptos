@@ -41,7 +41,6 @@ public:
     return g;
   }
 
-  double hoverScale() const override { return 1.07; }  // 原型 .wv.hot scale(1.07)
   double hoverPush() const override { return 0; }
   double cardRadius(int, int) const override { return 20; }  // 原型 RADII wave
 

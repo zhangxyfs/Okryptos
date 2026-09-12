@@ -19,7 +19,6 @@ public:
     return layoutCapsule(n, screenH, edge);
   }
 
-  double hoverScale() const override { return 1.08; }  // 原型 .cap.hot scale(1.08)
   double hoverPush() const override { return 0; }      // 胶囊间距已大，推挤邻项只会抖
   double cardRadius(int, int) const override { return 22; }  // 原型 RADII capsule
 

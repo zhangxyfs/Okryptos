@@ -31,7 +31,6 @@ public:
   // 收缩态旋转需持续重绘（展开静止后停帧）
   bool wantsTick() const override { return lastE_ < 0.999; }
 
-  double hoverScale() const override { return 1.22; }  // 原型 .sat.hot scale(1.22)
   double hoverPush() const override { return 0; }      // 环形排布不推挤邻项
   // 原型 RADII：罗盘中心 43 / 卫星 23
   double cardRadius(int idx, int mid) const override { return idx == mid ? 43 : 23; }
