@@ -28,20 +28,20 @@ type Model struct {
 // 2026-09-12 hf-mirror 实测钉死；变更新增条目即可，无需改代码。
 var Models = []Model{
 	{
-		ID: "qwen3-1.7b-q8", Label: "Qwen3-1.7B · Q8_0（首选 · 1.8GB · 中文强）",
+		ID: "qwen3-1.7b-q8", Label: "Qwen3-1.7B · Q8_0（首选 · 1.8GB · 内存≈2.3GB · 中文强）",
 		Repo: "Qwen/Qwen3-1.7B-GGUF", File: "Qwen3-1.7B-Q8_0.gguf",
 		Size: 1834426016, SHA256: "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a",
 		Thinking: true,
 	},
 	{
-		ID: "qwen3-0.6b-q8", Label: "Qwen3-0.6B · Q8_0（最省 · 640MB · 老机器可跑）",
+		ID: "qwen3-0.6b-q8", Label: "Qwen3-0.6B · Q8_0（最省 · 640MB · 内存≈1GB · 老机器可跑）",
 		Repo: "Qwen/Qwen3-0.6B-GGUF", File: "Qwen3-0.6B-Q8_0.gguf",
 		Size: 639446688, SHA256: "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
 		Thinking: true,
 	},
 	{
 		// 用 unsloth 仓：Qwen 官方未发布 4B-Instruct-2507 的 GGUF。
-		ID: "qwen3-4b-instruct-2507-q4km", Label: "Qwen3-4B-Instruct-2507 · Q4_K_M（最稳 · 2.5GB · 非思考版）",
+		ID: "qwen3-4b-instruct-2507-q4km", Label: "Qwen3-4B-Instruct-2507 · Q4_K_M（最稳 · 2.5GB · 内存≈3GB · 非思考版）",
 		Repo: "unsloth/Qwen3-4B-Instruct-2507-GGUF", File: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
 		Size: 2497281120, SHA256: "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
 		Thinking: false,
