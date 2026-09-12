@@ -57,6 +57,44 @@ func TestDesiredChatModel(t *testing.T) {
 	if desiredChatModel(cfg) != nil {
 		t.Fatal("未知清单 id 应 nil")
 	}
+
+	// 识别意图槽（active_filter）独占 builtin：普通槽为空时也应解析到该模型，
+	// 否则 janitor desired=nil，sidecar 永不拉起（与 filterx 解析顺序对齐）。
+	cfg = config.Config{}
+	cfg.LLM.ActiveFilter = "意图"
+	cfg.LLM.Profiles = []config.LLMProfile{{Name: "意图", Kind: "builtin", Model: "qwen3-1.7b-q8", Filter: true}}
+	m = desiredChatModel(cfg)
+	if m == nil || m.ID != "qwen3-1.7b-q8" {
+		t.Fatalf("filter 槽独占 builtin 应解析到模型, got %+v", m)
+	}
+
+	// 普通槽挂 openai + active_filter 挂 builtin：应返回 builtin 模型
+	// （filterx 优先序：active_filter 优先于 active）。
+	cfg = config.Config{}
+	cfg.LLM.Active = "普通"
+	cfg.LLM.ActiveFilter = "意图"
+	cfg.LLM.Profiles = []config.LLMProfile{
+		{Name: "普通", Kind: "openai", Model: "gpt-x", BaseURL: "h"},
+		{Name: "意图", Kind: "builtin", Model: "qwen3-1.7b-q8", Filter: true},
+	}
+	m = desiredChatModel(cfg)
+	if m == nil || m.ID != "qwen3-1.7b-q8" {
+		t.Fatalf("active_filter 应优先于 active, got %+v", m)
+	}
+
+	// filter 槽挂 ollama（非 builtin）+ 普通槽挂 builtin：应回退到普通槽的
+	// builtin 模型——两槽谁挂 builtin 就维持谁，否则条目优化永久"启动中"。
+	cfg = config.Config{}
+	cfg.LLM.Active = "普通"
+	cfg.LLM.ActiveFilter = "意图"
+	cfg.LLM.Profiles = []config.LLMProfile{
+		{Name: "普通", Kind: "builtin", Model: "qwen3-1.7b-q8"},
+		{Name: "意图", Kind: "ollama", Model: "qwen3", Filter: true},
+	}
+	m = desiredChatModel(cfg)
+	if m == nil || m.ID != "qwen3-1.7b-q8" {
+		t.Fatalf("filter 槽非 builtin 时应回退普通槽 builtin, got %+v", m)
+	}
 }
 
 // TestJanitorStartsSidecar：全局配置 active=内置 + 假模型就绪 → janitor 一轮内拉起。

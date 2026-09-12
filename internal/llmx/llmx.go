@@ -36,17 +36,22 @@ type Client struct {
 // New 构造客户端；timeout<=0 钳 30s（生成比 embed 慢，沿用 embedx 的
 // 零值钳制教训但阈值不同）。kind 不做校验（任何 kind 都返回非 nil 客户端），
 // 非法 kind 在 Chat 的 default 分支报错（调用方校验兜底）。
-// kind=builtin 时从 chatsc 状态文件发现端口：healthy → 按 openai 协议走
-// （healthy 即视为一次使用，Touch 更新 last_used 防 daemon 空闲回收——
-// embedx 是在成功调用后 Touch，此处简化为 New 内 Touch 一次）；未就绪 →
-// RequestStart 写 want 请求拉起，client 标记 notReady。契约不变：永不返回 nil。
+// kind=builtin 时从 chatsc 状态文件发现端口：healthy 且 model_id 与
+// profile.Model 一致 → 按 openai 协议走（healthy 即视为一次使用，Touch 更新
+// last_used 防 daemon 空闲回收——embedx 是在成功调用后 Touch，此处简化为
+// New 内 Touch 一次）；未就绪或模型身份不匹配 → RequestStart 写 want 请求
+// 拉起，client 标记 notReady。契约不变：永不返回 nil。
 func New(p config.LLMProfile, timeout time.Duration) *Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
 	var notReady error
 	if p.Kind == "builtin" {
-		if st := chatsc.LoadState(); st != nil && st.Healthy() {
+		// healthy 之外还要校验模型身份：sidecar 跑着的模型与 profile.Model
+		// 不同（如两槽各挂不同 builtin，janitor 只维持过滤槽那个）时不能
+		// 直接对话——那是"跑着 A 模型却按 B profile 对话"的静默错配；
+		// 走 notReady 分支，RequestStart 让 daemon 换型重拉。
+		if st := chatsc.LoadState(); st != nil && st.Healthy() && st.ModelID == p.Model {
 			p.BaseURL = st.BaseURL()
 			p.Kind = "openai"
 			chatsc.Touch()

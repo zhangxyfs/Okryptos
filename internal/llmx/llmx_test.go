@@ -303,6 +303,35 @@ func TestChatBuiltinReady(t *testing.T) {
 	}
 }
 
+// TestChatBuiltinModelMismatch：状态文件 healthy 但 model_id 与 profile.Model
+// 不同（跑着 A 模型却按 B profile 对话的静默错配）时，应走 notReady 分支：
+// Chat 返回"启动中"错误且 want 落盘（RequestStart 让 daemon 换型重拉）。
+func TestChatBuiltinModelMismatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": "pong"}}},
+		})
+	}))
+	defer srv.Close()
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	p, _ := strconv.Atoi(port)
+	st := chatsc.State{PID: 1, Port: p, ModelID: "别的模型", StartedAt: time.Now(), LastUsed: time.Now()}
+	data, _ := json.Marshal(st)
+	if err := os.WriteFile(filepath.Join(home, "chat-sidecar.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := New(config.LLMProfile{Kind: "builtin", Model: "qwen3-1.7b"}, 0)
+	if _, err := c.Chat(context.Background(), "s", "u", 10); err == nil ||
+		!strings.Contains(err.Error(), "启动中") {
+		t.Fatalf("模型身份不匹配应返回启动中错误, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "chat-sidecar.want")); err != nil {
+		t.Fatalf("want 标记应被写入: %v", err)
+	}
+}
+
 func TestChatOllama(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
