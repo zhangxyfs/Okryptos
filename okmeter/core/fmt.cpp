@@ -39,7 +39,7 @@ std::string fmtYi(int64_t v) {
   std::string out = d.substr(0, cut) + "." + d.substr(cut);
   while (!out.empty() && out.back() == '0') out.pop_back();  // 21.00000000 → 21
   if (!out.empty() && out.back() == '.') out.pop_back();
-  return out + unit;
+  return out + " " + unit;  // 数字与单位间留空格
 }
 
 std::string relTime(int64_t thenMs, int64_t nowMs) {

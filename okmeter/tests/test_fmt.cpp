@@ -36,8 +36,8 @@ TEST(fmt_yi_units) {
   CHECK(fmtYi(0) == "0");
   CHECK(fmtYi(999) == "999");
   CHECK(fmtYi(9999) == "9999");
-  CHECK(fmtYi(10000) == "1万");
-  CHECK(fmtYi(906288) == "90.6288万");
-  CHECK(fmtYi(2103434288) == "21.03434288亿");
-  CHECK(fmtYi(318345935) == "3.18345935亿");
+  CHECK(fmtYi(10000) == "1 万");
+  CHECK(fmtYi(906288) == "90.6288 万");
+  CHECK(fmtYi(2103434288) == "21.03434288 亿");
+  CHECK(fmtYi(318345935) == "3.18345935 亿");
 }
