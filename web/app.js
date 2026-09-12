@@ -95,6 +95,10 @@ const I18N = {
     mirrorHf:"hf-mirror 镜像（国内推荐）", mirrorOfficial:"huggingface 官方", downloaded:"（已下载）",
     fOlUrl:"服务地址", keySaved:"已保存（留空保持不变）", eGlobal:"全局",
     kindOpenai:"OpenAI 兼容（/chat/completions）", kindAnthropic:"Anthropic 兼容（/v1/messages）",
+    kindOllama:"Ollama（本地）",
+    eActiveFilter:"使用中·意图",
+    lFilterChk:"识别意图（检索过滤专用）",
+    lFilterHelp:"勾选后此配置的「使用中」独立于普通 LLM：专用于每轮提问前的检索相关性过滤（自动调用、按次计费/占本机资源），max_tokens 保持 0。在线低价模型或本地小模型均可；推荐本地模型（ollama）：qwen3:1.7b（1.4GB，首选）/ qwen3:0.6b（523MB，最省）/ qwen3:4b-instruct-2507（2.5GB，非思考版输出最稳）。",
     tagOpenai:"OpenAI 兼容", tagAnthropic:"Anthropic 兼容",
     fTemp:"temperature（高级，留空 = 不传）", fMaxTokens:"max_tokens（高级，0 = 默认）",
     eTitle:"语义检索（embedding）", eDesc:"混合检索的语义通道；不配置任何服务时退化为纯关键词检索",
@@ -318,6 +322,10 @@ const I18N = {
     mirrorHf:"hf-mirror (recommended in CN)", mirrorOfficial:"huggingface official", downloaded:" (downloaded)",
     fOlUrl:"Service URL", keySaved:"Saved (leave empty to keep)", eGlobal:"Global",
     kindOpenai:"OpenAI-compatible (/chat/completions)", kindAnthropic:"Anthropic-compatible (/v1/messages)",
+    kindOllama:"Ollama (local)",
+    eActiveFilter:"Active · Intent",
+    lFilterChk:"Intent recognition (retrieval filter only)",
+    lFilterHelp:"When checked, this profile's \"Active\" is independent of the general LLM: used solely for retrieval relevance filtering before each question (called automatically; billed per call or uses local resources) — keep max_tokens at 0. A low-cost online model or a small local model both work; recommended local models (ollama): qwen3:1.7b (1.4GB, best pick) / qwen3:0.6b (523MB, smallest) / qwen3:4b-instruct-2507 (2.5GB, non-thinking, most stable output).",
     tagOpenai:"OpenAI-compat", tagAnthropic:"Anthropic-compat",
     fTemp:"temperature (advanced, empty = not sent)", fMaxTokens:"max_tokens (advanced, 0 = default)",
     eTitle:"Semantic retrieval (embedding)", eDesc:"The semantic channel of hybrid retrieval; degrades to keyword-only when no service is configured",
@@ -4200,8 +4208,8 @@ function renderPrefs(){
     } else if(PREFS.llm){
       const cur = (PREFS.llm.profiles||[]).find(p=>p.name===PREFS.llm.active);
       if(cur){
-        sumBody.innerHTML = '<span class="badge-type t-'+(cur.kind==="anthropic"?"pitfall":"rule")+'">'
-          + esc(cur.kind==="anthropic"?t("tagAnthropic"):t("tagOpenai")) + '</span>'
+        sumBody.innerHTML = '<span class="badge-type t-'+(cur.kind==="anthropic"?"pitfall":cur.kind==="ollama"?"note":"rule")+'">'
+          + esc(cur.kind==="anthropic"?t("tagAnthropic"):cur.kind==="ollama"?t("tagOllama"):t("tagOpenai")) + '</span>'
           + ' <b>'+esc(cur.name)+'</b> <span class="mono">'+esc((cur.model||"")+(cur.base_url?" @ "+cur.base_url:""))+'</span>';
       } else {
         sumBody.innerHTML = '<span class="muted">'+t("lNone")+'</span>';
@@ -4710,14 +4718,16 @@ function renderEmbModal(){
   return mask;
 }
 
-/* ---------- LLM 服务管理弹窗：与 embedding 弹窗同构。kind 两档（OpenAI/Anthropic 兼容），
+/* ---------- LLM 服务管理弹窗：与 embedding 弹窗同构。kind 三档（OpenAI/Anthropic 兼容 + Ollama 本地），
+   双「使用中」槽位：普通槽 + 识别意图槽（filter 标记的 profile 专用检索过滤，同一 profile 两槽互斥）；
    temperature/max_tokens 为高级参数（留空/0 = 不传）；编辑表单内带「测试连接」（真实调
    /api/llm/test，成功显示实测耗时，失败显示后端错误）。确定即生效。 ---------- */
 function openLlmModal(){
   const l = PREFS.llm || {};
-  llmDraft = { active:l.active||"",
+  llmDraft = { active:l.active||"", activeFilter:l.active_filter||"",
     profiles:(l.profiles||[]).map(p=>({ name:p.name, kind:p.kind, base:p.base_url||"",
-      model:p.model||"", key:"", temperature:p.temperature||"", maxTokens:p.max_tokens||0 })) };
+      model:p.model||"", key:"", temperature:p.temperature||"", maxTokens:p.max_tokens||0,
+      filter:!!p.filter })) };
   llmEdit = -1; llmForm = null; llmErr = ""; llmModal = true; render();
 }
 function closeLlmModal(){
@@ -4730,7 +4740,7 @@ async function llmApply(){
     await api("/api/llm/profile", { method:"POST", body:{
       name:p.name.trim(), kind:p.kind, base_url:String(p.base||"").trim(), model:String(p.model||"").trim(),
       api_key:p.key||"", temperature:String(p.temperature||"").trim(), max_tokens:p.maxTokens||0,
-      activate:false } });   // api_key 空/掩码 = 同名保留旧 key（后端收口）
+      filter:!!p.filter, activate:false } });   // api_key 空/掩码 = 同名保留旧 key（后端收口）
   }
   const keep = {}; draft.profiles.forEach(p=>{ keep[p.name]=true; });
   for(const sp of old.profiles||[]){
@@ -4741,7 +4751,12 @@ async function llmApply(){
   let serverActive = old.active || "";
   if(serverActive && !keep[serverActive]) serverActive = "";
   if(draft.active !== serverActive){
-    await api("/api/llm/active", { method:"POST", body:{ name:draft.active } });   // 空串 = 停用
+    await api("/api/llm/active", { method:"POST", body:{ name:draft.active, slot:"general" } });   // 空串 = 停用
+  }
+  let serverFilter = old.active_filter || "";
+  if(serverFilter && !keep[serverFilter]) serverFilter = "";
+  if(draft.activeFilter !== serverFilter){
+    await api("/api/llm/active", { method:"POST", body:{ name:draft.activeFilter, slot:"filter" } });
   }
 }
 function renderLlmModal(){
@@ -4750,20 +4765,27 @@ function renderLlmModal(){
   m.appendChild(Object.assign(el("h3"),{textContent:t("lTitle")+" · "+t("eProfiles")}));
 
   llmDraft.profiles.forEach((p,idx)=>{
-    const row = el("div","prof"+(llmDraft.active===p.name?" sel":""));
+    const row = el("div","prof"+(llmDraft.active===p.name || llmDraft.activeFilter===p.name?" sel":""));
     row.style.cursor = "default";
     const info = el("span","info");
-    info.innerHTML = '<span class="badge-type t-'+(p.kind==="anthropic"?"pitfall":"rule")+'">'
-      + esc(p.kind==="anthropic"?t("tagAnthropic"):t("tagOpenai")) + '</span>'
+    info.innerHTML = '<span class="badge-type t-'+(p.kind==="anthropic"?"pitfall":p.kind==="ollama"?"note":"rule")+'">'
+      + esc(p.kind==="anthropic"?t("tagAnthropic"):p.kind==="ollama"?t("tagOllama"):t("tagOpenai")) + '</span>'
       + ' <b>'+esc(p.name)+'</b> <span class="mono">'+esc(p.model||"")+ (p.base?" @ "+esc(p.base):"") +'</span>';
     row.appendChild(info);
     const acts = el("span");
     acts.style.cssText = "margin-left:auto;display:flex;gap:6px;flex:none";
-    if(llmDraft.active===p.name){
-      acts.appendChild(Object.assign(el("span","chip on"),{textContent:t("eActive")}));
+    const inGeneral = llmDraft.active===p.name, inFilter = llmDraft.activeFilter===p.name;
+    if(inGeneral || inFilter){
+      acts.appendChild(Object.assign(el("span","chip on"),
+        {textContent:inFilter?t("eActiveFilter"):t("eActive")}));
     } else {
       const sa = el("button","btn"); sa.textContent = t("eSetActive"); sa.style.padding="2px 10px";
-      sa.onclick = ()=>{ llmDraft.active = p.name; render(); };
+      sa.onclick = ()=>{
+        // 按 profile 的识别意图标记落槽；同一 profile 两槽互斥
+        if(p.filter){ llmDraft.activeFilter = p.name; if(llmDraft.active===p.name) llmDraft.active = ""; }
+        else { llmDraft.active = p.name; if(llmDraft.activeFilter===p.name) llmDraft.activeFilter = ""; }
+        render();
+      };
       acts.appendChild(sa);
     }
     const ed = el("button","btn"); ed.textContent = t("eEdit"); ed.style.padding="2px 10px";
@@ -4772,6 +4794,7 @@ function renderLlmModal(){
     const del = el("button","btn btn-danger"); del.textContent = t("eDel"); del.style.padding="2px 10px";
     del.onclick = ()=>{
       if(llmDraft.active===p.name) llmDraft.active = "";
+      if(llmDraft.activeFilter===p.name) llmDraft.activeFilter = "";
       llmDraft.profiles.splice(idx,1);
       if(llmEdit===idx){ llmEdit=-1; llmForm=null; }
       render();
@@ -4788,20 +4811,34 @@ function renderLlmModal(){
     const kindRow = el("div","prow");
     kindRow.appendChild(Object.assign(el("span","k"),{textContent:t("fType")}));
     const sel = el("select","pselect");
-    [["openai",t("kindOpenai")],["anthropic",t("kindAnthropic")]].forEach(([v,label])=>{
+    [["openai",t("kindOpenai")],["anthropic",t("kindAnthropic")],["ollama",t("kindOllama")]].forEach(([v,label])=>{
       const op=el("option"); op.value=v; op.textContent=label; sel.appendChild(op);
     });
     sel.value = llmForm.kind||"openai";
-    sel.onchange = ()=>{ llmForm.kind = sel.value; };
+    sel.onchange = ()=>{ llmForm.kind = sel.value; render(); };
     kindRow.appendChild(sel);
     m.appendChild(kindRow);
-    m.appendChild(prow(t("fBase"), ptext(llmForm.base||"", v=>{ llmForm.base=v; }, "300px")));
+    const baseIn = ptext(llmForm.base||"", v=>{ llmForm.base=v; }, "300px");
+    if(llmForm.kind==="ollama") baseIn.placeholder = "http://localhost:11434（留空默认）";
+    m.appendChild(prow(t("fBase"), baseIn));
     m.appendChild(prow(t("fModel"), ptext(llmForm.model||"", v=>{ llmForm.model=v; }, "300px")));
-    const keyIn = ptext(llmForm.key||"", v=>{ llmForm.key=v; }, "300px");
-    keyIn.placeholder = llmEdit>=0 ? t("keySaved") : "api_key";
-    m.appendChild(prow(t("fKey"), keyIn));
+    if(llmForm.kind!=="ollama"){
+      const keyIn = ptext(llmForm.key||"", v=>{ llmForm.key=v; }, "300px");
+      keyIn.placeholder = llmEdit>=0 ? t("keySaved") : "api_key";
+      m.appendChild(prow(t("fKey"), keyIn));
+    }
     m.appendChild(prow(t("fTemp"), ptext(llmForm.temperature||"", v=>{ llmForm.temperature=v; }, "120px")));
     m.appendChild(prow(t("fMaxTokens"), pnum(llmForm.maxTokens||0,0,128000,v=>{ llmForm.maxTokens=v; })));
+    const fchk = el("input"); fchk.type = "checkbox"; fchk.checked = !!llmForm.filter;
+    fchk.onchange = ()=>{ llmForm.filter = fchk.checked; render(); };
+    const fchkRow = el("div","prow");
+    fchkRow.appendChild(Object.assign(el("span","k"),{textContent:t("lFilterChk")}));
+    fchkRow.appendChild(fchk);
+    m.appendChild(fchkRow);
+    if(llmForm.filter){
+      const help = el("div","small muted"); help.textContent = t("lFilterHelp");
+      m.appendChild(help);
+    }
     const frow = el("div","prow");
     frow.appendChild(el("span","k"));
     const test = el("button","btn");
