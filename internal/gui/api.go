@@ -104,6 +104,7 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/llm/test", h.apiLLMTest)
 	api("POST /api/llm/download", h.apiLLMDownload)
 	api("POST /api/llm/download/cancel", h.apiLLMDownloadCancel)
+	api("POST /api/llm/models-dir", h.apiLLMModelsDirSet)
 	api("POST /api/entry/optimize", h.apiEntryOptimize)
 	api("GET /api/project/branch-info", h.apiProjectBranchInfo)
 	api("GET /api/project/readme", h.apiProjectReadme)

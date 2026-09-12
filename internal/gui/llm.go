@@ -106,6 +106,7 @@ func (h *Handler) apiLLMGet(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"active": cfg.LLM.Active, "active_filter": cfg.LLM.ActiveFilter, "profiles": profiles,
 		"builtin_models": builtinModels, "chat_download": h.chatDlSnapshot(),
+		"models_dir": modelsDir, "models_dir_default": embedsidecar.DefaultModelsDir(),
 	})
 }
 
@@ -303,6 +304,31 @@ func (h *Handler) apiLLMTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// apiLLMModelsDirSet：设置内置模型目录（body {path}；空串=恢复默认）。
+// chat 与 embedding 共用同一目录（[embedding] models_dir 键），本端点只是同一设置的
+// LLM 侧入口：转调 setupx.SaveEmbeddingModelsDir，行为镜像 apiEmbeddingModelsDirSet
+// （非空先 MkdirAll 校验，失败 400；已有模型文件不随迁）。
+func (h *Handler) apiLLMModelsDirSet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	p := strings.TrimSpace(req.Path)
+	if p != "" {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			writeErr(w, http.StatusBadRequest, "目录不可用: "+err.Error())
+			return
+		}
+	}
+	if err := setupx.SaveEmbeddingModelsDir(p); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.apiLLMGet(w, r)
 }
 
 // ---------- builtin 模型下载（chatx 清单，dlJob 模式镜像 embedding 侧） ----------

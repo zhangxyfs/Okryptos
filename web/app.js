@@ -105,6 +105,7 @@ const I18N = {
     eTitle:"语义检索（embedding）", eDesc:"混合检索的语义通道；不配置任何服务时退化为纯关键词检索",
     eNone:"未配置（仅关键词检索）", eDir:"内置模型目录", eActive:"使用中",
     lTitle:"模型配置（LLM）", lDesc:"生成场景（条目优化等）调用的大模型服务；temperature 留空 = 不传",
+    lDirShared:"与语义检索（embedding）共用此目录，改动对两者同时生效",
     lTest:"测试连接", lTesting:"测试中…", lTestOk:"✓ 连通（{ms}ms）",
     lNone:"未配置（✨ 优化不可用）",
     hTitle:"Hook 超时", hDesc:"写入各 agent hooks 的超时秒数。2026-08-04 曾发生 Windows 高负载下 5s 超时致 PostToolUse 整会话静默丢失，故默认 10", hSec:"超时（秒）",
@@ -333,6 +334,7 @@ const I18N = {
     eTitle:"Semantic retrieval (embedding)", eDesc:"The semantic channel of hybrid retrieval; degrades to keyword-only when no service is configured",
     eNone:"Not configured (keyword-only)", eDir:"Builtin models dir", eActive:"Active",
     lTitle:"Model config (LLM)", lDesc:"LLM services for generation tasks (entry polishing etc.); empty temperature = not sent",
+    lDirShared:"Shared with semantic retrieval (embedding) — changes apply to both",
     lTest:"Test connection", lTesting:"Testing…", lTestOk:"✓ Connected ({ms}ms)",
     lNone:"Not configured (✨ polish unavailable)",
     hTitle:"Hook timeout", hDesc:"Timeout seconds written into each agent's hooks. On 2026-08-04 a 5s timeout under Windows load silently dropped PostToolUse for an entire session — hence default 10", hSec:"Timeout (s)",
@@ -4734,6 +4736,7 @@ function renderEmbModal(){
 function openLlmModal(){
   const l = PREFS.llm || {};
   llmDraft = { active:l.active||"", activeFilter:l.active_filter||"",
+    dir:l.models_dir||"",
     profiles:(l.profiles||[]).map(p=>({ name:p.name, kind:p.kind, base:p.base_url||"",
       model:p.model||"", key:"", temperature:p.temperature||"", maxTokens:p.max_tokens||0,
       filter:!!p.filter })) };
@@ -4747,6 +4750,10 @@ function closeLlmModal(){
 }
 async function llmApply(){
   const draft = llmDraft, old = PREFS.llm || {};
+  const dir = String(draft.dir||"").trim();
+  if(dir !== String(old.models_dir||"").trim()){
+    await api("/api/llm/models-dir", { method:"POST", body:{ path:dir } });   // 与 embedding 共用同一目录键
+  }
   for(const p of draft.profiles){
     await api("/api/llm/profile", { method:"POST", body:{
       name:p.name.trim(), kind:p.kind, base_url:String(p.base||"").trim(), model:String(p.model||"").trim(),
@@ -4919,6 +4926,21 @@ function renderLlmModal(){
       stRow.appendChild(llmDlEl);
       m.appendChild(stRow);
       paintLlmDl();
+      // 全局段：模型目录（与 embedding 共用 [embedding] models_dir 键，同一设置的第二个入口）
+      const dirRow = el("div","prow");
+      dirRow.appendChild(Object.assign(el("span","k"),{textContent:t("eDir")}));
+      const dirIn = ptext(llmDraft.dir, v=>{ llmDraft.dir=v; }, "300px");
+      dirIn.placeholder = l0.models_dir_default || "";
+      dirRow.appendChild(dirIn);
+      const openDir = el("button","btn"); openDir.textContent = t("eDirOpen");
+      openDir.onclick = ()=>{
+        api("/api/setup/embedding/open-models-dir", { method:"POST" })   // 目录共用，直接复用 embedding 端点
+          .catch(err=>{ llmErr = err.message; render(); });
+      };
+      dirRow.appendChild(openDir);
+      m.appendChild(dirRow);
+      const dirNote = el("div","small muted"); dirNote.textContent = t("lDirShared");
+      m.appendChild(dirNote);
     } else {
       const baseIn = ptext(llmForm.base||"", v=>{ llmForm.base=v; }, "300px");
       if(llmForm.kind==="ollama") baseIn.placeholder = "http://localhost:11434（留空默认）";

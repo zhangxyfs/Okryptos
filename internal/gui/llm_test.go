@@ -861,3 +861,58 @@ func TestLLMDownloadEndpoints(t *testing.T) {
 		t.Fatalf("cancel 应 200, got %d", code)
 	}
 }
+
+// TestLLMModelsDir 模型目录（chat 与 embedding 共用 [embedding] models_dir 键，LLM 侧
+// 只是同一设置的第二个入口）：GET 回显当前值与默认值；POST 设目录后 GET 回显且落盘；
+// 空串恢复默认。
+func TestLLMModelsDir(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	var view struct {
+		ModelsDir        string `json:"models_dir"`
+		ModelsDirDefault string `json:"models_dir_default"`
+	}
+	_, data := do(t, "GET", srv.URL+"/api/llm", testToken, nil)
+	if err := json.Unmarshal(data, &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.ModelsDir == "" || view.ModelsDirDefault == "" || view.ModelsDir != view.ModelsDirDefault {
+		t.Fatalf("未配置时应回显 models_dir == models_dir_default（非空）: %+v", view)
+	}
+
+	// 设置自定义目录 → 200 + GET 回显 + 目录即创建 + 落盘 [embedding] models_dir
+	dir := filepath.Join(t.TempDir(), "models")
+	code, data := do(t, "POST", srv.URL+"/api/llm/models-dir", testToken, map[string]any{"path": dir})
+	if code != 200 {
+		t.Fatalf("models-dir set: %d %s", code, data)
+	}
+	_, data = do(t, "GET", srv.URL+"/api/llm", testToken, nil)
+	if err := json.Unmarshal(data, &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.ModelsDir != dir {
+		t.Fatalf("设置后应回显新目录: got %q want %q", view.ModelsDir, dir)
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatalf("设置即创建目录: %v", err)
+	}
+	cfgData, _ := os.ReadFile(filepath.Join(okHome, "config.toml"))
+	if !strings.Contains(string(cfgData), "models_dir") {
+		t.Fatalf("models_dir 应落盘（[embedding] 段）: %q", cfgData)
+	}
+
+	// 空串 = 恢复默认
+	code, data = do(t, "POST", srv.URL+"/api/llm/models-dir", testToken, map[string]any{"path": ""})
+	if code != 200 {
+		t.Fatalf("恢复默认应 200: %d %s", code, data)
+	}
+	_, data = do(t, "GET", srv.URL+"/api/llm", testToken, nil)
+	if err := json.Unmarshal(data, &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.ModelsDir != view.ModelsDirDefault {
+		t.Fatalf("空串应恢复默认: models_dir=%q default=%q", view.ModelsDir, view.ModelsDirDefault)
+	}
+}
