@@ -333,7 +333,7 @@ public:
     dc->FillRoundedRectangle(&rr, brush.Get());
     brush->SetColor(glassfx::ink(0.08f));
     dc->FillRoundedRectangle(&rr, brush.Get());
-    brush->SetColor(glassfx::ink(0.16f));
+    brush->SetColor(inkOn(lastLuma_, 0.16f));  // 亮底深描边
     dc->DrawRoundedRectangle(&rr, brush.Get(), 1.0f);
   }
 

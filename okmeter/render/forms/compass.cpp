@@ -52,7 +52,8 @@ public:
     const ItemGeom& hub = g.items[(size_t)ctx.mid];
     if (ensureDash(dc)) {
       ctx.brush->SetColor(
-          D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.13f * (float)(0.35 + 0.65 * e)));
+          inkOn(ctx.material ? ctx.material->backdropLuma() : 0.0f,
+                                   0.13f * (float)(0.35 + 0.65 * e)));
       const float R84 = 84.0f * (float)g.scale;  // 轨道半径 ×比例
       dc->DrawEllipse(D2D1::Ellipse(D2D1::Point2F((float)hub.x, (float)hub.y),
                                     R84, R84),

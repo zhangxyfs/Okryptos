@@ -25,7 +25,8 @@ D2D1_COLOR_F kHairline(float a) { return D2D1::ColorF(1.0f, 1.0f, 1.0f, a); }
 class DarkMaterial final : public IMaterial {
 public:
   std::string id() const override { return "dark"; }
-  float backdropLuma() const override { return lastLuma_; }
+  // 有效玻璃亮度：74% desk-deep 叠背景——亮背景下球体仍偏深，墨色恒浅
+  float backdropLuma() const override { return 0.74f * 0.08f + 0.26f * lastLuma_; }
 
   void onPointer(float x, float y) const override {
     px_ = x;

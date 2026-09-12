@@ -82,7 +82,7 @@ public:
         // 宽 max(4%, ratio)（原型 .cap .bar 同款）×比例
         const float bl = l + 13.0f * u, br = rgt - 13.0f * u;
         const float by = t + 2.0f * hh - 12.0f * u;  // 底 padding 9 + 条高 3
-        ctx.brush->SetColor(D2D1::ColorF(0.93f, 0.94f, 0.96f, 0.10f * dim));
+        ctx.brush->SetColor(inkOn(luma, 0.10f * dim));  // 轨道：亮底深色
         dc->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(bl, by, br, by + 3.0f * u),
                                                    1.5f * u, 1.5f * u),
                                  ctx.brush);
@@ -93,7 +93,7 @@ public:
         if ((int)i == ctx.mid)
           ctx.brush->SetColor(D2D1::ColorF(0x5FE0A8, dim));  // 原型 accent 绿
         else
-          ctx.brush->SetColor(D2D1::ColorF(0.93f, 0.94f, 0.96f, 0.52f * dim));
+          ctx.brush->SetColor(inkOn(luma, 0.52f * dim));  // 填充：亮底深色
         dc->FillRoundedRectangle(
             D2D1::RoundedRect(D2D1::RectF(bl, by, bl + fw, by + 3.0f * u),
                               1.5f * u, 1.5f * u),

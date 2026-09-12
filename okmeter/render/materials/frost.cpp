@@ -13,7 +13,8 @@ namespace {
 class FrostMaterial final : public IMaterial {
 public:
   std::string id() const override { return "frost"; }
-  float backdropLuma() const override { return lastLuma_; }
+  // 有效玻璃亮度：白 12% 提亮叠模糊背景——亮底下玻璃亮，需深墨
+  float backdropLuma() const override { return 0.12f + 0.88f * lastLuma_; }
 
   void onPointer(float x, float y) const override {
     px_ = x;
@@ -88,7 +89,7 @@ public:
     else if (ctx.isCenter)
       ctx.brush->SetColor(glassfx::accentC(0.60f * dim));
     else
-      ctx.brush->SetColor(glassfx::ink(0.26f * dim));
+      ctx.brush->SetColor(inkOn(backdropLuma(), 0.26f * dim));  // 亮底深描边
     glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f, 0.0f, ctx.cornerR);
   }
 
@@ -115,7 +116,7 @@ public:
     if (!dc || !g.connector || g.items.size() < 2) return;
     ComPtr<ID2D1SolidColorBrush> brush;
     if (FAILED(dc->CreateSolidColorBrush(D2D1::ColorF(0, 0), &brush))) return;
-    brush->SetColor(glassfx::ink(0.24f));
+    brush->SetColor(inkOn(backdropLuma(), 0.24f));  // 亮底深连线
     for (int pass = 0; pass < 2; ++pass)
       for (size_t i = 0; i + 1 < g.items.size(); ++i) {
         const D2D1_POINT_2F a{ (float)g.items[i].x, (float)g.items[i].y };

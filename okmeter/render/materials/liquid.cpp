@@ -195,7 +195,7 @@ public:
     else if (ctx.isCenter)
       ctx.brush->SetColor(glassfx::accentC(0.60f * dim));
     else
-      ctx.brush->SetColor(glassfx::ink(0.16f * dim));
+      ctx.brush->SetColor(inkOn(backdropLuma(), 0.16f * dim));  // 亮底深描边
     glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f, 0.0f, ctx.cornerR);
   }
 
@@ -222,7 +222,7 @@ public:
     if (!dc || !g.connector || g.items.size() < 2) return;
     ComPtr<ID2D1SolidColorBrush> brush;
     if (FAILED(dc->CreateSolidColorBrush(D2D1::ColorF(0, 0), &brush))) return;
-    brush->SetColor(glassfx::ink(0.22f));
+    brush->SetColor(inkOn(backdropLuma(), 0.22f));  // 亮底深连线
     for (int pass = 0; pass < 2; ++pass)
       for (size_t i = 0; i + 1 < g.items.size(); ++i) {
         const D2D1_POINT_2F a{ (float)g.items[i].x, (float)g.items[i].y };
