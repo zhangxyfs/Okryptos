@@ -16,7 +16,7 @@ public:
     (void)screenH;
     (void)edge;  // 环形布局左右缘对称，edge 只影响 tuck 烘焙方向
     // 展开态（e≈1）不旋转，位置回到基准角（悬停命中/卡锚定与绘制一致）
-    return layoutCompass(n, rot_ * (1.0 - lastE_));
+    return layoutCompass(n, rot_ * (1.0 - lastE_), screenH);
   }
 
   // 收缩态缓慢旋转（原型 spinLoop：rot += dt_ms * 0.0036° = 3.6°/s；展开静止）
@@ -51,9 +51,10 @@ public:
     if (ensureDash(dc)) {
       ctx.brush->SetColor(
           D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.13f * (float)(0.35 + 0.65 * e)));
+      const float R84 = 84.0f * (float)g.scale;  // 轨道半径 ×比例
       dc->DrawEllipse(D2D1::Ellipse(D2D1::Point2F((float)hub.x, (float)hub.y),
-                                    84.0f, 84.0f),
-                      ctx.brush, 1.0f, dash_.Get());
+                                    R84, R84),
+                      ctx.brush, 1.0f * (float)g.scale, dash_.Get());
     }
 
     for (size_t i = 0; i < n; ++i) {
@@ -83,30 +84,31 @@ public:
       if (i < ctx.items->size()) {
         const DockItem& di = (*ctx.items)[i];
         const float r = (float)it.r;
+        const float u = (float)g.scale;  // uiScale：内部偏移 ×比例
         const float luma = ctx.material ? ctx.material->backdropLuma() : 0.0f;
         if (isHub) {
           if (!di.value.empty()) {
             ctx.brush->SetColor(inkOn(luma, 0.93f * dim));
-            const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y - 18.0f, c.x + r, c.y + 2.0f);
+            const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y - 18.0f * u, c.x + r, c.y + 2.0f * u);
             dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.hubFmt,
                          &tr, ctx.brush);
           }
           if (!di.label.empty()) {
             ctx.brush->SetColor(inkOn(luma, 0.66f * dim));
-            const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y + 3.0f, c.x + r, c.y + 16.0f);
+            const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y + 3.0f * u, c.x + r, c.y + 16.0f * u);
             dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.labelFmt,
                          &tr, ctx.brush);
           }
         } else {
           if (!di.value.empty()) {
             ctx.brush->SetColor(inkOn(luma, 0.93f * dim));
-            const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y - 12.0f, c.x + r, c.y + 1.0f);
+            const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y - 12.0f * u, c.x + r, c.y + 1.0f * u);
             dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.satFmt,
                          &tr, ctx.brush);
           }
           if (!di.label.empty()) {
             ctx.brush->SetColor(inkOn(luma, 0.66f * dim));
-            const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y + 1.0f, c.x + r, c.y + 12.0f);
+            const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y + 1.0f * u, c.x + r, c.y + 12.0f * u);
             dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.labelFmt,
                          &tr, ctx.brush);
           }

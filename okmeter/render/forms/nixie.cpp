@@ -25,13 +25,13 @@ const char* kSegs[11] = {
 };
 
 void drawDigit(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* brush, char ch,
-               float x, float y, float dim, D2D1_COLOR_F lit, D2D1_COLOR_F unlit) {
+               float x, float y, float u, D2D1_COLOR_F lit, D2D1_COLOR_F unlit) {
   // 字模 15×26；横段厚 3 长 11，纵段厚 3 长 10（原型 .dg 同款定位）
   int idx = ch >= '0' && ch <= '9' ? ch - '0' : (ch == '.' ? 10 : -1);
   if (idx < 0) return;
   const char* segs = kSegs[idx];
-  const float T = 3.0f;   // 段厚
-  const float H = 10.0f;  // 纵段长
+  const float T = 3.0f * u;   // 段厚 ×比例
+  const float H = 10.0f * u;  // 纵段长 ×比例
   auto seg = [&](char s, D2D1_RECT_F r) {
     const bool on = strchr(segs, s) != nullptr;
     brush->SetColor(on ? lit : unlit);
@@ -45,17 +45,16 @@ void drawDigit(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* brush, char ch,
       dc->FillRoundedRectangle(D2D1::RoundedRect(r, rr, rr), brush);
   };
   if (ch == '.') {
-    seg('p', D2D1::RectF(x + 0.5f, y + 23.0f, x + 3.5f, y + 26.0f));
+    seg('p', D2D1::RectF(x + 0.5f * u, y + 23.0f * u, x + 3.5f * u, y + 26.0f * u));
     return;
   }
-  seg('a', D2D1::RectF(x + 2, y, x + 13, y + T));                 // 顶横
-  seg('g', D2D1::RectF(x + 2, y + 11.5f, x + 13, y + 14.5f));     // 中横
-  seg('d', D2D1::RectF(x + 2, y + 23, x + 13, y + 26));           // 底横
-  seg('f', D2D1::RectF(x, y + 2, x + T, y + 2 + H));              // 左上
-  seg('b', D2D1::RectF(x + 12, y + 2, x + 15, y + 2 + H));        // 右上
-  seg('e', D2D1::RectF(x, y + 14, x + T, y + 14 + H));            // 左下
-  seg('c', D2D1::RectF(x + 12, y + 14, x + 15, y + 14 + H));      // 右下
-  (void)dim;
+  seg('a', D2D1::RectF(x + 2 * u, y, x + 13 * u, y + T));                 // 顶横
+  seg('g', D2D1::RectF(x + 2 * u, y + 11.5f * u, x + 13 * u, y + 14.5f * u));  // 中横
+  seg('d', D2D1::RectF(x + 2 * u, y + 23 * u, x + 13 * u, y + 26 * u));   // 底横
+  seg('f', D2D1::RectF(x, y + 2 * u, x + T, y + 2 * u + H));              // 左上
+  seg('b', D2D1::RectF(x + 12 * u, y + 2 * u, x + 15 * u, y + 2 * u + H));  // 右上
+  seg('e', D2D1::RectF(x, y + 14 * u, x + T, y + 14 * u + H));            // 左下
+  seg('c', D2D1::RectF(x + 12 * u, y + 14 * u, x + 15 * u, y + 14 * u + H));  // 右下
 }
 
 class NixieForm final : public IForm {
@@ -63,19 +62,20 @@ public:
   std::string id() const override { return "nixie"; }
 
   DockGeom layout(int n, int screenH, const std::string& edge) const override {
-    (void)screenH;
     DockGeom g;
     if (n < 1) return g;
     const int mid = (n - 1) / 2;
-    g.w = kW;
-    g.h = 2 * (mid * kStep + 68);
+    const double s = uiScale(screenH);  // 比例法：原型值 × 屏高/1080
+    g.scale = s;
+    g.w = kW * s;
+    g.h = 2 * (mid * kStep * s + 68 * s);
     g.connector = false;  // 原型 nixie 隐藏 arcSvg
     g.items.resize((size_t)n);
     for (int i = 0; i < n; ++i) {
       g.items[(size_t)i].x = g.w / 2;
-      g.items[(size_t)i].y = g.h / 2 + (i - mid) * kStep;
-      g.items[(size_t)i].r = kItemHalfH;
-      g.items[(size_t)i].hw = kItemHalfW;
+      g.items[(size_t)i].y = g.h / 2 + (i - mid) * kStep * s;
+      g.items[(size_t)i].r = (float)(kItemHalfH * s);
+      g.items[(size_t)i].hw = (float)(kItemHalfW * s);
     }
     (void)edge;
     return g;
@@ -111,7 +111,7 @@ public:
       osc.dimmed = dim;
       osc.backdropDX = ctx.backdropDX;
       osc.backdropDY = ctx.backdropDY;
-      osc.cornerR = 12.0f;  // 块状角半径（原型 border-radius）
+      osc.cornerR = 12.0f * (float)g.scale;  // 块状角半径 ×比例
       if (isHot)
         dc->SetTransform(D2D1::Matrix3x2F::Scale((float)it.scale, (float)it.scale, c));
       ctx.material->drawOrbBack(dc, osc);
@@ -134,32 +134,33 @@ public:
         digits = x < 100 ? fmt1(x) : std::to_string((int)std::llround(x));
         unit = L"M";
       }
-      // 数码行居中：总宽 = 数字 15·N + 间隔 3·(N-1)（点号 4 宽）+ 单位 ~8
+      // 数码行居中：总宽 = 数字 15·N + 间隔 3·(N-1)（点号 4 宽）+ 单位 ~8（×比例）
+      const float u = (float)g.scale;
       float totalW = 0;
-      for (char ch : digits) totalW += ch == '.' ? 4.0f + 3.0f : 15.0f + 3.0f;
-      if (!digits.empty()) totalW -= 3.0f;
-      if (!unit.empty()) totalW += 4.0f + 8.0f;
+      for (char ch : digits) totalW += (ch == '.' ? 4.0f + 3.0f : 15.0f + 3.0f) * u;
+      if (!digits.empty()) totalW -= 3.0f * u;
+      if (!unit.empty()) totalW += (4.0f + 8.0f) * u;
       float x = c.x - totalW * 0.5f;
-      const float y = c.y - 19.0f;
+      const float y = c.y - 19.0f * u;
       const D2D1_COLOR_F lit = osc.isCenter
           ? D2D1::ColorF(kAccent, dim) : inkOn(luma, 0.5f * dim);
       const D2D1_COLOR_F unlit = inkOn(luma, 0.5f * 0.13f * dim);
       for (char ch : digits) {
-        const float dw = ch == '.' ? 4.0f : 15.0f;
-        drawDigit(dc, ctx.brush, ch, x, y, dim, lit, unlit);
-        x += dw + 3.0f;
+        const float dw = (ch == '.' ? 4.0f : 15.0f) * u;
+        drawDigit(dc, ctx.brush, ch, x, y, u, lit, unlit);
+        x += dw + 3.0f * u;
       }
       if (!unit.empty()) {
         ctx.brush->SetColor(osc.isCenter ? D2D1::ColorF(kAccent, dim)
                                          : inkOn(luma, 0.66f * dim));
-        const D2D1_RECT_F tr = D2D1::RectF(x + 1.0f, y + 12.0f, x + 12.0f, y + 26.0f);
+        const D2D1_RECT_F tr = D2D1::RectF(x + 1.0f * u, y + 12.0f * u, x + 12.0f * u, y + 26.0f * u);
         dc->DrawText(unit.c_str(), (UINT32)unit.size(), ctx.labelFmt, &tr, ctx.brush,
                      D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
       }
       // 模型名（8.5px dim，原型 .nx .k 居中省略）
       if (!di.label.empty()) {
         ctx.brush->SetColor(inkOn(luma, 0.5f * dim));
-        const D2D1_RECT_F tr = D2D1::RectF(c.x - 48.0f, c.y + 11.0f, c.x + 48.0f, c.y + 23.0f);
+        const D2D1_RECT_F tr = D2D1::RectF(c.x - 48.0f * u, c.y + 11.0f * u, c.x + 48.0f * u, c.y + 23.0f * u);
         dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.labelFmt,
                      &tr, ctx.brush);
       }

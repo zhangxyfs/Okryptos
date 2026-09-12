@@ -44,7 +44,8 @@ public:
                 int hoverIdx, double cardRadius);
 
 private:
-  bool ensure(D3DContext& d3d);  // dc 指针/代际变化（设备重建）时重建全部资源
+  bool ensure(D3DContext& d3d, float scale = 1.0f);  // dc 指针/代际/比例变化时重建全部资源
+  float fmtScale_ = -1.0f;  // 当前文本格式的比例（-1=未建；uiScale 变化触发重建）
 
   ID2D1DeviceContext* seen_ = nullptr;
   unsigned seenGen_ = 0;  // 上次重建资源时的设备代际（防 dc 地址复用 ABA 误判）

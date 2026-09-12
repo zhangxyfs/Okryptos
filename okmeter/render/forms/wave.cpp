@@ -22,19 +22,20 @@ public:
   std::string id() const override { return "wave"; }
 
   DockGeom layout(int n, int screenH, const std::string& edge) const override {
-    (void)screenH;
     DockGeom g;
     if (n < 1) return g;
     const int mid = (n - 1) / 2;
-    g.w = kW;
-    g.h = 2 * (mid * kStep + 68);
+    const double s = uiScale(screenH);  // 比例法：原型值 × 屏高/1080
+    g.scale = s;
+    g.w = kW * s;
+    g.h = 2 * (mid * kStep * s + 68 * s);
     g.connector = false;  // 原型 wave 隐藏 arcSvg
     g.items.resize((size_t)n);
     for (int i = 0; i < n; ++i) {
       g.items[(size_t)i].x = g.w / 2;
-      g.items[(size_t)i].y = g.h / 2 + (i - mid) * kStep;
-      g.items[(size_t)i].r = kItemHalfH;
-      g.items[(size_t)i].hw = kItemHalfW;
+      g.items[(size_t)i].y = g.h / 2 + (i - mid) * kStep * s;
+      g.items[(size_t)i].r = (float)(kItemHalfH * s);
+      g.items[(size_t)i].hw = (float)(kItemHalfW * s);
     }
     (void)edge;
     return g;
@@ -70,7 +71,7 @@ public:
       osc.dimmed = dim;
       osc.backdropDX = ctx.backdropDX;
       osc.backdropDY = ctx.backdropDY;
-      osc.cornerR = 10.0f;  // 块状角半径（原型 border-radius）
+      osc.cornerR = 10.0f * (float)g.scale;  // 块状角半径 ×比例
       if (isHot)
         dc->SetTransform(D2D1::Matrix3x2F::Scale((float)it.scale, (float)it.scale, c));
       ctx.material->drawOrbBack(dc, osc);
@@ -78,25 +79,24 @@ public:
 
       if (i >= ctx.items->size()) continue;
       const DockItem& di = (*ctx.items)[i];
-      const float l = c.x - kItemHalfW, rgt = c.x + kItemHalfW;
+      const float u = (float)g.scale;  // uiScale：内部尺寸 = 原型值 × 比例
+      const float l = c.x - (float)(it.hw * it.scale), rgt = c.x + (float)(it.hw * it.scale);
       // 顶行：左名右值（原型 .wv .top，padding 13）
       if (!di.label.empty()) {
         ctx.brush->SetColor(inkOn(luma, 0.66f * dim));
-        const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f, c.y - 24.0f, rgt - 80.0f, c.y - 9.0f);
-        dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.capNameFmt,
-                     &tr, ctx.brush, D2D1_DRAW_TEXT_OPTIONS_NONE,
-                     DWRITE_MEASURING_MODE_NATURAL);
+        const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f * u, c.y - 24.0f * u, rgt - 80.0f * u, c.y - 9.0f * u);
+        drawTextTrimmed(*ctx.d3d, dc, ctx.brush, di.label, ctx.capNameFmt, tr);
       }
       if (!di.value.empty()) {
         ctx.brush->SetColor(inkOn(luma, 0.93f * dim));
-        const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f, c.y - 24.0f, rgt - 13.0f, c.y - 9.0f);
+        const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f * u, c.y - 24.0f * u, rgt - 13.0f * u, c.y - 9.0f * u);
         dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.capValFmt,
                      &tr, ctx.brush);
       }
       // sparkline：26 点历史，170×24（原型 drawSpark 同款：线 + 下方面积）
       if (di.hist.size() >= 2) {
-        const float sw = 170.0f, sh = 24.0f;
-        const float sx = c.x - sw * 0.5f, sy = c.y - 3.0f;
+        const float sw = 170.0f * u, sh = 24.0f * u;
+        const float sx = c.x - sw * 0.5f, sy = c.y - 3.0f * u;
         double maxV = 1.0;
         for (double v : di.hist) if (v > maxV) maxV = v;
         const size_t cnt = di.hist.size();
@@ -127,7 +127,7 @@ public:
         ctx.brush->SetColor(osc.isCenter
             ? D2D1::ColorF(kAccent, dim) : inkOn(luma, 0.55f * dim));
         for (size_t k = 1; k < cnt; ++k)
-          dc->DrawLine(ptAt(k - 1), ptAt(k), ctx.brush, 1.2f);
+          dc->DrawLine(ptAt(k - 1), ptAt(k), ctx.brush, 1.2f * u);
       }
     }
   }

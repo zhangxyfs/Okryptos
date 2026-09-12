@@ -19,15 +19,16 @@ bool makeFmt(IDWriteFactory* dw, const wchar_t* family, float size,
 
 } // namespace
 
-bool DockScene::ensure(D3DContext& d3d) {
+bool DockScene::ensure(D3DContext& d3d, float scale) {
   ID2D1DeviceContext* dc = d3d.dc();
   if (!dc || !d3d.dwrite()) return false;
-  if (dc == seen_ && seenGen_ == d3d.generation() && brush_ && valueFmt_ &&
-      labelFmt_ && capNameFmt_ && capValFmt_ && hubFmt_ && satFmt_ &&
+  if (dc == seen_ && seenGen_ == d3d.generation() && fmtScale_ == scale && brush_ &&
+      valueFmt_ && labelFmt_ && capNameFmt_ && capValFmt_ && hubFmt_ && satFmt_ &&
       cardTitleFmt_ && cardBigFmt_ && cardRowFmt_ && cardValFmt_ &&
       cardFootFmt_) return true;
   seen_ = dc;
   seenGen_ = d3d.generation();
+  fmtScale_ = scale;
   brush_.Reset();
   valueFmt_.Reset();
   labelFmt_.Reset();
@@ -44,27 +45,27 @@ bool DockScene::ensure(D3DContext& d3d) {
   IDWriteFactory* dw = d3d.dwrite();
   // 数值字号校准原型：值 13px 600 字重、短名 8.5px；
   // 胶囊左名 10px / 右值 11px 600、罗盘中心 15px / 卫星 9.5px（原型 .cap/.hub/.sat）
-  return makeFmt(dw, L"Consolas", 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+  return makeFmt(dw, L"Consolas", 13.0f * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD,
                  DWRITE_TEXT_ALIGNMENT_CENTER, &valueFmt_) &&
-         makeFmt(dw, L"Consolas", 8.5f, DWRITE_FONT_WEIGHT_NORMAL,
+         makeFmt(dw, L"Consolas", 8.5f * scale, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_CENTER, &labelFmt_) &&
-         makeFmt(dw, L"Segoe UI", 10.0f, DWRITE_FONT_WEIGHT_NORMAL,
+         makeFmt(dw, L"Segoe UI", 10.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_LEADING, &capNameFmt_) &&
-         makeFmt(dw, L"Consolas", 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+         makeFmt(dw, L"Consolas", 11.0f * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD,
                  DWRITE_TEXT_ALIGNMENT_TRAILING, &capValFmt_) &&
-         makeFmt(dw, L"Consolas", 15.0f, DWRITE_FONT_WEIGHT_NORMAL,
+         makeFmt(dw, L"Consolas", 15.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_CENTER, &hubFmt_) &&
-         makeFmt(dw, L"Consolas", 9.5f, DWRITE_FONT_WEIGHT_NORMAL,
+         makeFmt(dw, L"Consolas", 9.5f * scale, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_CENTER, &satFmt_) &&
-         makeFmt(dw, L"Segoe UI", 10.5f, DWRITE_FONT_WEIGHT_NORMAL,
+         makeFmt(dw, L"Segoe UI", 10.5f * scale, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_LEADING, &cardTitleFmt_) &&
-         makeFmt(dw, L"Consolas", 21.0f, DWRITE_FONT_WEIGHT_NORMAL,
+         makeFmt(dw, L"Consolas", 21.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_LEADING, &cardBigFmt_) &&
-         makeFmt(dw, L"Segoe UI", 11.0f, DWRITE_FONT_WEIGHT_NORMAL,
+         makeFmt(dw, L"Segoe UI", 11.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_LEADING, &cardRowFmt_) &&
-         makeFmt(dw, L"Consolas", 11.0f, DWRITE_FONT_WEIGHT_NORMAL,
+         makeFmt(dw, L"Consolas", 11.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_TRAILING, &cardValFmt_) &&
-         makeFmt(dw, L"Segoe UI", 10.0f, DWRITE_FONT_WEIGHT_NORMAL,
+         makeFmt(dw, L"Segoe UI", 10.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_LEADING, &cardFootFmt_);
 }
 
@@ -73,7 +74,7 @@ void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
                      const std::vector<DockItem>& items, int mid,
                      double e, const std::string& edge, float dx,
                      float backdropDX, float backdropDY, int pressIdx) {
-  if (!ensure(d3d)) return;
+  if (!ensure(d3d, (float)g.scale)) return;
   ID2D1DeviceContext* dc = d3d.dc();
   dc->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
   dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
@@ -119,18 +120,19 @@ void DockScene::drawCard(D3DContext& d3d, IMaterial& material,
                          const DetailCard& card, const std::string& edge,
                          const DockGeom& g, float dx, double winH,
                          int hoverIdx, double cardRadius) {
-  if (!card.valid || !ensure(d3d) || hoverIdx < 0 ||
+  if (!card.valid || !ensure(d3d, (float)g.scale) || hoverIdx < 0 ||
       hoverIdx >= (int)g.items.size())
     return;
   ID2D1DeviceContext* dc = d3d.dc();
   dc->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
   dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
 
-  constexpr float kCardW = 252.0f;
+  const float sc = (float)g.scale;  // uiScale：卡片尺寸 = 原型值 × 比例
+  const float kCardW = 252.0f * sc;
   constexpr float kCardZoneW = 268.0f;  // 展开态卡区宽（app.cpp kCardZoneW 同款）
-  constexpr float kPadX = 16.0f, kPadTop = 14.0f, kPadBot = 12.0f;
-  constexpr float kTitleH = 15.0f, kBigH = 27.0f, kRowH = 22.0f;
-  const float footH = card.foot.empty() ? 0.0f : 22.0f;  // 8 间距 + 14 行高
+  const float kPadX = 16.0f * sc, kPadTop = 14.0f * sc, kPadBot = 12.0f * sc;
+  const float kTitleH = 15.0f * sc, kBigH = 27.0f * sc, kRowH = 22.0f * sc;
+  const float footH = card.foot.empty() ? 0.0f : 22.0f * sc;  // 8 间距 + 14 行高
   const float cardH = kPadTop + kTitleH + 3.0f + kBigH + 10.0f +
                       kRowH * (float)card.rows.size() + footH + kPadBot;
 

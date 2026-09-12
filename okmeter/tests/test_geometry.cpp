@@ -46,3 +46,25 @@ TEST(geom_hover_enlarge_and_squeeze) {
   CHECK(std::abs(g.items[2].scale - 1.0) < 1e-9);
   CHECK(g.items[1].dy == 0 && g.items[3].dy == 0);
 }
+
+TEST(geom_uiscale_ratio) {
+  // 比例法：基准画布 1080 → 比例 1（用户实机）；钳制防极端
+  CHECK(std::abs(uiScale(1080) - 1.0) < 1e-9);
+  CHECK(std::abs(uiScale(2160) - 1.6) < 1e-9);  // 4K 钳 1.6
+  CHECK(std::abs(uiScale(540) - 0.7) < 1e-9);   // 小屏钳 0.7
+  CHECK(std::abs(uiScale(900) - 900.0 / 1080.0) < 1e-9);
+}
+
+TEST(geom_capsule_scales_with_screen) {
+  auto g1 = layoutCapsule(3, 1080, "right");
+  auto g2 = layoutCapsule(3, 2160, "right");  // 钳 1.6
+  CHECK(std::abs(g1.w - 196.0) < 1e-6);            // 基准分辨率下与原型一致
+  CHECK(std::abs(g2.w - 196.0 * 1.6) < 1e-6);      // 4K 按比例放大
+  CHECK(std::abs(g2.items[1].hw - 87.0 * 1.6) < 1e-6);
+  CHECK(std::abs(g2.items[1].r - 20.0 * 1.6) < 1e-6);
+  CHECK(std::abs(g2.scale - 1.6) < 1e-9);
+  // 间距同比：g2 step = g1 step × 1.6
+  const double step1 = g1.items[1].y - g1.items[0].y;
+  const double step2 = g2.items[1].y - g2.items[0].y;
+  CHECK(std::abs(step2 - step1 * 1.6) < 1e-6);
+}

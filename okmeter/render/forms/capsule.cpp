@@ -15,8 +15,8 @@ public:
   std::string id() const override { return "capsule"; }
 
   DockGeom layout(int n, int screenH, const std::string& edge) const override {
-    (void)screenH;  // 直线排布固定 step，与屏高无关（原型 geom() capsule 同款）
-    return layoutCapsule(n, edge);
+    // 尺寸全部由 layoutCapsule 按 uiScale(screenH) 缩放（比例法）
+    return layoutCapsule(n, screenH, edge);
   }
 
   double hoverScale() const override { return 1.08; }  // 原型 .cap.hot scale(1.08)
@@ -56,31 +56,32 @@ public:
         dc->SetTransform(D2D1::Matrix3x2F::Scale((float)it.scale, (float)it.scale, c));
       if (i < ctx.items->size()) {
         const DockItem& di = (*ctx.items)[i];
-        const float l = c.x - (float)kCapHalfW, t = c.y - (float)kCapHalfH;
-        const float rgt = c.x + (float)kCapHalfW;
+        const float u = (float)g.scale;  // uiScale：内部尺寸 = 原型值 × 比例
+        const float hw = (float)(it.hw * it.scale), hh = (float)(it.r * it.scale);
+        const float l = c.x - hw, t = c.y - hh;
+        const float rgt = c.x + hw;
         const float luma = ctx.material ? ctx.material->backdropLuma() : 0.0f;
-        // 顶行：左名 右值，padding 左右 13、上 8（原型 .cap .top）
+        // 顶行：左名 右值，padding 左右 13、上 8（原型 .cap .top）×比例
         if (!di.label.empty()) {
           ctx.brush->SetColor(inkOn(luma, 0.66f * dim));
-          const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f, t + 8.0f, rgt - 80.0f, t + 24.0f);
-          dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.capNameFmt,
-                       &tr, ctx.brush,
-                       D2D1_DRAW_TEXT_OPTIONS_NONE,
-                       DWRITE_MEASURING_MODE_NATURAL);
+          const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f * u, t + 8.0f * u,
+                                             rgt - 80.0f * u, t + 24.0f * u);
+          drawTextTrimmed(*ctx.d3d, dc, ctx.brush, di.label, ctx.capNameFmt, tr);
         }
         if (!di.value.empty()) {
           ctx.brush->SetColor(inkOn(luma, 0.93f * dim));
-          const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f, t + 8.0f, rgt - 13.0f, t + 24.0f);
+          const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f * u, t + 8.0f * u,
+                                             rgt - 13.0f * u, t + 24.0f * u);
           dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.capValFmt,
                        &tr, ctx.brush);
         }
         // 底部 3px 占比条：轨道 ink 10%，填充 ink 52%（中心项 accent），
-        // 宽 max(4%, ratio)（原型 .cap .bar 同款）
-        const float bl = l + 13.0f, br = rgt - 13.0f;
-        const float by = t + 2.0f * (float)kCapHalfH - 12.0f;  // 底 padding 9 + 条高 3
+        // 宽 max(4%, ratio)（原型 .cap .bar 同款）×比例
+        const float bl = l + 13.0f * u, br = rgt - 13.0f * u;
+        const float by = t + 2.0f * hh - 12.0f * u;  // 底 padding 9 + 条高 3
         ctx.brush->SetColor(D2D1::ColorF(0.93f, 0.94f, 0.96f, 0.10f * dim));
-        dc->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(bl, by, br, by + 3.0f),
-                                                   1.5f, 1.5f),
+        dc->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(bl, by, br, by + 3.0f * u),
+                                                   1.5f * u, 1.5f * u),
                                  ctx.brush);
         double ratio = di.ratio;
         if (ratio < 0.04) ratio = 0.04;
@@ -91,7 +92,8 @@ public:
         else
           ctx.brush->SetColor(D2D1::ColorF(0.93f, 0.94f, 0.96f, 0.52f * dim));
         dc->FillRoundedRectangle(
-            D2D1::RoundedRect(D2D1::RectF(bl, by, bl + fw, by + 3.0f), 1.5f, 1.5f),
+            D2D1::RoundedRect(D2D1::RectF(bl, by, bl + fw, by + 3.0f * u),
+                              1.5f * u, 1.5f * u),
             ctx.brush);
       }
       if (isHot) dc->SetTransform(D2D1::Matrix3x2F::Identity());

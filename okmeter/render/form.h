@@ -13,6 +13,22 @@ namespace okmeter::render {
 class IMaterial;
 class BackdropCapture;
 
+// 省略号裁剪文本（原型 text-overflow:ellipsis；长模型名不换行、截断加省略号）
+inline void drawTextTrimmed(D3DContext& d3d, ID2D1DeviceContext* dc,
+                            ID2D1Brush* brush, const std::wstring& s,
+                            IDWriteTextFormat* fmt, const D2D1_RECT_F& rc) {
+  if (!dc || !brush || !fmt || s.empty()) return;
+  Microsoft::WRL::ComPtr<IDWriteTextLayout> tl;
+  if (FAILED(d3d.dwrite()->CreateTextLayout(s.c_str(), (UINT32)s.size(), fmt,
+                                            rc.right - rc.left, rc.bottom - rc.top,
+                                            &tl)))
+    return;
+  const DWRITE_TRIMMING trim{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+  (void)tl->SetTrimming(&trim, nullptr);
+  (void)tl->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+  dc->DrawTextLayout(D2D1::Point2F(rc.left, rc.top), tl.Get(), brush);
+}
+
 struct DockItem {
   std::wstring value;  // 紧凑值（球内主文本，Consolas 13px 半粗 白 93%）
   std::wstring label;  // 模型短名 / 口径名（Consolas 8.5px 白 66%）
@@ -24,6 +40,8 @@ struct DockItem {
 // 形态绘制的每帧输入。geom 已由场景烘焙最终位置（tuck/让位/dx 已并入），
 // 形态按 items[i].x/y 直读、按 scale 自行放大；e 用于收缩态降不透明度。
 // 画刷与文本格式由 DockScene 持有（设备代际重建），形态只借用。
+struct DrawContext;  // fwd for helper below
+
 struct DrawContext {
   D3DContext* d3d = nullptr;
   const IMaterial* material = nullptr;       // 球底/描边委托（必有）
