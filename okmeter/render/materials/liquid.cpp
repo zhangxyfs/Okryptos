@@ -196,7 +196,7 @@ public:
       ctx.brush->SetColor(glassfx::accentC(0.60f * dim));
     else
       ctx.brush->SetColor(glassfx::ink(0.16f * dim));
-    glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f, ctx.cornerR);
+    glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f, 0.0f, ctx.cornerR);
   }
 
   // 详情卡底：82% 深玻璃 + 白 6% 提亮 + ink 17% 描边（v1 卡不做 backdrop blur）

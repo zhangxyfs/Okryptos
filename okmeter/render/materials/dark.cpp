@@ -108,7 +108,7 @@ public:
       ctx.brush->SetColor(D2D1::ColorF(kAccent, 0.60f * dim));
     else
       ctx.brush->SetColor(kHairline(0.13f * dim));
-    glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f, ctx.cornerR);
+    glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f, 0.0f, ctx.cornerR);
   }
 
   // 详情卡底：90% 深玻璃 + 1px hairline（v1 卡不做 backdrop blur）
