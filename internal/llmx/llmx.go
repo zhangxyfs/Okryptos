@@ -25,7 +25,8 @@ type Client struct {
 }
 
 // New 构造客户端；timeout<=0 钳 30s（生成比 embed 慢，沿用 embedx 的
-// 零值钳制教训但阈值不同）。kind 非法返回 nil（调用方校验兜底）。
+// 零值钳制教训但阈值不同）。kind 不做校验（任何 kind 都返回非 nil 客户端），
+// 非法 kind 在 Chat 的 default 分支报错（调用方校验兜底）。
 func New(p config.LLMProfile, timeout time.Duration) *Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second

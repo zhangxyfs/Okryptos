@@ -30,7 +30,8 @@ const llmKeyMask = "********"
 
 // httpBaseURLOK 校验 base_url 只允许 http/https scheme：test 端点会把 api_key
 // 以 Bearer/x-api-key 头发往该地址，file://、gopher:// 等形态一律拒绝
-// （空串同样拒绝——llmx/embedx 无默认地址，空 base_url 本来也只会在网络层报错）。
+// （空串同样拒绝——唯一的例外是 test 端点对 kind=ollama 的空 base_url 放行，
+// 由 llmx 归一到 localhost:11434 默认地址，且在调用点单独豁免）。
 func httpBaseURLOK(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -47,6 +48,7 @@ type llmProfileJSON struct {
 	APIKey      string `json:"api_key"` // GET 掩码回显；POST 掩码/空 = 保留原值
 	Temperature string `json:"temperature"`
 	MaxTokens   int    `json:"max_tokens"`
+	Filter      bool   `json:"filter"` // 识别意图标记（active_filter 槽候选）
 	Active      bool   `json:"active"`
 }
 
@@ -86,10 +88,11 @@ func (h *Handler) apiLLMGet(w http.ResponseWriter, _ *http.Request) {
 		profiles = append(profiles, llmProfileJSON{
 			Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL, Model: p.Model,
 			APIKey: key, Temperature: p.Temperature, MaxTokens: p.MaxTokens,
-			Active: p.Name == cfg.LLM.Active,
+			Filter: p.Filter, Active: p.Name == cfg.LLM.Active,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"active": cfg.LLM.Active, "profiles": profiles})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"active": cfg.LLM.Active, "active_filter": cfg.LLM.ActiveFilter, "profiles": profiles})
 }
 
 // apiLLMProfileSave 新增/同名覆盖保存 profile；activate=true 同时设为使用中。
@@ -103,6 +106,7 @@ func (h *Handler) apiLLMProfileSave(w http.ResponseWriter, r *http.Request) {
 		APIKey      string `json:"api_key"`
 		Temperature string `json:"temperature"`
 		MaxTokens   int    `json:"max_tokens"`
+		Filter      bool   `json:"filter"`
 		Activate    bool   `json:"activate"`
 	}
 	if !decodeJSON(w, r, &req) {
@@ -111,12 +115,16 @@ func (h *Handler) apiLLMProfileSave(w http.ResponseWriter, r *http.Request) {
 	req.Name = strings.TrimSpace(req.Name)
 	req.BaseURL = strings.TrimSpace(req.BaseURL)
 	req.Model = strings.TrimSpace(req.Model)
-	if req.Name == "" || req.BaseURL == "" || req.Model == "" {
-		writeErr(w, http.StatusBadRequest, "名称、base_url、模型均不能为空")
+	if req.Name == "" || req.Model == "" {
+		writeErr(w, http.StatusBadRequest, "名称、模型不能为空")
 		return
 	}
-	if req.Kind != "openai" && req.Kind != "anthropic" {
-		writeErr(w, http.StatusBadRequest, "类型仅支持 openai | anthropic")
+	if req.Kind != "openai" && req.Kind != "anthropic" && req.Kind != "ollama" {
+		writeErr(w, http.StatusBadRequest, "类型仅支持 openai | anthropic | ollama")
+		return
+	}
+	if req.Kind != "ollama" && req.BaseURL == "" {
+		writeErr(w, http.StatusBadRequest, "base_url 不能为空（ollama 可留空，默认 localhost:11434）")
 		return
 	}
 	temperature, err := validateLLMAdv(req.Temperature, req.MaxTokens)
@@ -129,7 +137,7 @@ func (h *Handler) apiLLMProfileSave(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := setupx.SaveLLMProfile(config.LLMProfile{
 		Name: req.Name, Kind: req.Kind, BaseURL: req.BaseURL, Model: req.Model, APIKey: req.APIKey,
-		Temperature: temperature, MaxTokens: req.MaxTokens,
+		Temperature: temperature, MaxTokens: req.MaxTokens, Filter: req.Filter,
 	}, req.Activate); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -156,15 +164,23 @@ func (h *Handler) apiLLMProfileDelete(w http.ResponseWriter, r *http.Request) {
 	h.apiLLMGet(w, r)
 }
 
-// apiLLMActive 切换使用中 profile；空 name = 停用。
+// apiLLMActive 切换使用中 profile；空 name = 停用。slot="filter" 走识别意图
+// 槽（active_filter），缺省/其他值走普通槽（active）。
 func (h *Handler) apiLLMActive(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
+		Slot string `json:"slot"` // "filter"=识别意图槽；缺省=普通槽
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := setupx.SetActiveLLM(req.Name); err != nil {
+	var err error
+	if req.Slot == "filter" {
+		err = setupx.SetActiveLLMFilter(req.Name)
+	} else {
+		err = setupx.SetActiveLLM(req.Name)
+	}
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -213,7 +229,7 @@ func (h *Handler) apiLLMTest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !httpBaseURLOK(req.BaseURL) {
+	if !(req.Kind == "ollama" && req.BaseURL == "") && !httpBaseURLOK(req.BaseURL) {
 		writeErr(w, http.StatusBadRequest, "base_url 必须是 http/https URL")
 		return
 	}

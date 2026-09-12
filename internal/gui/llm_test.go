@@ -110,6 +110,121 @@ func TestLLMRoundTrip(t *testing.T) {
 	}
 }
 
+// TestLLMProfileSaveOllama ollama 档：base_url 可留空、免 api_key。
+// POST 应 200（非 400），GET 回显的 profiles 含 kind=ollama。
+func TestLLMProfileSaveOllama(t *testing.T) {
+	h, _, _ := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, data := do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "本地", "kind": "ollama", "base_url": "", "model": "qwen3:1.7b", "activate": false,
+	})
+	if code != 200 {
+		t.Fatalf("ollama 档应放行: %d %s", code, data)
+	}
+
+	var view struct {
+		Profiles []struct {
+			Name string `json:"name"`
+			Kind string `json:"kind"`
+		} `json:"profiles"`
+	}
+	_, data = do(t, "GET", srv.URL+"/api/llm", testToken, nil)
+	if err := json.Unmarshal(data, &view); err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Profiles) != 1 || view.Profiles[0].Name != "本地" || view.Profiles[0].Kind != "ollama" {
+		t.Fatalf("GET 应回显 ollama profile: %+v", view)
+	}
+}
+
+// TestLLMProfileSaveFilterFlag 识别意图标记随保存回显：POST 带 filter=true，
+// GET 该 profile filter=true。
+func TestLLMProfileSaveFilterFlag(t *testing.T) {
+	h, _, _ := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, data := do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "意图", "kind": "openai", "base_url": "http://x", "model": "m", "filter": true,
+	})
+	if code != 200 {
+		t.Fatalf("save: %d %s", code, data)
+	}
+
+	var view struct {
+		Profiles []struct {
+			Name   string `json:"name"`
+			Filter bool   `json:"filter"`
+		} `json:"profiles"`
+	}
+	_, data = do(t, "GET", srv.URL+"/api/llm", testToken, nil)
+	if err := json.Unmarshal(data, &view); err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Profiles) != 1 || view.Profiles[0].Name != "意图" || !view.Profiles[0].Filter {
+		t.Fatalf("filter 标记应随保存回显: %+v", view)
+	}
+}
+
+// TestLLMActiveSlots 双槽位：slot=filter 走 active_filter 槽且不动普通槽；
+// 空 name 清对应槽。
+func TestLLMActiveSlots(t *testing.T) {
+	h, _, _ := newEnv(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, _ := do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "s", "kind": "openai", "base_url": "https://x.example.com/v1",
+		"model": "m", "api_key": "k", "activate": true,
+	})
+	if code != 200 {
+		t.Fatalf("save general: %d", code)
+	}
+	code, _ = do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "意图", "kind": "openai", "base_url": "http://x", "model": "m", "filter": true,
+	})
+	if code != 200 {
+		t.Fatalf("save filter profile: %d", code)
+	}
+
+	var view struct {
+		Active       string `json:"active"`
+		ActiveFilter string `json:"active_filter"`
+	}
+
+	// slot=filter → active_filter 落槽，active 不变
+	code, data := do(t, "POST", srv.URL+"/api/llm/active", testToken, map[string]any{
+		"name": "意图", "slot": "filter",
+	})
+	if code != 200 {
+		t.Fatalf("active slot=filter: %d %s", code, data)
+	}
+	_, data = do(t, "GET", srv.URL+"/api/llm", testToken, nil)
+	if err := json.Unmarshal(data, &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.ActiveFilter != "意图" || view.Active != "s" {
+		t.Fatalf("active_filter 应落槽且 active 不变: %+v", view)
+	}
+
+	// 空 name + slot=filter → 清空该槽，active 仍不变
+	code, _ = do(t, "POST", srv.URL+"/api/llm/active", testToken, map[string]any{
+		"name": "", "slot": "filter",
+	})
+	if code != 200 {
+		t.Fatalf("clear slot=filter: %d", code)
+	}
+	_, data = do(t, "GET", srv.URL+"/api/llm", testToken, nil)
+	if err := json.Unmarshal(data, &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.ActiveFilter != "" || view.Active != "s" {
+		t.Fatalf("空 name 应清 active_filter 槽: %+v", view)
+	}
+}
+
 // TestLLMTestEndpoint 连通性测试接口：假 openai 服务 200，错误地址 502。
 func TestLLMTestEndpoint(t *testing.T) {
 	h, _, _ := newEnv(t)
