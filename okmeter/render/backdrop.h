@@ -34,8 +34,10 @@ public:
   // 供渲染侧把窗口坐标换算成纹理坐标；捕获未启动时为 (0,0)
   void capOrigin(int& x, int& y) const;
 
-  // 渲染侧取最新帧：成功返回 AddRef 的整屏纹理（BGRA8，捕获尺寸）
+  // 渲染侧取最新帧：成功返回 AddRef 的整屏纹理（BGRA8，捕获尺寸）。
+  // 顺带在帧变化时刷新 luma_（8×8 网格点采样均摊亮度，亮背景自适应墨色用）
   bool acquire(ID3D11Texture2D** out);
+  float luma() const { return luma_; }  // 0..1 相对亮度；无捕获/未采样为 0
   bool dirty() const;
   void markClean();
   unsigned long long frameCount() const;  // 累计到达帧数（验收/诊断）
@@ -60,6 +62,9 @@ private:
   unsigned long long frames_ = 0;
   int capW_ = 0, capH_ = 0;  // 帧池尺寸（内容尺寸变化时回调线程 Recreate）
   int capX_ = 0, capY_ = 0;  // 捕获显示器左上角虚拟屏幕坐标（纹理原点）
+  float luma_ = 0.0f;        // 最近帧均摊亮度（acquire 内网格点采样）
+  bool lumaDirty_ = true;    // 新帧到达置位，acquire 采样后清
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> lumaStage_;  // 8×8 STAGING 采样缓冲
 
   bool ok_ = false;
   bool degraded_ = false;

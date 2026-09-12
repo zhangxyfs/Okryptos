@@ -194,8 +194,11 @@ bool D3DContext::presentLayered() {
   SIZE sz{ w_, h_ };
   POINT srcPt{ 0, 0 };
   BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-  // nullptr dst/位置：只更新内容不动窗口（位置由 SetWindowPos 管理）
-  return UpdateLayeredWindow(hwnd_, nullptr, nullptr, &sz, memDC_, &srcPt, 0, &bf,
+  // 位置与内容同一 ULW 事务上屏（滑出动画逐帧移动时不再"窗口动一格、内容慢半拍"）
+  RECT wr{};
+  GetWindowRect(hwnd_, &wr);
+  POINT dstPt{ wr.left, wr.top };
+  return UpdateLayeredWindow(hwnd_, nullptr, &dstPt, &sz, memDC_, &srcPt, 0, &bf,
                              ULW_ALPHA) != FALSE;
 }
 

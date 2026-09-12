@@ -20,6 +20,7 @@ public:
   }
 
   double hoverScale() const override { return 1.08; }  // 原型 .cap.hot scale(1.08)
+  double hoverPush() const override { return 0; }      // 胶囊间距已大，推挤邻项只会抖
   double cardRadius(int, int) const override { return 22; }  // 原型 RADII capsule
 
   void drawItems(ID2D1DeviceContext* dc, const DrawContext& ctx) const override {
@@ -57,9 +58,10 @@ public:
         const DockItem& di = (*ctx.items)[i];
         const float l = c.x - (float)kCapHalfW, t = c.y - (float)kCapHalfH;
         const float rgt = c.x + (float)kCapHalfW;
-        // 顶行：左名（白 66%）右值（白 93%），padding 左右 13、上 8（原型 .cap .top）
+        const float luma = ctx.material ? ctx.material->backdropLuma() : 0.0f;
+        // 顶行：左名 右值，padding 左右 13、上 8（原型 .cap .top）
         if (!di.label.empty()) {
-          ctx.brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.66f * dim));
+          ctx.brush->SetColor(inkOn(luma, 0.66f * dim));
           const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f, t + 5.0f, rgt - 80.0f, t + 21.0f);
           dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.capNameFmt,
                        &tr, ctx.brush,
@@ -67,7 +69,7 @@ public:
                        DWRITE_MEASURING_MODE_NATURAL);
         }
         if (!di.value.empty()) {
-          ctx.brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.93f * dim));
+          ctx.brush->SetColor(inkOn(luma, 0.93f * dim));
           const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f, t + 5.0f, rgt - 13.0f, t + 21.0f);
           dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.capValFmt,
                        &tr, ctx.brush);

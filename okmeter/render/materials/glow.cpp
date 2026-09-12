@@ -38,6 +38,7 @@ struct PressRing { float x = 0, y = 0; double t0 = 0; };
 class GlowMaterial final : public IMaterial {
 public:
   std::string id() const override { return "glow"; }
+  float backdropLuma() const override { return lastLuma_; }
 
   void onPointer(float x, float y) const override {
     px_ = x;
@@ -238,6 +239,7 @@ public:
     bool glassDrawn = false;
     if (ctx.backdrop && ctx.backdrop->ok() && !ctx.backdrop->degraded()) {
       pipe_.refresh(dc, ctx.backdrop);
+      lastLuma_ = ctx.backdrop->luma();
       if (pipe_.ready() && glassfx::pushShapeClip(dc, c, hw, r)) {
         dc->DrawImage(pipe_.output(), D2D1::Point2F(ctx.backdropDX, ctx.backdropDY),
                       D2D1_INTERPOLATION_MODE_LINEAR);
@@ -490,6 +492,7 @@ private:
   mutable const ID2D1DeviceContext* seenDc_ = nullptr;
   mutable unsigned gen_ = 0;
   mutable glassfx::BackdropPipe pipe_;  // 强模糊 + 提饱和 + 提亮背景管线
+  mutable float lastLuma_ = 0.0f;        // 最近背景帧亮度（自适应墨色）
   mutable ComPtr<ID2D1RadialGradientBrush> hotGlow_, shadow_, hlTop_, bottomShade_;
   mutable ComPtr<ID2D1RadialGradientBrush> edgeLight_;
   mutable ComPtr<ID2D1LinearGradientBrush> topLight_;

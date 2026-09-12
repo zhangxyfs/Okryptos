@@ -185,6 +185,7 @@ void DockScene::drawCard(D3DContext& d3d, IMaterial& material,
 
   // 标题：长模型 id 省略号裁剪（DrawText 无裁剪能力；CreateTextLayout +
   // 逐字符 trimming 省略号，原型 .d-name text-overflow:ellipsis 同款）
+  const float cardLuma = material.backdropLuma();  // 亮背景自适应墨色
   if (!card.title.empty() && ty + kTitleH <= contentBot) {
     ComPtr<IDWriteTextLayout> tl;
     if (SUCCEEDED(d3d.dwrite()->CreateTextLayout(
@@ -193,29 +194,29 @@ void DockScene::drawCard(D3DContext& d3d, IMaterial& material,
       DWRITE_TRIMMING trim{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
       (void)tl->SetTrimming(&trim, nullptr);
       (void)tl->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-      brush_->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.55f));
+      brush_->SetColor(inkOn(cardLuma, 0.55f));
       dc->DrawTextLayout(D2D1::Point2F(cx0, ty), tl.Get(), brush_.Get());
     }
   }
   ty += kTitleH + 3.0f;
   text(card.big, cardBigFmt_.Get(), ty, ty + kBigH,
-       D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.95f));
+       inkOn(cardLuma, 0.95f));
   ty += kBigH + 10.0f;
 
   for (const auto& row : card.rows) {
     if (ty + kRowH > contentBot) break;  // 截底卡：放不下的行整行弃画
-    brush_->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.07f));  // 行间分隔 hairline
+    brush_->SetColor(inkOn(cardLuma, 0.07f));  // 行间分隔 hairline
     dc->DrawLine(D2D1::Point2F(cx0, ty), D2D1::Point2F(cx1, ty), brush_.Get(), 1.0f);
     text(row.first, cardRowFmt_.Get(), ty, ty + kRowH,
-         D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.55f));
+         inkOn(cardLuma, 0.55f));
     text(row.second, cardValFmt_.Get(), ty, ty + kRowH,
-         D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.93f));
+         inkOn(cardLuma, 0.93f));
     ty += kRowH;
   }
 
   if (!card.foot.empty())
     text(card.foot, cardFootFmt_.Get(), ty + 8.0f, ty + footH,
-         D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.45f));
+         inkOn(cardLuma, 0.45f));
 }
 
 } // namespace okmeter::render

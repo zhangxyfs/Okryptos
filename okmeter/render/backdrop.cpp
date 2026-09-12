@@ -312,6 +312,7 @@ void BackdropCapture::onFrame(IUnknown* poolSender) {
   if (tex) {
     latest_ = tex;
     dirty_ = true;
+    lumaDirty_ = true;
     ++frames_;
     if (size.Width != capW_ || size.Height != capH_) {
       capW_ = size.Width;
@@ -334,6 +335,58 @@ bool BackdropCapture::acquire(ID3D11Texture2D** out) {
   AcquireSRWLockShared(&lock_);
   if (latest_) (void)latest_.CopyTo(out);
   ReleaseSRWLockShared(&lock_);
+  if (*out && lumaDirty_) {
+    // 8×8 网格点采样均摊亮度（refresh 级频率：acquire 仅 dirty 时被材质调用）。
+    // 3D 侧点采样避免在 D2D BeginDraw 内嵌套绘制（refresh 在帧内被调）。
+    ComPtr<ID3D11Device> dev;
+    (*out)->GetDevice(&dev);
+    ComPtr<ID3D11DeviceContext> imm;
+    if (dev) dev->GetImmediateContext(&imm);
+    if (imm && !lumaStage_) {
+      D3D11_TEXTURE2D_DESC sd{};
+      sd.Width = 8;
+      sd.Height = 8;
+      sd.MipLevels = 1;
+      sd.ArraySize = 1;
+      sd.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+      sd.SampleDesc.Count = 1;
+      sd.Usage = D3D11_USAGE_STAGING;
+      sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+      (void)dev->CreateTexture2D(&sd, nullptr, &lumaStage_);
+    }
+    if (imm && lumaStage_) {
+      D3D11_BOX box{};
+      box.front = 0;
+      box.back = 1;
+      box.bottom = 1;
+      box.right = 1;
+      for (int j = 0; j < 8; ++j)
+        for (int i = 0; i < 8; ++i) {
+          box.left = (UINT)((i + 0.5) * capW_ / 8);
+          box.top = (UINT)((j + 0.5) * capH_ / 8);
+          box.right = box.left + 1;
+          box.bottom = box.top + 1;
+          imm->CopySubresourceRegion(lumaStage_.Get(), 0, (UINT)i, (UINT)j, 0,
+                                     (*out), 0, &box);
+        }
+      D3D11_MAPPED_SUBRESOURCE m{};
+      if (SUCCEEDED(imm->Map(lumaStage_.Get(), 0, D3D11_MAP_READ, 0, &m))) {
+        unsigned r = 0, g = 0, b = 0;
+        for (int j = 0; j < 8; ++j) {
+          const auto* p = (const BYTE*)m.pData + (size_t)j * m.RowPitch;
+          for (int i = 0; i < 8; ++i) {
+            b += p[i * 4 + 0];
+            g += p[i * 4 + 1];
+            r += p[i * 4 + 2];
+          }
+        }
+        imm->Unmap(lumaStage_.Get(), 0);
+        luma_ = (0.2126f * (r / 64.0f) + 0.7152f * (g / 64.0f) +
+                 0.0722f * (b / 64.0f)) / 255.0f;
+        lumaDirty_ = false;
+      }
+    }
+  }
   return *out != nullptr;
 }
 

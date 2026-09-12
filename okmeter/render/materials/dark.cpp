@@ -25,6 +25,7 @@ D2D1_COLOR_F kHairline(float a) { return D2D1::ColorF(1.0f, 1.0f, 1.0f, a); }
 class DarkMaterial final : public IMaterial {
 public:
   std::string id() const override { return "dark"; }
+  float backdropLuma() const override { return lastLuma_; }
 
   void onPointer(float x, float y) const override {
     px_ = x;
@@ -71,6 +72,7 @@ public:
     bool glassDrawn = false;
     if (ctx.backdrop && ctx.backdrop->ok() && !ctx.backdrop->degraded()) {
       refreshBackdrop(dc, ctx.backdrop);
+      lastLuma_ = ctx.backdrop->luma();
       if (bgBmp_ && blur_ && glassfx::pushShapeClip(dc, c, hw, r)) {
         dc->DrawImage(blur_.Get(), D2D1::Point2F(ctx.backdropDX, ctx.backdropDY),
                       D2D1_INTERPOLATION_MODE_LINEAR);
@@ -221,6 +223,7 @@ private:
   mutable ComPtr<ID2D1RadialGradientBrush> hotGlow_;  // 悬停 accent 外发光
   mutable float px_ = 0, py_ = 0;                     // 跟手光光源位置
   mutable bool hasPtr_ = false;
+  mutable float lastLuma_ = 0.0f;                     // 最近背景帧亮度（自适应墨色）
 };
 
 } // namespace

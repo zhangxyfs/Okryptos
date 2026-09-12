@@ -12,6 +12,12 @@ namespace okmeter::render {
 class D3DContext;
 class BackdropCapture;
 
+// 亮背景自适应墨色：背景亮（luma>0.55）用深墨，暗背景用浅墨（修"白底白字不可见"）
+inline D2D1_COLOR_F inkOn(float luma, float a) {
+  return luma > 0.55f ? D2D1::ColorF(0.09f, 0.11f, 0.14f, a)
+                      : D2D1::ColorF(0.93f, 0.94f, 0.96f, a);
+}
+
 // 单球底绘制输入。center/r 为最终值（悬停放大已并入 r，勿再设变换）；
 // backdropDX/DY 把背景纹理像素平移到窗口坐标（tex(0,0) 落在窗口此坐标）；
 // dimmed 为收缩态不透明度乘子（原型 .dock:not(.open) .orb opacity .55）。
@@ -32,6 +38,7 @@ class IMaterial {
 public:
   virtual ~IMaterial() = default;
   virtual std::string id() const = 0;                    // "dark"
+  virtual float backdropLuma() const { return 0.0f; }  // 最近背景帧亮度（亮背景自适应墨色：>0.55 用深墨）
   virtual void drawOrbBack(ID2D1DeviceContext*, const OrbStyleCtx&) const = 0;  // 球体底（玻璃/折射/光）
   virtual void drawCardBack(ID2D1DeviceContext*, const D2D1_RECT_F&, float radius) const = 0;
   // 项间连线/底层光效；g.connector=false（胶囊/罗盘）时不画项间折线

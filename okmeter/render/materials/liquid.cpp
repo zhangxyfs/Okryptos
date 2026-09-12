@@ -57,6 +57,7 @@ ComPtr<ID2D1Bitmap> bakeNormalMap(ID2D1DeviceContext* dc) {
 class LiquidMaterial final : public IMaterial {
 public:
   std::string id() const override { return "liquid"; }
+  float backdropLuma() const override { return lastLuma_; }
 
   void onPointer(float x, float y) const override {
     px_ = x;
@@ -104,6 +105,7 @@ public:
     // 玻璃底：全折射路径 / 退化毛玻璃 / 纯色兜底
     if (fullGlass) {
       refreshBackdrop(dc, ctx.backdrop);
+      lastLuma_ = ctx.backdrop->luma();
       if (refractReady() && glassfx::pushCircleClip(dc, c, r)) {
         // 球区背景（纹理坐标）→ 位移折射 → 微模糊 → 提饱和 → 提亮 → 平移回原点
         const float pad = std::ceil(r * kCropPadRatio);
@@ -390,6 +392,7 @@ private:
   mutable ComPtr<ID2D1RadialGradientBrush> hlTop_, specular_;
   mutable ComPtr<ID2D1LinearGradientBrush> edgeBright_, edgeDark_;
   mutable float px_ = 0, py_ = 0;
+  mutable float lastLuma_ = 0.0f;  // 最近背景帧亮度（自适应墨色）
   mutable bool hasPtr_ = false;
 };
 
