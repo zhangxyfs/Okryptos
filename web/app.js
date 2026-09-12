@@ -4893,7 +4893,7 @@ function renderLlmModal(){
       const mSel = el("select","pselect"); mSel.style.maxWidth="420px";
       (l0.builtin_models||[]).forEach(bm=>{
         const op=el("option"); op.value=bm.id;
-        op.textContent = bm.label + "（" + fmtMB(bm.size) + "）" + (bm.downloaded?t("downloaded"):"");
+        op.textContent = bm.label + (bm.downloaded?t("downloaded"):"");
         mSel.appendChild(op);
       });
       if(l0.builtin_models && l0.builtin_models.length) mSel.value = llmForm.model||l0.builtin_models[0].id;
