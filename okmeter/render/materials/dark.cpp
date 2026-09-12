@@ -45,7 +45,7 @@ public:
     const float dim = ctx.dimmed;
 
     // 悬停外发光（原型 .orb.hot box-shadow 0 0 22px accent 32%）
-    if (ctx.isHot && hotGlow_) {
+    if (ctx.isHot && hotGlow_ && !glassfx::isPill(hw, r)) {  // 椭圆光晕仅圆项（原型 .orb.hot 专属；块状 hot 仅描边）
       hotGlow_->SetCenter(c);
       hotGlow_->SetRadiusX(glassfx::shapeRX(hw, r, 22.0f));
       hotGlow_->SetRadiusY(r + 22.0f);
@@ -54,7 +54,7 @@ public:
     }
 
     // 底部外阴影（柔和径向渐变，中心下移 5px 模拟下方投影）
-    if (shadow_) {
+    if (shadow_ && !glassfx::isPill(hw, r)) {  // 椭圆阴影仅圆项
       shadow_->SetCenter(D2D1::Point2F(c.x, c.y + 5.0f));
       shadow_->SetRadiusX(glassfx::shapeRX(hw, r, 9.0f));
       shadow_->SetRadiusY(r + 9.0f);

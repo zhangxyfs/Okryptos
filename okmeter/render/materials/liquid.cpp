@@ -78,7 +78,7 @@ public:
         ctx.backdrop && ctx.backdrop->ok() && !ctx.backdrop->degraded();
 
     // 悬停外发光（原型 .orb.hot）
-    if (ctx.isHot && hotGlow_) {
+    if (ctx.isHot && hotGlow_ && !glassfx::isPill(hw, r)) {  // 椭圆光晕仅圆项（原型 .orb.hot 专属；块状 hot 仅描边）
       hotGlow_->SetCenter(c);
       hotGlow_->SetRadiusX(glassfx::shapeRX(hw, r, 22.0f));
       hotGlow_->SetRadiusY(r + 22.0f);

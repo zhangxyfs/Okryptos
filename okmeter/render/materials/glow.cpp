@@ -213,7 +213,7 @@ public:
     const float hw = ctx.halfW > 0 ? ctx.halfW : ctx.r;
     const float dim = ctx.dimmed;
 
-    if (ctx.isHot && hotGlow_) {
+    if (ctx.isHot && hotGlow_ && !glassfx::isPill(hw, r)) {  // 椭圆光晕仅圆项（原型 .orb.hot 专属；块状 hot 仅描边）
       hotGlow_->SetCenter(c);
       hotGlow_->SetRadiusX(glassfx::shapeRX(hw, r, 22.0f));
       hotGlow_->SetRadiusY(r + 22.0f);
@@ -222,7 +222,7 @@ public:
     }
 
     // 浮动阴影（原型 0 10px 30px black 30%）
-    if (shadow_) {
+    if (shadow_ && !glassfx::isPill(hw, r)) {  // 椭圆阴影仅圆项
       shadow_->SetCenter(D2D1::Point2F(c.x, c.y + 10.0f));
       shadow_->SetRadiusX(glassfx::shapeRX(hw, r, 15.0f));
       shadow_->SetRadiusY(r + 15.0f);
