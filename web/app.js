@@ -99,7 +99,7 @@ const I18N = {
     lDlReady:"✓ 模型已就绪，sidecar 按需拉起、空闲自动退出",
     eActiveFilter:"使用中·意图",
     lFilterChk:"识别意图（检索过滤专用）",
-    lFilterHelp:"勾选后此配置的「使用中」独立于普通 LLM：专用于每轮提问前的检索相关性过滤（自动调用、按次计费/占本机资源），max_tokens 保持 0。在线低价模型或本地模型均可。内置档（推荐）为 CPU 推理：占内存、不占显存，单次过滤（仅输出几个编号）约 1~3 秒（估算）。三个内置模型：1.7B Q8（首选，文件 1.8GB，运行内存 ≈2.3GB，速度中等）/ 0.6B Q8（最省，640MB，内存 ≈1GB，最快）/ 4B-Instruct Q4（最稳，2.5GB，内存 ≈3GB，较慢，非思考版输出最可靠）。ollama 档模型同名（qwen3:1.7b 等），有显卡时可 offload 到显存（占用≈模型体积）。",
+    lFilterHelp:"勾选后此配置的「使用中」独立于普通 LLM：专用于每轮提问前的检索相关性过滤（自动调用、按次计费/占本机资源），max_tokens 保持 0。在线低价模型或本地模型均可。\n内置档（推荐）为 CPU 推理：占内存、不占显存；单次过滤（仅输出几个编号）约 1~3 秒（估算）。\n· 1.7B Q8：首选，文件 1.8GB，运行内存 ≈2.3GB，速度中等\n· 0.6B Q8：最省，640MB，内存 ≈1GB，最快\n· 4B-Instruct Q4：最稳，2.5GB，内存 ≈3GB，较慢，非思考版输出最可靠\nollama 档模型同名（qwen3:1.7b 等），有显卡时可 offload 到显存（占用≈模型体积）。",
     tagOpenai:"OpenAI 兼容", tagAnthropic:"Anthropic 兼容",
     fTemp:"temperature（高级，留空 = 不传）", fMaxTokens:"max_tokens（高级，0 = 默认）",
     eTitle:"语义检索（embedding）", eDesc:"混合检索的语义通道；不配置任何服务时退化为纯关键词检索",
@@ -328,7 +328,7 @@ const I18N = {
     lDlReady:"✓ Model ready; sidecar starts on demand and exits when idle",
     eActiveFilter:"Active · Intent",
     lFilterChk:"Intent recognition (retrieval filter only)",
-    lFilterHelp:"When checked, this profile's \"Active\" is independent of the general LLM: used solely for retrieval relevance filtering before each question (called automatically; billed per call or uses local resources) — keep max_tokens at 0. A low-cost online model or a local model both work. The builtin tier (recommended) runs on CPU: uses RAM, not VRAM; one filter call (outputs only a few indices) takes ~1-3s (estimate). The three builtin models: 1.7B Q8 (best pick, 1.8GB file, RAM ≈2.3GB, medium speed) / 0.6B Q8 (smallest, 640MB, RAM ≈1GB, fastest) / 4B-Instruct Q4 (most stable, 2.5GB, RAM ≈3GB, slower, non-thinking = most reliable output). The ollama tier uses the same model names (qwen3:1.7b etc.) and can offload to VRAM when a GPU is present (usage ≈ model size).",
+    lFilterHelp:"When checked, this profile's \"Active\" is independent of the general LLM: used solely for retrieval relevance filtering before each question (called automatically; billed per call or uses local resources) — keep max_tokens at 0. A low-cost online model or a local model both work.\nThe builtin tier (recommended) runs on CPU: uses RAM, not VRAM; one filter call (outputs only a few indices) takes ~1-3s (estimate).\n· 1.7B Q8: best pick, 1.8GB file, RAM ≈2.3GB, medium speed\n· 0.6B Q8: smallest, 640MB, RAM ≈1GB, fastest\n· 4B-Instruct Q4: most stable, 2.5GB, RAM ≈3GB, slower, non-thinking = most reliable output\nThe ollama tier uses the same model names (qwen3:1.7b etc.) and can offload to VRAM when a GPU is present (usage ≈ model size).",
     tagOpenai:"OpenAI-compat", tagAnthropic:"Anthropic-compat",
     fTemp:"temperature (advanced, empty = not sent)", fMaxTokens:"max_tokens (advanced, 0 = default)",
     eTitle:"Semantic retrieval (embedding)", eDesc:"The semantic channel of hybrid retrieval; degrades to keyword-only when no service is configured",
@@ -4961,7 +4961,8 @@ function renderLlmModal(){
     fchkRow.appendChild(fchk);
     m.appendChild(fchkRow);
     if(llmForm.filter){
-      const help = el("div","small muted"); help.textContent = t("lFilterHelp");
+      const help = el("div","small muted"); help.style.whiteSpace = "pre-line";
+      help.textContent = t("lFilterHelp");
       m.appendChild(help);
     }
     const frow = el("div","prow");
