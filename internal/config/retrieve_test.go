@@ -157,3 +157,11 @@ func TestCoverageMergedNoAliasing(t *testing.T) {
 		t.Fatalf("extra_stop_terms 合并异常: %+v", cfg.Retrieve.Coverage.ExtraStopTerms)
 	}
 }
+
+func TestFilterDefault(t *testing.T) {
+	cfg := Default()
+	f := cfg.Retrieve.Filter
+	if !f.Enabled || f.TimeoutMs != 3000 || f.MaxTokens != 64 {
+		t.Fatalf("filter 默认应为 enabled+3000ms+64: %+v", f)
+	}
+}

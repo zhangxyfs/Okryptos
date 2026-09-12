@@ -194,6 +194,17 @@ type RetrieveCoverage struct {
 	ExtraStopTerms []string `toml:"extra_stop_terms"` // 内置虚词表之外的追加层
 }
 
+// RetrieveFilter 控制注入前的 LLM 相关性后置过滤（[retrieve.filter] 子表）：
+// 检索候选（top_n 截断+分支过滤+冷却排除后）交给激活的 LLM profile 逐条裁决，
+// 不相关的丢弃；只删不加。fail-open：未配置 LLM、超时、输出截断、解析失败
+// 一律保留原候选（filterx 收口）。过滤用 profile 取自 [llm] 的 active_filter
+// 识别意图槽（Task 7），未配置时回退普通 active。
+type RetrieveFilter struct {
+	Enabled   bool `toml:"enabled"`    // 默认 true（见 Default）；无可用 LLM profile 时自动空转
+	TimeoutMs int  `toml:"timeout_ms"` // 单次过滤超时，默认 3000；<=0 按 3000（hook 路径同步预算内）
+	MaxTokens int  `toml:"max_tokens"` // 过滤输出上限，默认 64；<=0 按 64（只输出编号数组，够用即可）
+}
+
 type Retrieve struct {
 	Alpha float64 `toml:"alpha"`
 	Beta  float64 `toml:"beta"`
@@ -231,6 +242,8 @@ type Retrieve struct {
 	// Coverage 是关键词通道的词元覆盖度准入（[retrieve.coverage] 子表）：
 	// 虚词命中的无关条目因覆盖度不足被拒；纯虚词查询跳过整个关键词通道。
 	Coverage RetrieveCoverage `toml:"coverage"`
+	// Filter 是注入前的 LLM 相关性后置过滤（[retrieve.filter] 子表）。
+	Filter RetrieveFilter `toml:"filter"`
 	// DedupTurns 是跨轮注入冷却轮数（默认 3）：同 session 内已注入的检索条目
 	// 冷却 N 个 prompt 轮不再注入（门控轮也计），0=关闭（旧行为，每轮都注入）。
 	// <0 由 EffectiveDedupTurns() 归一为 0（fail-open 方向）。GUI 引导页可配（0~99）。
@@ -318,7 +331,8 @@ func Default() Config {
 				Rule: []int{180, 730}, Pitfall: []int{90, 365}, Note: []int{60, 180}, Reference: []int{180, 730},
 			}},
 			Feedback: RetrieveFeedback{Enabled: false, WindowDays: 30, MinInjections: 4, Demote: 0.8},
-			Coverage: RetrieveCoverage{Enabled: true, MinRatio: 0.25}},
+			Coverage: RetrieveCoverage{Enabled: true, MinRatio: 0.25},
+			Filter:   RetrieveFilter{Enabled: true, TimeoutMs: 3000, MaxTokens: 64}},
 		Capture:    Capture{Mode: "propose", TurnInterval: 3},
 		Wiki:       Wiki{StaleCommits: 20},
 		Hooks:      Hooks{TimeoutSec: 10},
