@@ -4213,14 +4213,16 @@ function renderPrefs(){
     c.appendChild(Object.assign(el("h3"),{textContent:t("lTitle")}));
     c.appendChild(Object.assign(el("div","pdesc"),{textContent:t("lDesc")}));
     const sumBody = el("span");
+    // 双槽摘要共用徽标渲染：kind 徽标 + 名称 + 模型（builtin 显示 label）@ 地址
+    const llmBadgeHtml = (p)=> '<span class="badge-type t-'+(p.kind==="builtin"?"reference":p.kind==="anthropic"?"pitfall":p.kind==="ollama"?"note":"rule")+'">'
+      + esc(p.kind==="builtin"?t("tagBuiltin"):p.kind==="anthropic"?t("tagAnthropic"):p.kind==="ollama"?t("tagOllama"):t("tagOpenai")) + '</span>'
+      + ' <b>'+esc(p.name)+'</b> <span class="mono">'+esc((p.kind==="builtin"?llmBuiltinLabel(p.model):(p.model||""))+(p.base_url?" @ "+p.base_url:""))+'</span>';
     if(PREFS.errs.llm){
       sumBody.appendChild(Object.assign(el("span","fb2 err"),{textContent:PREFS.errs.llm}));
     } else if(PREFS.llm){
       const cur = (PREFS.llm.profiles||[]).find(p=>p.name===PREFS.llm.active);
       if(cur){
-        sumBody.innerHTML = '<span class="badge-type t-'+(cur.kind==="builtin"?"reference":cur.kind==="anthropic"?"pitfall":cur.kind==="ollama"?"note":"rule")+'">'
-          + esc(cur.kind==="builtin"?t("tagBuiltin"):cur.kind==="anthropic"?t("tagAnthropic"):cur.kind==="ollama"?t("tagOllama"):t("tagOpenai")) + '</span>'
-          + ' <b>'+esc(cur.name)+'</b> <span class="mono">'+esc((cur.kind==="builtin"?llmBuiltinLabel(cur.model):(cur.model||""))+(cur.base_url?" @ "+cur.base_url:""))+'</span>';
+        sumBody.innerHTML = llmBadgeHtml(cur);
       } else {
         sumBody.innerHTML = '<span class="muted">'+t("lNone")+'</span>';
       }
@@ -4229,6 +4231,13 @@ function renderPrefs(){
     mg.disabled = !PREFS.llm;
     mg.onclick = openLlmModal;
     c.appendChild(sumRow(t("eActive"), sumBody, mg));
+    // 识别意图槽摘要（双槽位：独立于普通槽一行；未配置显示"未设置"）
+    if(PREFS.llm && !PREFS.errs.llm){
+      const fcur = (PREFS.llm.profiles||[]).find(p=>p.name===PREFS.llm.active_filter);
+      const fltBody = el("span");
+      fltBody.innerHTML = fcur ? llmBadgeHtml(fcur) : '<span class="muted">'+t("lNone")+'</span>';
+      c.appendChild(sumRow(t("eActiveFilter"), fltBody));
+    }
     if(prefsFb.l) c.appendChild(savedFb("prefs:l"));
     d.appendChild(c);
   }
