@@ -1,5 +1,6 @@
-// Package llmx 收口大模型生成调用：openai（/chat/completions 兼容）与
-// anthropic（/v1/messages 兼容）两种协议，供条目优化等场景使用。
+// Package llmx 收口大模型生成调用：openai（/chat/completions 兼容）、
+// anthropic（/v1/messages 兼容）与 ollama（本地，OpenAI 兼容协议）三种协议，
+// 供条目优化等场景使用。
 package llmx
 
 import (
@@ -28,6 +29,9 @@ type Client struct {
 func New(p config.LLMProfile, timeout time.Duration) *Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
+	}
+	if p.Kind == "ollama" {
+		p.BaseURL = normalizeOllamaBase(p.BaseURL)
 	}
 	if p.Kind == "anthropic" {
 		// 用户按 openai 习惯把 base_url 填成 …/v1 时先去重，否则 endpoint 拼出
@@ -62,12 +66,12 @@ func (c *Client) Chat(ctx context.Context, system, user string, maxTokens int) (
 		maxTokens = c.p.MaxTokens
 	}
 	switch c.p.Kind {
-	case "openai":
+	case "openai", "ollama":
 		return c.chatOpenAI(ctx, system, user, maxTokens)
 	case "anthropic":
 		return c.chatAnthropic(ctx, system, user, maxTokens)
 	default:
-		return Reply{}, fmt.Errorf("未知 llm 类型: %q（openai|anthropic）", c.p.Kind)
+		return Reply{}, fmt.Errorf("未知 llm 类型: %q（openai|anthropic|ollama）", c.p.Kind)
 	}
 }
 
@@ -217,4 +221,17 @@ func (c *Client) chatAnthropic(ctx context.Context, system, user string, maxToke
 		Truncated: out.StopReason == "max_tokens",
 		Usage:     Usage{Prompt: out.Usage.Input, Completion: out.Usage.Output},
 	}, nil
+}
+
+// normalizeOllamaBase ollama 的 OpenAI 兼容端点挂在 /v1 下：留空按本机默认，
+// 缺 /v1 后缀自动补上（用户按习惯填 http://host:11434 会 404，embedx 修过同款）。
+func normalizeOllamaBase(base string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" {
+		base = "http://localhost:11434"
+	}
+	if !strings.HasSuffix(base, "/v1") {
+		base += "/v1"
+	}
+	return base
 }

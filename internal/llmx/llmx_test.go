@@ -234,3 +234,38 @@ func TestAdvancedParams(t *testing.T) {
 		t.Fatal("非法 temperature 应报错")
 	}
 }
+
+func TestNormalizeOllamaBase(t *testing.T) {
+	cases := map[string]string{
+		"":                         "http://localhost:11434/v1",
+		"http://192.168.1.5:11434": "http://192.168.1.5:11434/v1",
+		"http://host:11434/":       "http://host:11434/v1",
+		"http://host:11434/v1":     "http://host:11434/v1",
+		"http://host:11434/v1/":    "http://host:11434/v1",
+	}
+	for in, want := range cases {
+		if got := normalizeOllamaBase(in); got != want {
+			t.Errorf("normalizeOllamaBase(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestChatOllama(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": "pong"}}},
+		})
+	}))
+	defer srv.Close()
+	// base_url 不带 /v1：应自动补；无 api_key：ollama 忽略 Authorization
+	c := New(config.LLMProfile{Kind: "ollama", BaseURL: srv.URL, Model: "qwen3"}, 0)
+	rep, err := c.Chat(context.Background(), "sys", "usr", 100)
+	if err != nil || rep.Text != "pong" {
+		t.Fatalf("got (%q, %v)", rep.Text, err)
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Fatalf("path = %q（应自动补 /v1）", gotPath)
+	}
+}
