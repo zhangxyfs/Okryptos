@@ -1,0 +1,328 @@
+package chatsc
+
+import (
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"okryptos/internal/chatx"
+)
+
+// TestMain 模式：helper 进程伪装 llama-server（/health + 常驻）。
+// OK_HELPER_HANG=1 时永不就绪（模拟冷启动中的 llama-server）。
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("OK_HELPER") != "1" {
+		return
+	}
+	if os.Getenv("OK_HELPER_HANG") == "1" {
+		select {} // 阻塞至被 Kill
+	}
+	port := os.Getenv("OK_HELPER_PORT")
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	_ = http.ListenAndServe("127.0.0.1:"+port, mux)
+	os.Exit(0)
+}
+
+// setupEnv：OK_HOME 隔离 + ServerCommand 替换为 helper 进程 + 假模型落盘。
+func setupEnv(t *testing.T) (*Manager, chatx.Model) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	old := ServerCommand
+	ServerCommand = func(path string, args ...string) *exec.Cmd {
+		// 从 args 里挖 --port 值传给 helper
+		port := ""
+		for i, a := range args {
+			if a == "--port" && i+1 < len(args) {
+				port = args[i+1]
+			}
+		}
+		cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess")
+		cmd.Env = append(os.Environ(), "OK_HELPER=1", "OK_HELPER_PORT="+port)
+		return cmd
+	}
+	t.Cleanup(func() { ServerCommand = old })
+	model := chatx.Model{ID: "fake", File: "fake.gguf", Size: 4}
+	modelsDir := filepath.Join(home, "models")
+	os.MkdirAll(modelsDir, 0o755)
+	os.WriteFile(model.InstalledPath(modelsDir), []byte("fake"), 0o644)
+	rtDir := filepath.Join(home, "runtime")
+	os.MkdirAll(rtDir, 0o755)
+	os.WriteFile(filepath.Join(rtDir, serverExeName), []byte("x"), 0o755)
+	mgr := &Manager{RuntimeDir: rtDir, ModelsDir: modelsDir, HealthTimeout: 10 * time.Second, IdleTimeout: 100 * time.Millisecond}
+	t.Cleanup(mgr.Stop)
+	return mgr, model
+}
+
+func TestEnsureHealthyAndStop(t *testing.T) {
+	mgr, model := setupEnv(t)
+	st, err := mgr.Ensure(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Port <= 0 || st.ModelID != "fake" || !st.Healthy() {
+		t.Fatalf("%+v", st)
+	}
+	if LoadState() == nil {
+		t.Fatal("state 应已落盘")
+	}
+	// 幂等：再次 Ensure 复用
+	st2, err := mgr.Ensure(model)
+	if err != nil || st2.Port != st.Port {
+		t.Fatalf("应复用: %v %+v", err, st2)
+	}
+	mgr.Stop()
+	if LoadState() != nil {
+		t.Fatal("Stop 后 state 应删除")
+	}
+}
+
+func TestReconcileLifecycle(t *testing.T) {
+	mgr, model := setupEnv(t)
+	now := time.Now() // 固定基准时间：Reconcile 的 now 参数化正是为测试确定性
+	// 无 want 且 desired 未变 → 不拉起
+	mgr.lastDesired = "fake"
+	mgr.Reconcile(&model, now)
+	if LoadState() != nil {
+		t.Fatal("无 want 不应拉起")
+	}
+	// want → 拉起
+	RequestStart()
+	mgr.Reconcile(&model, now)
+	st := LoadState()
+	if st == nil || !st.Healthy() {
+		t.Fatal("want 应触发拉起")
+	}
+	if WantPending() {
+		t.Fatal("拉起后 want 应清除")
+	}
+	// 空闲超时 → 回收
+	mgr.Reconcile(&model, now.Add(time.Hour))
+	if LoadState() != nil {
+		t.Fatal("空闲应回收")
+	}
+	// desired 消失 → 确保停止
+	RequestStart()
+	mgr.Reconcile(&model, now)
+	mgr.Reconcile(nil, now)
+	if LoadState() != nil {
+		t.Fatal("desired 消失应停止")
+	}
+}
+
+func TestReconcileStopsOrphanWithoutState(t *testing.T) {
+	mgr, model := setupEnv(t)
+	RequestStart()
+	mgr.Reconcile(&model, time.Now())
+	st := LoadState()
+	if st == nil || !st.Healthy() {
+		t.Fatal("前置：sidecar 应在线")
+	}
+	// 模拟 writeState 失败/丢失：state 缺失但进程活着
+	if err := os.Remove(statePath()); err != nil {
+		t.Fatal(err)
+	}
+	mgr.Reconcile(nil, time.Now())
+	if st.Healthy() {
+		t.Fatal("孤儿进程应被回收（无条件 Stop）")
+	}
+	if LoadState() != nil {
+		t.Fatal("state 应保持缺席")
+	}
+}
+
+// TestReconcileDetectsCrash：sidecar 进程崩溃（state 残留但 /health 不通）时，
+// 第一轮 Reconcile 仅计数，连续第二轮判定死亡并回收；want 门控下下轮自然重拉。
+func TestReconcileDetectsCrash(t *testing.T) {
+	mgr, model := setupEnv(t)
+	mgr.IdleTimeout = time.Hour // 排除空闲回收干扰，只观察崩溃检测路径
+	RequestStart()
+	mgr.Reconcile(&model, time.Now())
+	if LoadState() == nil {
+		t.Fatal("前置：sidecar 应在线")
+	}
+	// 模拟崩溃：直接杀进程，state 文件残留
+	if err := mgr.cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	mgr.Reconcile(&model, now) // streak=1：仅计数，state 仍在
+	if LoadState() == nil {
+		t.Fatal("第一轮不健康应仅计数，不应立即回收")
+	}
+	mgr.Reconcile(&model, now) // streak=2：判死回收
+	if LoadState() != nil {
+		t.Fatal("连续两轮不健康应判死回收")
+	}
+	// want/激活门控下轮自然重拉（failCount 未达上限）
+	RequestStart()
+	mgr.Reconcile(&model, now)
+	st := LoadState()
+	if st == nil || !st.Healthy() {
+		t.Fatal("重拉后应恢复在线")
+	}
+}
+
+func TestWantFlagRoundTrip(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	if WantPending() {
+		t.Fatal("初始无 want")
+	}
+	RequestStart()
+	if !WantPending() {
+		t.Fatal("want 应存在")
+	}
+	ClearWant()
+	if WantPending() {
+		t.Fatal("清除后无 want")
+	}
+}
+
+// TestStopNotBlockedByEnsure：Ensure 的就绪等待不持 mu（M-11）——daemon 退出
+// 的 Stop 须立即拿锁杀进程，而不是被最长 HealthTimeout 的冷启动等待卡住。
+func TestStopNotBlockedByEnsure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	old := ServerCommand
+	spawned := make(chan struct{}, 1)
+	ServerCommand = func(path string, args ...string) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess")
+		cmd.Env = append(os.Environ(), "OK_HELPER=1", "OK_HELPER_HANG=1")
+		spawned <- struct{}{}
+		return cmd
+	}
+	t.Cleanup(func() { ServerCommand = old })
+	model := chatx.Model{ID: "fake", File: "fake.gguf", Size: 4}
+	modelsDir := filepath.Join(home, "models")
+	os.MkdirAll(modelsDir, 0o755)
+	os.WriteFile(model.InstalledPath(modelsDir), []byte("fake"), 0o644)
+	rtDir := filepath.Join(home, "runtime")
+	os.MkdirAll(rtDir, 0o755)
+	os.WriteFile(filepath.Join(rtDir, serverExeName), []byte("x"), 0o755)
+	mgr := &Manager{RuntimeDir: rtDir, ModelsDir: modelsDir, HealthTimeout: 30 * time.Second, IdleTimeout: time.Hour}
+
+	ensureDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.Ensure(model) // 进程永不就绪，须靠 Stop 杀掉后返回
+		ensureDone <- err
+	}()
+	<-spawned
+
+	stopDone := make(chan struct{})
+	go func() { mgr.Stop(); close(stopDone) }()
+	select {
+	case <-stopDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop 被 Ensure 的就绪等待持锁阻塞（M-11 回归）")
+	}
+	select {
+	case err := <-ensureDone:
+		if err == nil {
+			t.Fatal("进程被 Stop 杀掉后 Ensure 应返回错误")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Ensure 未随 Stop 杀进程而返回")
+	}
+}
+
+// 跨进程停杀：状态文件的 PID 对应进程已死（端口无应答）时只清状态文件、不盲杀
+//（v2.18.2 回归：PID 复用场景下曾会误杀无关进程）。
+func TestStopSkipsKillWhenUnhealthy(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	st := &State{PID: 424242, Port: 9, ModelID: "m"} // 端口 9(discard)必不应答
+	if err := writeState(st); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{}
+	m.Stop() // 不 panic、不挂起即过
+	if LoadState() != nil {
+		t.Fatal("状态文件应已清除")
+	}
+}
+
+// TestStopResetsUnhealthyStreak：M-10 回归——判死 Stop 后计数若停在阈值上，
+// 新 sidecar 首次探测瞬时失败即凑满"连续两轮"被杀。Stop 与 Ensure 冷启动
+// 路径都必须归零。
+func TestStopResetsUnhealthyStreak(t *testing.T) {
+	mgr, model := setupEnv(t)
+	RequestStart()
+	mgr.Reconcile(&model, time.Now())
+	if LoadState() == nil {
+		t.Fatal("前置：sidecar 应在线")
+	}
+	// Stop 路径：模拟判死时刻的计数，Stop 后须归零
+	mgr.unhealthyStreak = 2
+	mgr.Stop()
+	if mgr.unhealthyStreak != 0 {
+		t.Fatalf("Stop 应重置 unhealthyStreak，got %d", mgr.unhealthyStreak)
+	}
+	// Ensure 冷启动路径：state 已删，Ensure 走 stopLocked+spawnLocked
+	mgr.unhealthyStreak = 2
+	st, err := mgr.Ensure(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Healthy() {
+		t.Fatal("Ensure 后 sidecar 应健康")
+	}
+	if mgr.unhealthyStreak != 0 {
+		t.Fatalf("Ensure 冷启动应重置 unhealthyStreak，got %d", mgr.unhealthyStreak)
+	}
+}
+
+// TestSpawnArgsChat：chat sidecar 命令行——压 thinking、定上下文 8192，
+// 绝不含 embedding 专用参数（--embeddings/--pooling）。
+func TestSpawnArgsChat(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OK_HOME", home)
+	old := ServerCommand
+	var gotArgs []string
+	ServerCommand = func(path string, args ...string) *exec.Cmd {
+		gotArgs = append([]string(nil), args...)
+		// 不带 OK_HELPER：TestHelperProcess 立即返回，子进程秒退 → Ensure 快速报错
+		return exec.Command(os.Args[0], "-test.run=TestHelperProcess")
+	}
+	t.Cleanup(func() { ServerCommand = old })
+	model := chatx.Model{ID: "fake", File: "fake.gguf", Size: 4}
+	modelsDir := filepath.Join(home, "models")
+	os.MkdirAll(modelsDir, 0o755)
+	os.WriteFile(model.InstalledPath(modelsDir), []byte("fake"), 0o644)
+	rtDir := filepath.Join(home, "runtime")
+	os.MkdirAll(rtDir, 0o755)
+	os.WriteFile(filepath.Join(rtDir, serverExeName), []byte("x"), 0o755)
+	mgr := &Manager{RuntimeDir: rtDir, ModelsDir: modelsDir, HealthTimeout: 5 * time.Second, IdleTimeout: time.Hour}
+
+	if _, err := mgr.Ensure(model); err == nil {
+		t.Fatal("helper 立即退出，Ensure 应报错（参数已捕获）")
+	}
+	if len(gotArgs) == 0 {
+		t.Fatal("未捕获到 spawn 参数")
+	}
+	pair := func(flag, val string) bool {
+		for i, a := range gotArgs {
+			if a == flag && i+1 < len(gotArgs) && gotArgs[i+1] == val {
+				return true
+			}
+		}
+		return false
+	}
+	if !pair("-c", "8192") {
+		t.Fatalf("命令行应含 -c 8192: %v", gotArgs)
+	}
+	if !pair("--chat-template-kwargs", `{"enable_thinking":false}`) {
+		t.Fatalf("命令行应含 --chat-template-kwargs 压 thinking: %v", gotArgs)
+	}
+	for _, a := range gotArgs {
+		if a == "--embeddings" || a == "--pooling" {
+			t.Fatalf("chat sidecar 不应含 embedding 参数: %v", gotArgs)
+		}
+	}
+	if !strings.Contains(strings.Join(gotArgs, " "), "--port") {
+		t.Fatalf("命令行应含 --port: %v", gotArgs)
+	}
+}
