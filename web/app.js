@@ -89,7 +89,7 @@ const I18N = {
     gOnFb:"✓ 已开启全部 hooks", gOffFb:"✓ 已关闭全部 hooks",
     eManage:"管理配置", eProfiles:"服务列表", eAdd:"+ 新增服务", eEdit:"编辑", eDel:"删除", eSetActive:"设为使用中",
     fName:"名称", fType:"类型", fBase:"base_url", fModel:"模型", fKey:"api_key", fMirror:"下载源（仅 builtin）",
-    eAddTitle:"新增服务", eEditTitle:"编辑服务", fOk:"确定", fCancel:"取消",
+    eAddTitle:"新增服务", eEditTitle:"编辑服务", fOk:"确定", fCancel:"取消", fSaveSvc:"保存服务",
     typeBuiltin:"内置本地模型（ok 托管 · 无需联网）", typeOllama:"Ollama（本机/局域网服务）", typeOpenai:"自定义（OpenAI 兼容服务）",
     tagBuiltin:"内置", tagOllama:"Ollama", tagCustom:"自定义",
     mirrorHf:"hf-mirror 镜像（国内推荐）", mirrorOfficial:"huggingface 官方", downloaded:"（已下载）",
@@ -318,7 +318,7 @@ const I18N = {
     gOnFb:"✓ All hooks enabled", gOffFb:"✓ All hooks disabled",
     eManage:"Manage", eProfiles:"Services", eAdd:"+ Add service", eEdit:"Edit", eDel:"Delete", eSetActive:"Set active",
     fName:"Name", fType:"Type", fBase:"base_url", fModel:"Model", fKey:"api_key", fMirror:"Mirror (builtin only)",
-    eAddTitle:"Add service", eEditTitle:"Edit service", fOk:"OK", fCancel:"Cancel",
+    eAddTitle:"Add service", eEditTitle:"Edit service", fOk:"OK", fCancel:"Cancel", fSaveSvc:"Save service",
     typeBuiltin:"Builtin local model (ok-managed, offline)", typeOllama:"Ollama (local/LAN service)", typeOpenai:"Custom (OpenAI-compatible)",
     tagBuiltin:"Builtin", tagOllama:"Ollama", tagCustom:"Custom",
     mirrorHf:"hf-mirror (recommended in CN)", mirrorOfficial:"huggingface official", downloaded:" (downloaded)",
@@ -4668,7 +4668,7 @@ function renderEmbModal(){
     }
     const frow = el("div","prow");
     frow.appendChild(el("span","k"));
-    const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+    const ok = el("button","btn btn-primary"); ok.textContent = t("fSaveSvc");
     ok.onclick = ()=>{
       const nm = (embForm.name||"").trim();
       if(!nm) return;
@@ -4993,7 +4993,7 @@ function renderLlmModal(){
         frow.appendChild(Object.assign(el("span","fb2"+(llmDraft._testMsg.err?" err":"")),
           {textContent:llmDraft._testMsg.txt}));
     }
-    const ok = el("button","btn btn-primary"); ok.textContent = t("fOk");
+    const ok = el("button","btn btn-primary"); ok.textContent = t("fSaveSvc");
     ok.onclick = ()=>{
       const nm = (llmForm.name||"").trim();
       if(!nm) return;
