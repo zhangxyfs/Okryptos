@@ -21,7 +21,7 @@ set "ADAPT=adapters\kimi\*.cpp"
 set "UI_CORE=ui\geometry.cpp"
 set "UI_WIN=ui\app.cpp ui\menu.cpp ui\settings.cpp ui\watch.cpp"
 set "RENDER=render\*.cpp render\forms\*.cpp render\materials\*.cpp"
-set "SYSLIBS=d3d11.lib d2d1.lib dwrite.lib dcomp.lib dxgi.lib windowscodecs.lib user32.lib windowsapp.lib wtsapi32.lib"
+set "SYSLIBS=d3d11.lib d2d1.lib dwrite.lib dcomp.lib dxgi.lib windowscodecs.lib user32.lib gdi32.lib windowsapp.lib wtsapi32.lib"
 
 echo [1/3] 编译单测...
 cl %FLAGS% tests\*.cpp %CORE% %ADAPT% %UI_CORE% /Fo:build\ /Fe:build\okmeter-tests.exe || (popd & exit /b 1)

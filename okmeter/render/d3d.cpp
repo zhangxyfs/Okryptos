@@ -7,15 +7,24 @@ namespace okmeter::render {
 
 void D3DContext::release() {
   frame_.Reset();
-  swap_.Reset();
-  visual_.Reset();
-  target_.Reset();
-  dcomp_.Reset();
-  dwrite_.Reset();
+  staging_.Reset();
+  rt_.Reset();
   dc_.Reset();
   d2dDev_.Reset();
   d2df_.Reset();
+  dwrite_.Reset();
   d3d_.Reset();
+  if (memDC_) {
+    if (dibOld_) SelectObject(memDC_, dibOld_);
+    DeleteDC(memDC_);
+    memDC_ = nullptr;
+    dibOld_ = nullptr;
+  }
+  if (dib_) {
+    DeleteObject(dib_);
+    dib_ = nullptr;
+    dibBits_ = nullptr;
+  }
 }
 
 bool D3DContext::init(HWND hwnd, int w, int h) {
@@ -46,44 +55,58 @@ bool D3DContext::init(HWND hwnd, int w, int h) {
   if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                                  reinterpret_cast<IUnknown**>(dwrite_.GetAddressOf())))) return false;
 
-  // 4. DirectComposition：device → target(hwnd, 置顶) → visual → SetRoot
-  if (FAILED(DCompositionCreateDevice(dxgi.Get(), IID_PPV_ARGS(&dcomp_)))) return false;
-  if (FAILED(dcomp_->CreateTargetForHwnd(hwnd, TRUE, &target_))) return false;
-  if (FAILED(dcomp_->CreateVisual(&visual_))) return false;
-  if (FAILED(target_->SetRoot(visual_.Get()))) return false;
-
-  // 5. 透明 swapchain 并挂到 visual
-  if (!createSwapChain()) return false;
+  // 4. 帧目标（RT 纹理 + staging + DIB）
+  if (!createFrameTargets()) return false;
   ++generation_;  // 重建成功：代际 +1（资源缓存方据此失效）
   return true;
 }
 
-bool D3DContext::createSwapChain() {
-  ComPtr<IDXGIDevice> dxgi;
-  if (FAILED(d3d_.As(&dxgi))) return false;
-  ComPtr<IDXGIAdapter> adapter;
-  if (FAILED(dxgi->GetAdapter(&adapter))) return false;
-  ComPtr<IDXGIFactory2> factory;
-  if (FAILED(adapter->GetParent(IID_PPV_ARGS(&factory)))) return false;
-
-  DXGI_SWAP_CHAIN_DESC1 desc{};
-  desc.Width = (UINT)w_;
-  desc.Height = (UINT)h_;
-  desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-  desc.SampleDesc.Count = 1;
-  desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-  desc.BufferCount = 2;
-  desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-  desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
-  if (FAILED(factory->CreateSwapChainForComposition(dxgi.Get(), &desc, nullptr, &swap_))) return false;
-  if (FAILED(visual_->SetContent(swap_.Get()))) return false;
+bool D3DContext::createFrameTargets() {
+  if (w_ <= 0 || h_ <= 0) return false;
+  // GPU 渲染目标纹理
+  D3D11_TEXTURE2D_DESC rd{};
+  rd.Width = (UINT)w_;
+  rd.Height = (UINT)h_;
+  rd.MipLevels = 1;
+  rd.ArraySize = 1;
+  rd.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+  rd.SampleDesc.Count = 1;
+  rd.Usage = D3D11_USAGE_DEFAULT;
+  rd.BindFlags = D3D11_BIND_RENDER_TARGET;
+  if (FAILED(d3d_->CreateTexture2D(&rd, nullptr, &rt_))) return false;
+  // CPU 回读 staging
+  D3D11_TEXTURE2D_DESC sd = rd;
+  sd.Usage = D3D11_USAGE_STAGING;
+  sd.BindFlags = 0;
+  sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+  if (FAILED(d3d_->CreateTexture2D(&sd, nullptr, &staging_))) return false;
+  // 分层窗口像素源：32bpp 顶向下 DIB 挂 memDC
+  if (!memDC_) {
+    memDC_ = CreateCompatibleDC(nullptr);
+    if (!memDC_) return false;
+  } else if (dib_) {
+    SelectObject(memDC_, dibOld_);
+    DeleteObject(dib_);
+    dib_ = nullptr;
+  }
+  BITMAPINFO bi{};
+  bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+  bi.bmiHeader.biWidth = w_;
+  bi.bmiHeader.biHeight = -h_;  // 顶向下（与纹理行序一致）
+  bi.bmiHeader.biPlanes = 1;
+  bi.bmiHeader.biBitCount = 32;
+  bi.bmiHeader.biCompression = BI_RGB;
+  dib_ = CreateDIBSection(memDC_, &bi, DIB_RGB_COLORS, &dibBits_, nullptr, 0);
+  if (!dib_ || !dibBits_) return false;
+  dibOld_ = (HBITMAP)SelectObject(memDC_, dib_);
   return true;
 }
 
 bool D3DContext::ensureTarget() {
   if (frame_) return true;
+  if (!rt_) return false;
   ComPtr<IDXGISurface> surface;
-  if (FAILED(swap_->GetBuffer(0, IID_PPV_ARGS(&surface)))) return false;
+  if (FAILED(rt_.As(&surface))) return false;
   const D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
       D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
       D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
@@ -98,32 +121,22 @@ Microsoft::WRL::ComPtr<IDXGIDevice> D3DContext::dxgiDevice() const {
   return dxgi;
 }
 
-// back buffer → staging → WIC PNG（预乘 BGRA 转非预乘编码）
+// RT 纹理 → staging → WIC PNG（预乘 BGRA 转非预乘编码）
 bool D3DContext::saveFrame(const std::wstring& path) const {
-  if (!swap_ || !d3d_) return false;
-  ComPtr<ID3D11Texture2D> back;
-  if (FAILED(swap_->GetBuffer(0, IID_PPV_ARGS(&back)))) return false;
-  D3D11_TEXTURE2D_DESC desc{};
-  back->GetDesc(&desc);
-  desc.Usage = D3D11_USAGE_STAGING;
-  desc.BindFlags = 0;
-  desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-  desc.MiscFlags = 0;
-  ComPtr<ID3D11Texture2D> staging;
-  if (FAILED(d3d_->CreateTexture2D(&desc, nullptr, &staging))) return false;
+  if (!rt_ || !d3d_) return false;
   ComPtr<ID3D11DeviceContext> imm;
   d3d_->GetImmediateContext(&imm);
   if (!imm) return false;
-  imm->CopyResource(staging.Get(), back.Get());
-
+  imm->CopyResource(staging_.Get(), rt_.Get());
+  D3D11_TEXTURE2D_DESC desc{};
+  rt_->GetDesc(&desc);
   (void)CoInitializeEx(nullptr, COINIT_MULTITHREADED);  // 已初始化则 S_FALSE
   ComPtr<IWICImagingFactory> wic;
   if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
                               CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))))
     return false;
-
   D3D11_MAPPED_SUBRESOURCE m{};
-  if (FAILED(imm->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &m))) return false;
+  if (FAILED(imm->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &m))) return false;
   bool ok = false;
   ComPtr<IWICBitmap> bmp;
   if (SUCCEEDED(wic->CreateBitmapFromMemory(
@@ -153,7 +166,7 @@ bool D3DContext::saveFrame(const std::wstring& path) const {
       }
     }
   }
-  imm->Unmap(staging.Get(), 0);
+  imm->Unmap(staging_.Get(), 0);
   return ok;
 }
 
@@ -163,6 +176,29 @@ bool D3DContext::begin() {
   return true;
 }
 
+// staging → DIB（行拷贝，处理 RowPitch 对齐）→ UpdateLayeredWindow 上屏
+bool D3DContext::presentLayered() {
+  if (!staging_ || !dibBits_ || !memDC_) return false;
+  ComPtr<ID3D11DeviceContext> imm;
+  d3d_->GetImmediateContext(&imm);
+  if (!imm) return false;
+  imm->CopyResource(staging_.Get(), rt_.Get());
+  D3D11_MAPPED_SUBRESOURCE m{};
+  if (FAILED(imm->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &m))) return false;
+  const int rowBytes = w_ * 4;
+  auto* dst = static_cast<BYTE*>(dibBits_);
+  const auto* src = static_cast<const BYTE*>(m.pData);
+  for (int y = 0; y < h_; ++y)
+    memcpy(dst + (size_t)y * rowBytes, src + (size_t)y * m.RowPitch, (size_t)rowBytes);
+  imm->Unmap(staging_.Get(), 0);
+  SIZE sz{ w_, h_ };
+  POINT srcPt{ 0, 0 };
+  BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+  // nullptr dst/位置：只更新内容不动窗口（位置由 SetWindowPos 管理）
+  return UpdateLayeredWindow(hwnd_, nullptr, nullptr, &sz, memDC_, &srcPt, 0, &bf,
+                             ULW_ALPHA) != FALSE;
+}
+
 bool D3DContext::end() {
   HRESULT hr = dc_->EndDraw();
   if (hr == D2DERR_RECREATE_TARGET || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
@@ -170,32 +206,20 @@ bool D3DContext::end() {
     lastRebuildErr_ = hr;
     if (d3d_) lastRemovedReason_ = d3d_->GetDeviceRemovedReason();
     (void)init(hwnd_, w_, h_);  // 本帧丢弃，重建设备；返回 false 让调用方补画补呈
-    return false;  // 关键：帧丢弃必须显式 false——DComp 窗口无已呈内容会被 DWM 合成黑色
+    return false;  // 帧丢弃必须显式 false（调用方 render() 有界重试）
   }
   if (FAILED(hr)) return false;
-  // DComp 内容由 DWM 在 vsync 合成上屏，Present(1,0) 的 vsync 阻塞只会让消息泵
-  // 空转、WM_TIMER 合并（动画抖动放大源）；Present(0,0) 非阻塞提交即可。
-  hr = swap_->Present(0, 0);
-  if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
-    ++rebuilds_;
-    lastRebuildErr_ = hr;
-    if (d3d_) lastRemovedReason_ = d3d_->GetDeviceRemovedReason();
-    (void)init(hwnd_, w_, h_);
-    return false;  // 同上：帧未呈现，调用方须重试
-  }
-  if (FAILED(hr)) return false;
-  return SUCCEEDED(dcomp_->Commit());
+  if (!presentLayered()) return false;
+  return true;
 }
 
 void D3DContext::resize(int w, int h) {
-  if (w <= 0 || h <= 0 || (w == w_ && h == h_) || !swap_) return;
+  if (w <= 0 || h <= 0 || (w == w_ && h == h_) || !rt_) return;
   w_ = w;
   h_ = h;
   dc_->SetTarget(nullptr);
   frame_.Reset();
-  const HRESULT hr = swap_->ResizeBuffers(0, (UINT)w, (UINT)h, DXGI_FORMAT_UNKNOWN, 0);
-  if (FAILED(hr)) (void)init(hwnd_, w_, h_);
-  // 正常路径下帧位图在下一帧 begin() 的 ensureTarget 中重建
+  (void)createFrameTargets();  // 失败则下一帧 begin() 的 ensureTarget 兜不住 → end 重建
 }
 
 } // namespace okmeter::render

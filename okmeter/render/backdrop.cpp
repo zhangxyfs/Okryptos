@@ -94,12 +94,15 @@ bool BackdropCapture::start(HWND hwnd, IDXGIDevice* dxgi) {
   }
 
   // 1. affinity 最先做：自身窗口从捕获中排除（API 缺失/失败 → 降级标记）
+  // 诊断开关：OKM_NO_AFFINITY=1 时跳过（黑边根因排查——DWM 对保护窗口的 alpha 处理嫌疑）
   using AffinityFn = BOOL(WINAPI*)(HWND, DWORD);
   const auto setAffinity = reinterpret_cast<AffinityFn>(
       GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowDisplayAffinity"));
   constexpr DWORD kWdaExclude = 0x00000011;  // WDA_EXCLUDEFROMCAPTURE（20H1+）
   constexpr DWORD kWdaMonitor = 0x00000001;  // WDA_MONITOR 兜底（自身窗口呈黑盒）
-  if (!setAffinity) {
+  if (GetEnvironmentVariableW(L"OKM_NO_AFFINITY", nullptr, 0) != 0) {
+    log(L"OKM_NO_AFFINITY=1：跳过 affinity 设置（诊断模式）");
+  } else if (!setAffinity) {
     degraded_ = true;
     log(L"SetWindowDisplayAffinity API 缺失 → 降级标记（液态玻璃不可用）");
   } else if (!setAffinity(hwnd, kWdaExclude)) {
@@ -112,6 +115,11 @@ bool BackdropCapture::start(HWND hwnd, IDXGIDevice* dxgi) {
   }
 
   // 2. WinRT 公寓（FreeThreaded 池回调需要 MTA）
+  // 诊断开关：OKM_NO_CAPTURE=1 时设完 affinity 即返回（黑边排查：排除+不捕获）
+  if (GetEnvironmentVariableW(L"OKM_NO_CAPTURE", nullptr, 0) != 0) {
+    log(L"OKM_NO_CAPTURE=1：affinity 已设，跳过捕获会话（诊断模式）");
+    return true;
+  }
   HRESULT hr = RoInitialize(RO_INIT_MULTITHREADED);
   if (hr == S_OK) {
     roInit_ = true;

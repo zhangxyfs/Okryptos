@@ -114,7 +114,9 @@ Kimi Code CLI 的 token 用量只能进 TUI 敲 `/usage` 看，hooks 事件不�
 
 ## 4. 技术选型
 
-结论：**C++（MSVC）+ Win32 + D3D11 + DirectComposition，单 exe 全自含**。
+结论：**C++（MSVC）+ Win32 + D3D11 + 分层窗口（WS_EX_LAYERED/UpdateLayeredWindow）上屏，单 exe 全自含**。
+
+> 修订（Plan 2b 收尾期实机实证）：原方案的 DirectComposition 上屏在"与 `WDA_EXCLUDEFROMCAPTURE` 共存"时被 DWM 把透明区合成成不透明黑底（A/B 对照实验：同一渲染内容，DComp+排除=黑底，分层窗口+排除=正常透明；DComp 不加排除则正常）。呈现层改为分层窗口逐像素 alpha 上屏——迅雷悬浮球/QQ 贴边/游戏启动器镂空同款路径，GPU 渲染管线（D3D11/D2D/着色器）与 WGC 捕获均不变，仅"最后一公里"上屏换成 RT 纹理回读 + UpdateLayeredWindow。
 
 95% 保真度的三个必要条件（技术选型只按这三条裁决）：
 
@@ -124,7 +126,7 @@ Kimi Code CLI 的 token 用量只能进 TUI 敲 `/usage` 看，hooks 事件不�
 
 | 方案 | 体积 | 保真度 | 与本仓库契合度 | 结论 |
 |---|---|---|---|---|
-| **C++ Win32 + D3D11 + DComp** | 2~5MB，零运行时依赖 | **95~98%**（与系统合成器同一条 GPU 管线） | 构建链加 MSVC 一步，Inno/托盘拉起透明 | **推荐** |
+| **C++ Win32 + D3D11 + 分层窗口** | 2~5MB，零运行时依赖 | **95~98%**（渲染与系统合成器同一条 GPU 管线） | 构建链加 MSVC 一步，Inno/托盘拉起透明 | **推荐** |
 | C# + WinUI 3（WinAppSDK） | 自含 60~90MB | ~95%（Composition 弹簧 + PixelShaderEffect + WGC） | 新语言新工具链，体积违背"小工具"定位 | 否决：体积与运行时 |
 | Go + WebView2 + WebGL2 升级 | ~10MB | ~90%（帧数据过 PostWebMessage 序列化，合成时机不可控） | 依赖现成 | 否决：摸不到 95% |
 | Electron | ~150MB | ~90% | 重量级 | 否决 |
@@ -132,7 +134,7 @@ Kimi Code CLI 的 token 用量只能进 TUI 敲 `/usage` 看，hooks 事件不�
 
 方案要点（C++ 路线）：
 
-- **窗口**：透明 swapchain 挂 DirectComposition visual，每像素 alpha 由合成器原生支持；`WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`；不用 WS_EX_LAYERED 老路子，不注册 AppBar。
+- **窗口**：`WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED` 分层窗口；D2D 渲到离屏 RT 纹理，帧末回读 DIB 经 `UpdateLayeredWindow` 逐像素 alpha 上屏（修订见 §4 结论注记；DComp swapchain 路线已废弃）。不注册 AppBar。
 - **背景捕获**：WGC `GraphicsCaptureItem::CreateFromMonitor` 全屏捕获，着色器里按窗口区域裁剪采样；自身窗口靠 `WDA_EXCLUDEFROMCAPTURE` 排除。
 - **渲染**：D3D11 片元着色器做折射/色散/菲涅尔/粒子；文本与详情卡用 D2D + DWrite（UI 总量 = 若干球 + 一张卡 + 一个菜单 + 设置面板，不需要 UI 框架）。
 - **数据层**：`ReadDirectoryChangesW` 监听 + 逐行 JSON 解析（格式固定，手写解析或单头库）+ 游标原子写盘，约 200 行，与 UI 同进程——维持"无 IPC"裁决不变。
@@ -179,3 +181,5 @@ Kimi Code CLI 的 token 用量只能进 TUI 敲 `/usage` 看，hooks 事件不�
 - 透明 + 置顶 + 穿透三个标志位在 Windows 各版本组合行为有差异，需在 Win10/Win11 各验一遍。
 - **WGC 显示器捕获触发 Win11 黄色捕获提示边框**（全屏四缘常亮黄框，Plan 2b 实测）：必须 `IGraphicsCaptureSession3::put_IsBorderRequired(false)`（Win11 22H2+）；旧版 Windows 无此接口则保留黄框并记 backdrop.log，不降级。光标捕获同步关闭（`IGraphicsCaptureSession2`），玻璃底不含指针。
 - **`WDA_EXCLUDEFROMCAPTURE` 的副作用**：GDI `BitBlt`/`CopyFromScreen` 截图与 WGC 录屏都看不到 dock 本体——自检截图必须走 `--shot`/`--shotcap`/`--shotmenu`/`--shotsettings` 的回读 backbuffer 路径，不能用系统截屏验收。
+- **DComp + `WDA_EXCLUDEFROMCAPTURE` 组合被 DWM 合成成不透明黑底**（Plan 2b 收尾期"黑边"根因，A/B 实证）：DComp 透明 swapchain 单独用正常、分层窗口加排除也正常，唯独 DComp+排除黑底；且运行时用 `SetWindowDisplayAffinity` 撤除标志不恢复。故呈现层弃用 DComp 改分层窗口（§4 修订）。
+- **WUC `CompositionBackdropBrush` 在非 UWP 桌面进程渲染为空**（spike 实证：Compositor 需先建 DispatcherQueue 才能激活；SpriteVisual 色刷正常显示但 BackdropBrush 是 no-op）——"系统合成器逐 visual 背景模糊"在纯 Win32 不可用，官方矩形亚克力（WinAppSDK DesktopAcrylicController）不满足逐球形态且拖重型运行时，故背景模糊维持自持 WGC 像素路线。

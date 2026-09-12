@@ -38,7 +38,7 @@ class KimiAdapter;
 // 退出（flush 游标）；弧线/空白右键仅后三项。菜单区纳入 dock 窗口（并集扩窗，
 // 球区偏移记 zoneDX_/zoneDY_），菜单外点击/Escape 收起。
 // 设置面板：背板式（ui/settings.*，规格 §3.5）——停靠 dock 对侧屏缘的 328px 玻璃
-// 面板（标题栏 + 滚动体区 + 底部操作条），与菜单同一套并集扩窗/同 swapchain 绘制。
+// 面板（标题栏 + 滚动体区 + 底部操作条），与菜单同一套并集扩窗/同渲染目标绘制。
 // 两段式保存：控件只改 draft，保存并生效 → normalize + saveConfig + createModules
 // 全量 rebuild；取消/✕/Escape 丢弃。面板打开期间 dock 保持展开；联合窗口横贯全屏，
 // WM_NCHITTEST 对中部空白区回 HTTRANSPARENT 穿透；滚轮走原始输入（RIDEV_INPUTSINK，

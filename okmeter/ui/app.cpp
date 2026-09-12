@@ -1353,7 +1353,8 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   const int x = cfg_.edge == "left" ? work.left + kCollapsedPx - dockW_
                                     : work.right - kCollapsedPx;
 
-  hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+  hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE |
+                              WS_EX_LAYERED,
                           kClassName, L"OkMeter", WS_POPUP,
                           x, winY_, dockW_, h, nullptr, nullptr, inst, this);
   if (!hwnd_) return 1;
