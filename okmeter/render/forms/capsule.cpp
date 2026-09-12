@@ -8,7 +8,7 @@ namespace okmeter::render {
 namespace {
 
 constexpr double kCapHalfW = 87;   // 胶囊半宽（174px）
-constexpr double kCapHalfH = 19;   // 胶囊半高
+constexpr double kCapHalfH = 20;   // 胶囊半高（原型 .cap 高 40：8+15+5+3+9）
 
 class CapsuleForm final : public IForm {
 public:
@@ -62,7 +62,7 @@ public:
         // 顶行：左名 右值，padding 左右 13、上 8（原型 .cap .top）
         if (!di.label.empty()) {
           ctx.brush->SetColor(inkOn(luma, 0.66f * dim));
-          const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f, t + 5.0f, rgt - 80.0f, t + 21.0f);
+          const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f, t + 8.0f, rgt - 80.0f, t + 24.0f);
           dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.capNameFmt,
                        &tr, ctx.brush,
                        D2D1_DRAW_TEXT_OPTIONS_NONE,
@@ -70,7 +70,7 @@ public:
         }
         if (!di.value.empty()) {
           ctx.brush->SetColor(inkOn(luma, 0.93f * dim));
-          const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f, t + 5.0f, rgt - 13.0f, t + 21.0f);
+          const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f, t + 8.0f, rgt - 13.0f, t + 24.0f);
           dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.capValFmt,
                        &tr, ctx.brush);
         }

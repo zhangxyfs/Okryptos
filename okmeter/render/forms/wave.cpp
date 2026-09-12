@@ -42,7 +42,7 @@ public:
 
   double hoverScale() const override { return 1.07; }  // 原型 .wv.hot scale(1.07)
   double hoverPush() const override { return 0; }
-  double cardRadius(int, int) const override { return 22; }
+  double cardRadius(int, int) const override { return 20; }  // 原型 RADII wave
 
   void drawItems(ID2D1DeviceContext* dc, const DrawContext& ctx) const override {
     if (!dc || !ctx.geom || !ctx.items || !ctx.material || !ctx.brush ||
@@ -82,21 +82,21 @@ public:
       // 顶行：左名右值（原型 .wv .top，padding 13）
       if (!di.label.empty()) {
         ctx.brush->SetColor(inkOn(luma, 0.66f * dim));
-        const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f, c.y - 27.0f, rgt - 80.0f, c.y - 11.0f);
+        const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f, c.y - 24.0f, rgt - 80.0f, c.y - 9.0f);
         dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.capNameFmt,
                      &tr, ctx.brush, D2D1_DRAW_TEXT_OPTIONS_NONE,
                      DWRITE_MEASURING_MODE_NATURAL);
       }
       if (!di.value.empty()) {
         ctx.brush->SetColor(inkOn(luma, 0.93f * dim));
-        const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f, c.y - 27.0f, rgt - 13.0f, c.y - 11.0f);
+        const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f, c.y - 24.0f, rgt - 13.0f, c.y - 9.0f);
         dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.capValFmt,
                      &tr, ctx.brush);
       }
       // sparkline：26 点历史，170×24（原型 drawSpark 同款：线 + 下方面积）
       if (di.hist.size() >= 2) {
         const float sw = 170.0f, sh = 24.0f;
-        const float sx = c.x - sw * 0.5f, sy = c.y - 8.0f;
+        const float sx = c.x - sw * 0.5f, sy = c.y - 3.0f;
         double maxV = 1.0;
         for (double v : di.hist) if (v > maxV) maxV = v;
         const size_t cnt = di.hist.size();

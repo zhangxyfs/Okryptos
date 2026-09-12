@@ -40,7 +40,7 @@ public:
 
   double hoverScale() const override { return 1.07; }  // 原型 .lvl.hot scale(1.07)
   double hoverPush() const override { return 0; }      // 块间距已大，推挤只会抖
-  double cardRadius(int, int) const override { return 22; }
+  double cardRadius(int, int) const override { return 20; }  // 原型 RADII level
 
   void drawItems(ID2D1DeviceContext* dc, const DrawContext& ctx) const override {
     if (!dc || !ctx.geom || !ctx.items || !ctx.material || !ctx.brush ||
@@ -80,14 +80,14 @@ public:
         // 顶行：左名（10px）右值（11px mono），padding 13（原型 .lvl .top）
         if (!di.label.empty()) {
           ctx.brush->SetColor(inkOn(luma, 0.66f * dim));
-          const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f, c.y - 22.0f, rgt - 80.0f, c.y - 6.0f);
+          const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f, c.y - 17.0f, rgt - 80.0f, c.y - 2.0f);
           dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.capNameFmt,
                        &tr, ctx.brush, D2D1_DRAW_TEXT_OPTIONS_NONE,
                        DWRITE_MEASURING_MODE_NATURAL);
         }
         if (!di.value.empty()) {
           ctx.brush->SetColor(inkOn(luma, 0.93f * dim));
-          const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f, c.y - 22.0f, rgt - 13.0f, c.y - 6.0f);
+          const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f, c.y - 17.0f, rgt - 13.0f, c.y - 2.0f);
           dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.capValFmt,
                        &tr, ctx.brush);
         }
@@ -98,7 +98,7 @@ public:
           const float segW = (total - segGap * 11.0f) / 12.0f;
           int lit = (int)std::lround((di.ratio < 0 ? 0 : di.ratio > 1 ? 1 : di.ratio) * 12.0);
           if (lit < 1) lit = 1;
-          const float y0 = c.y + 6.0f;
+          const float y0 = c.y + 4.0f;
           for (int s = 0; s < 12; ++s) {
             const float x0 = l + 13.0f + s * (segW + segGap);
             const D2D1_RECT_F sr = D2D1::RectF(x0, y0, x0 + segW, y0 + segH);

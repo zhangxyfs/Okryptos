@@ -38,7 +38,7 @@ DockGeom layoutCapsule(int n, const std::string& edge) {
   for (int i = 0; i < n; ++i) {
     g.items[(size_t)i].x = g.w / 2;  // 左右缘对称，edge 只影响 tuck 方向
     g.items[(size_t)i].y = g.h / 2 + (i - mid) * step;
-    g.items[(size_t)i].r = 19;       // 胶囊半高（174×38，padding 8+9 含 3px 占比条）
+    g.items[(size_t)i].r = 20;       // 胶囊半高（原型 .cap 高 40：8+15+5+3+9）
     g.items[(size_t)i].hw = 87;      // 胶囊半宽（174/2）
   }
   (void)edge;

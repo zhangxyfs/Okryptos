@@ -83,7 +83,7 @@ public:
 
   double hoverScale() const override { return 1.14; }  // 原型 .nx.hot scale(1.14)
   double hoverPush() const override { return 0; }
-  double cardRadius(int, int) const override { return 20; }
+  double cardRadius(int, int) const override { return 54; }  // 原型 RADII nixie
 
   void drawItems(ID2D1DeviceContext* dc, const DrawContext& ctx) const override {
     if (!dc || !ctx.geom || !ctx.items || !ctx.material || !ctx.brush ||
@@ -140,7 +140,7 @@ public:
       if (!digits.empty()) totalW -= 3.0f;
       if (!unit.empty()) totalW += 4.0f + 8.0f;
       float x = c.x - totalW * 0.5f;
-      const float y = c.y - 21.0f;
+      const float y = c.y - 19.0f;
       const D2D1_COLOR_F lit = osc.isCenter
           ? D2D1::ColorF(kAccent, dim) : inkOn(luma, 0.5f * dim);
       const D2D1_COLOR_F unlit = inkOn(luma, 0.5f * 0.13f * dim);
@@ -159,7 +159,7 @@ public:
       // 模型名（8.5px dim，原型 .nx .k 居中省略）
       if (!di.label.empty()) {
         ctx.brush->SetColor(inkOn(luma, 0.5f * dim));
-        const D2D1_RECT_F tr = D2D1::RectF(c.x - 48.0f, c.y + 9.0f, c.x + 48.0f, c.y + 21.0f);
+        const D2D1_RECT_F tr = D2D1::RectF(c.x - 48.0f, c.y + 11.0f, c.x + 48.0f, c.y + 23.0f);
         dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.labelFmt,
                      &tr, ctx.brush);
       }
