@@ -219,6 +219,13 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 		if len(info.CooledSkipped) > 0 {
 			logErr("prompt dedup: 冷却跳过（%s）", strings.Join(info.CooledSkipped, "、"))
 		}
+		// 覆盖度准入诊断（方案A）：记 ok.log，GUI 日志页可按"覆盖"过滤
+		if info.KeywordGated {
+			logErr("prompt coverage: 纯虚词查询，关键词通道整体跳过")
+		}
+		if len(info.CoverageRejected) > 0 {
+			logErr("prompt coverage: 覆盖度不足跳过（%s）", strings.Join(info.CoverageRejected, "、"))
+		}
 		hits = h
 	}
 	if len(hits) > 0 {

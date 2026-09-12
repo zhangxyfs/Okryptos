@@ -567,6 +567,22 @@ func TestCooldownGatedTurnTicks(t *testing.T) {
 	}
 }
 
+// TestPromptCoverageFilter 方案A 端到端：虚词查询不注入，实词查询照常注入。
+func TestPromptCoverageFilter(t *testing.T) {
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "构建.md", "---\ntitle: 构建双路径漂移\ntype: pitfall\ntags: [构建]\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\ndist/changelogs/ 还是陈旧内容。更彻底的做法是收敛到单一构建入口。\n")
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := InjectForPrompt(pc, "s-cov", projDir, "还是黑底的"); strings.Contains(out, "构建.md") {
+		t.Fatalf("虚词查询不应注入无关条目, got: %q", out)
+	}
+	if out := InjectForPrompt(pc, "s-cov", projDir, "构建漂移怎么回事"); !strings.Contains(out, "构建.md") {
+		t.Fatalf("实词查询应照常注入, got: %q", out)
+	}
+}
+
 // TestCooldownNoInjectedEvent 冷却跳过的轮次不记 injected 事件（反馈降权统计
 // 不被冷却污染）。
 func TestCooldownNoInjectedEvent(t *testing.T) {

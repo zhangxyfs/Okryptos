@@ -8,6 +8,7 @@ import (
 
 	"okryptos/internal/config"
 	"okryptos/internal/embed"
+	"okryptos/internal/retrieve"
 )
 
 // MinScoreFloor 计算生效的最低分数阈值。FTS5 bm25 的 idf 在小语料库下趋近于 0
@@ -95,6 +96,11 @@ type QueryInfo struct {
 	//（basename，按名次排序）；exclude 为空时恒 nil。供 hook 层记 ok.log
 	//（GUI 日志页按"冷却"过滤）。
 	CooledSkipped []string
+	// CoverageRejected：关键词通道因有效词元覆盖度不足被拒的条目（按检出序）。
+	// 供 hook 层记 ok.log（GUI 日志页按"覆盖"过滤）。
+	CoverageRejected []string
+	// KeywordGated：原词元非空但有效词元为 0（纯虚词查询），关键词通道整体跳过。
+	KeywordGated bool
 }
 
 // Hit 是一条检索命中，携带注入所需的正文与摘要。
@@ -213,9 +219,19 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve, 
 	}
 	var info QueryInfo
 
+	// 覆盖度准入（方案A）：有效词元 = 原词元滤虚词停用表（只作用于准入计数，
+	// FTS MATCH 仍用原词元，打分/排序不变）。纯虚词查询跳过整个关键词通道。
+	coverageOn := cfg.Coverage.Enabled
+	effTerms := terms
+	need := 0
+	if coverageOn {
+		effTerms = retrieve.EffectiveTerms(terms, cfg.Coverage.ExtraStopTerms)
+		need = retrieve.RequiredCoverage(len(effTerms), cfg.Coverage.MinRatio)
+		info.KeywordGated = len(terms) > 0 && len(effTerms) == 0
+	}
 	// 关键词通道：FTS5 BM25。bm25 返回负值（越小越好），取 kw=-rank，
 	// 归一化为 kw/(kw+6)。
-	if match := buildMatch(terms); match != "" {
+	if match := buildMatch(terms); match != "" && !info.KeywordGated {
 		rows, err := db.sql.Query(
 			`SELECT e.filename, e.title, e.type, e.summary, e.body, e.tags, e.mtime,
 				bm25(entries_fts, 10.0, 8.0, 3.0, 1.0) AS r
@@ -233,6 +249,22 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve, 
 				return nil, QueryInfo{}, err
 			}
 			h.Tags = splitTags(tagsStr)
+			// 覆盖度计数：命中标题/tags/摘要/正文的有效词元数须 ≥ need。
+			// 词元均小写（Terms 已归一），haystack 同步小写；拉丁词元按子串计
+			//（"go" 可计入 "golang"）——方向是放宽准入，fail-open 可接受。
+			if coverageOn {
+				haystack := strings.ToLower(h.Title + " " + tagsStr + " " + h.Summary + " " + h.Body)
+				cov := 0
+				for _, et := range effTerms {
+					if strings.Contains(haystack, et) {
+						cov++
+					}
+				}
+				if cov < need {
+					info.CoverageRejected = append(info.CoverageRejected, h.Filename)
+					continue
+				}
+			}
 			kw := -rank
 			// 准入看未乘 α 的归一 BM25 分（用户调 α 不应改变通道准入门槛）
 			if floor > 0 && kw/(kw+6) < floor {
@@ -321,13 +353,11 @@ func (db *DB) queryAll(terms []string, queryVec []float32, cfg config.Retrieve, 
 		// 语义诊断：样本足够却无任何语义准入（无显著头部）——供日志/提示/GUI 展示
 		if len(coses) >= 3 && !semAdmitted {
 			max, median, relGap := cosStats(coses)
-			info = QueryInfo{
-				SemanticRejected: true,
-				Coses:            len(coses),
-				MaxCos:           max,
-				MedianCos:        median,
-				RelGap:           relGap,
-			}
+			info.SemanticRejected = true
+			info.Coses = len(coses)
+			info.MaxCos = max
+			info.MedianCos = median
+			info.RelGap = relGap
 		}
 	}
 
