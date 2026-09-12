@@ -329,6 +329,16 @@ void BackdropCapture::onFrame(IUnknown* poolSender) {
     (void)pool->Recreate(dev.Get(), wgd::DirectXPixelFormat_B8G8R8A8UIntNormalized, 1, size);
 }
 
+void BackdropCapture::setLumaRegion(int x, int y, int w, int h) {
+  AcquireSRWLockExclusive(&lock_);
+  lumaX_ = x;
+  lumaY_ = y;
+  lumaW_ = w;
+  lumaH_ = h;
+  lumaDirty_ = true;  // 区域变化即重采
+  ReleaseSRWLockExclusive(&lock_);
+}
+
 bool BackdropCapture::acquire(ID3D11Texture2D** out) {
   if (!out) return false;
   *out = nullptr;
@@ -358,6 +368,18 @@ bool BackdropCapture::acquire(ID3D11Texture2D** out) {
       (void)dev->CreateTexture2D(&sd, nullptr, &lumaStage_);
     }
     if (imm && lumaStage_) {
+      // 采样区（纹理坐标）：lumaX_<0 或非法/过小时回退全屏
+      int rx = lumaX_ - capX_, ry = lumaY_ - capY_, rw = lumaW_, rh = lumaH_;
+      if (lumaX_ < 0 || rw < 16 || rh < 16 || rx >= capW_ || ry >= capH_) {
+        rx = 0;
+        ry = 0;
+        rw = capW_;
+        rh = capH_;
+      }
+      if (rx < 0) rx = 0;
+      if (ry < 0) ry = 0;
+      if (rx + rw > capW_) rw = capW_ - rx;
+      if (ry + rh > capH_) rh = capH_ - ry;
       D3D11_BOX box{};
       box.front = 0;
       box.back = 1;
@@ -365,8 +387,8 @@ bool BackdropCapture::acquire(ID3D11Texture2D** out) {
       box.right = 1;
       for (int j = 0; j < 8; ++j)
         for (int i = 0; i < 8; ++i) {
-          box.left = (UINT)((i + 0.5) * capW_ / 8);
-          box.top = (UINT)((j + 0.5) * capH_ / 8);
+          box.left = (UINT)(rx + (int)((i + 0.5) * rw / 8));
+          box.top = (UINT)(ry + (int)((j + 0.5) * rh / 8));
           box.right = box.left + 1;
           box.bottom = box.top + 1;
           imm->CopySubresourceRegion(lumaStage_.Get(), 0, (UINT)i, (UINT)j, 0,

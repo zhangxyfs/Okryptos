@@ -39,6 +39,10 @@ public:
   // 顺带在帧变化时刷新 luma_（8×8 网格点采样均摊亮度，亮背景自适应墨色用）
   bool acquire(ID3D11Texture2D** out);
   float luma() const { return luma_; }  // 0..1 相对亮度；无捕获/未采样为 0
+  // 亮度采样区域（屏幕坐标，默认为全屏）：app 在窗口位置变化时设置为 dock
+  // 窗口矩形——luma 反映"dock 背后的实际背景"而不是全屏均值（半屏白半屏暗
+  // 时全屏均值被稀释，自适应墨色永不触发，实测亮底不可读主因）
+  void setLumaRegion(int x, int y, int w, int h);
   bool dirty() const;
   void markClean();
   unsigned long long frameCount() const;  // 累计到达帧数（验收/诊断）
@@ -66,6 +70,7 @@ private:
   float luma_ = 0.0f;        // 最近帧均摊亮度（acquire 内网格点采样）
   bool lumaDirty_ = true;    // 新帧到达置位，acquire 采样后清
   std::chrono::steady_clock::time_point lastLumaTp_{};  // 亮度采样节流（≥300ms）
+  int lumaX_ = -1, lumaY_ = 0, lumaW_ = 0, lumaH_ = 0;  // 采样区（屏幕坐标；-1=全屏）
   Microsoft::WRL::ComPtr<ID3D11Texture2D> lumaStage_;  // 8×8 STAGING 采样缓冲
 
   bool ok_ = false;

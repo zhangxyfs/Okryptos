@@ -383,6 +383,7 @@ void DockApp::applyWindowPos() {
   }
   SetWindowPos(hwnd_, nullptr, x, y, w, h,
                SWP_NOZORDER | SWP_NOACTIVATE);  // 尺寸变化 → WM_SIZE → d3d.resize + render
+  backdrop_.setLumaRegion(x, y, w, h);  // 亮度采样区 = dock 窗口对应背景（自适应墨色用）
   if (menu_.open && (menu_.parent1 >= 0 || menu_.parent2 >= 0))
     placeSubColumns();  // 扩窗后按新窗口原点重布子列（屏幕坐标不变）
 }

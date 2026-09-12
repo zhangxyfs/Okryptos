@@ -199,7 +199,7 @@ public:
     else if (ctx.isCenter)
       ctx.brush->SetColor(glassfx::accentC(0.60f * dim));
     else
-      ctx.brush->SetColor(inkOn(backdropLuma(), 0.16f * dim));  // 亮底深描边
+      ctx.brush->SetColor(inkOn(backdropLuma(), 0.30f * dim));  // 亮底深描边（加深）
     glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f, 0.0f, ctx.cornerR);
   }
 
