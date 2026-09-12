@@ -244,13 +244,13 @@ void DockApp::rebuildCard() {
   const Binding& b = bindings_[(size_t)hoverIdx_];
   const int64_t now = nowMs();
   auto row = [&](const wchar_t* label, int64_t v) {
-    card_.rows.emplace_back(label, wide(fmtExact(v)));
+    card_.rows.emplace_back(label, wide(fmtYi(v)));  // 万/亿单位（读数省力）
   };
   if (b.isModel) {
     const ModelStat* m = agg.model(b.modelId);
     if (!m) return;
     card_.title = wide(b.modelId);
-    card_.big = wide(fmtExact(m->all.total()));
+    card_.big = wide(fmtYi(m->all.total()));
     row(L"今日", agg.modelToday(b.modelId, now).total());
     row(L"本周", agg.modelWeek(b.modelId, now).total());
     row(L"累计", m->all.total());
@@ -258,7 +258,7 @@ void DockApp::rebuildCard() {
   } else {
     const Sums t = scopeSums(agg, b.scope, now);
     card_.title = std::wstring(scopeLabel(b.scope)) + L" · 总量模式";
-    card_.big = wide(fmtExact(t.total()));
+    card_.big = wide(fmtYi(t.total()));
     row(L"当前会话", agg.session().total());
     row(L"今日", agg.today(now).total());
     row(L"全部累计", agg.all().total());

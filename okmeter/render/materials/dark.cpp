@@ -25,8 +25,14 @@ D2D1_COLOR_F kHairline(float a) { return D2D1::ColorF(1.0f, 1.0f, 1.0f, a); }
 class DarkMaterial final : public IMaterial {
 public:
   std::string id() const override { return "dark"; }
-  // 有效玻璃亮度：74% desk-deep 叠背景——亮背景下球体仍偏深，墨色恒浅
-  float backdropLuma() const override { return 0.74f * 0.08f + 0.26f * lastLuma_; }
+  // 有效玻璃亮度：74% desk-deep 叠背景——亮背景下球体仍偏深，墨色恒浅；
+  // 迟滞防闪烁：跨阈值震荡时墨色不来回跳（>0.62 深墨 / <0.48 浅墨 / 中间保持）
+  float backdropLuma() const override {
+    const float l = 0.74f * 0.08f + 0.26f * lastLuma_;
+    if (l > 0.62f) darkInk_ = true;
+    else if (l < 0.48f) darkInk_ = false;
+    return darkInk_ ? 1.0f : 0.0f;
+  }
 
   void onPointer(float x, float y) const override {
     px_ = x;
@@ -224,7 +230,8 @@ private:
   mutable ComPtr<ID2D1RadialGradientBrush> hotGlow_;  // 悬停 accent 外发光
   mutable float px_ = 0, py_ = 0;                     // 跟手光光源位置
   mutable bool hasPtr_ = false;
-  mutable float lastLuma_ = 0.0f;                     // 最近背景帧亮度（自适应墨色）
+  mutable float lastLuma_ = 0.0f;
+  mutable bool darkInk_ = false;  // 墨色迟滞状态                     // 最近背景帧亮度（自适应墨色）
 };
 
 } // namespace

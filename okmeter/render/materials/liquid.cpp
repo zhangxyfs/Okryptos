@@ -57,7 +57,11 @@ ComPtr<ID2D1Bitmap> bakeNormalMap(ID2D1DeviceContext* dc) {
 class LiquidMaterial final : public IMaterial {
 public:
   std::string id() const override { return "liquid"; }
-  float backdropLuma() const override { return lastLuma_; }
+  float backdropLuma() const override {  // 迟滞防闪烁（>0.62 深墨 / <0.48 浅墨）
+    if (lastLuma_ > 0.62f) darkInk_ = true;
+    else if (lastLuma_ < 0.48f) darkInk_ = false;
+    return darkInk_ ? 1.0f : 0.0f;
+  }
 
   void onPointer(float x, float y) const override {
     px_ = x;
@@ -392,7 +396,8 @@ private:
   mutable ComPtr<ID2D1RadialGradientBrush> hlTop_, specular_;
   mutable ComPtr<ID2D1LinearGradientBrush> edgeBright_, edgeDark_;
   mutable float px_ = 0, py_ = 0;
-  mutable float lastLuma_ = 0.0f;  // 最近背景帧亮度（自适应墨色）
+  mutable float lastLuma_ = 0.0f;
+  mutable bool darkInk_ = false;  // 墨色迟滞状态  // 最近背景帧亮度（自适应墨色）
   mutable bool hasPtr_ = false;
 };
 
