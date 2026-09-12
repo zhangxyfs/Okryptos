@@ -37,6 +37,28 @@ func TestDesiredBuiltinModel(t *testing.T) {
 	}
 }
 
+func TestDesiredChatModel(t *testing.T) {
+	var cfg config.Config
+	if desiredChatModel(cfg) != nil {
+		t.Fatal("无 active 应 nil")
+	}
+	cfg.LLM.Active = "a"
+	cfg.LLM.Profiles = []config.LLMProfile{{Name: "a", Kind: "openai", Model: "m", BaseURL: "h"}}
+	if desiredChatModel(cfg) != nil {
+		t.Fatal("openai 应 nil")
+	}
+	cfg.LLM.Profiles[0].Kind = "builtin"
+	cfg.LLM.Profiles[0].Model = "qwen3-1.7b-q8"
+	m := desiredChatModel(cfg)
+	if m == nil || m.ID != "qwen3-1.7b-q8" {
+		t.Fatalf("%+v", m)
+	}
+	cfg.LLM.Profiles[0].Model = "不存在"
+	if desiredChatModel(cfg) != nil {
+		t.Fatal("未知清单 id 应 nil")
+	}
+}
+
 // TestJanitorStartsSidecar：全局配置 active=内置 + 假模型就绪 → janitor 一轮内拉起。
 func TestJanitorStartsSidecar(t *testing.T) {
 	home := t.TempDir()

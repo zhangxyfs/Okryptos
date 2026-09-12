@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"okryptos/internal/chatsc"
 	"okryptos/internal/daemonx"
 	"okryptos/internal/embedsidecar"
 	"okryptos/internal/gui"
@@ -148,6 +149,16 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 	}
 	defer sidecarMgr.Stop()
 	go sidecarJanitor(sidecarMgr)
+	// chat sidecar 托管：active llm profile 为 builtin 时按需保持在线；daemon 退出时回收。
+	// 与 embedding sidecar 共存：内存预算 0.6B emb Q8 + 1.7B chat Q8 ≈ 3GB。
+	chatMgr := &chatsc.Manager{
+		RuntimeDir:    chatsc.DefaultRuntimeDir(),
+		ModelsDir:     chatsc.DefaultModelsDir(), // janitor 每轮按配置刷新（与 embedding 共用目录）
+		HealthTimeout: 90 * time.Second,
+		IdleTimeout:   10 * time.Minute,
+	}
+	defer chatMgr.Stop()
+	go chatJanitor(chatMgr)
 	// 同步 ticker：每分钟检查一轮，启用同步且到点的项目跑 SyncOnce（失败仅记日志）
 	startSyncJanitor(stdout)
 	fmt.Fprintf(stdout, "Okryptos daemon: %s\n", info.URL())
