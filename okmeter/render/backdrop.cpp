@@ -336,8 +336,11 @@ bool BackdropCapture::acquire(ID3D11Texture2D** out) {
   if (latest_) (void)latest_.CopyTo(out);
   ReleaseSRWLockShared(&lock_);
   if (*out && lumaDirty_) {
-    // 8×8 网格点采样均摊亮度（refresh 级频率：acquire 仅 dirty 时被材质调用）。
-    // 3D 侧点采样避免在 D2D BeginDraw 内嵌套绘制（refresh 在帧内被调）。
+    // 亮度采样节流（≥300ms 一次）：WGC 帧到达可达 60fps，若每帧 64 块拷贝 +
+    // GPU 同步 Map 会把渲染线程卡死（实测"特别卡"主因）。3D 侧点采样避开
+    // 在 D2D BeginDraw 内嵌套绘制（refresh 在帧内被调）。
+    const auto nowTp = std::chrono::steady_clock::now();
+    if (nowTp - lastLumaTp_ >= std::chrono::milliseconds(300)) {
     ComPtr<ID3D11Device> dev;
     (*out)->GetDevice(&dev);
     ComPtr<ID3D11DeviceContext> imm;
@@ -384,7 +387,9 @@ bool BackdropCapture::acquire(ID3D11Texture2D** out) {
         luma_ = (0.2126f * (r / 64.0f) + 0.7152f * (g / 64.0f) +
                  0.0722f * (b / 64.0f)) / 255.0f;
         lumaDirty_ = false;
+        lastLumaTp_ = nowTp;  // 采样成功才推进节流点（失败下帧重试）
       }
+    }
     }
   }
   return *out != nullptr;

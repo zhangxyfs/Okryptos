@@ -81,16 +81,13 @@ void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
   const size_t n = g.items.size();
   if (n == 0) return;
 
-  // 位置烘焙：收缩 tuck（e=0 项心收拢到露出侧，帽露出 kCollapsedCapPx；胶囊按
-  // 半宽 hw 计帽）+ 悬停让位 dy + 卡区偏移 dx，全部并入 geom，形态/材质直读最终坐标
+  // 位置烘焙：悬停让位 dy + 卡区偏移 dx 并入 geom，形态/材质直读最终坐标。
+  // 收缩不再 tuck 项心（原型收缩 = 整个 dock 平移露出左半 50%，项位置不动；
+  // 旧"帽露出 12px"机制与 50% 露出叠加会导致只见帽尖不见左半——实测回归）
   DockGeom baked = g;
   for (size_t i = 0; i < n; ++i) {
     const ItemGeom& it = g.items[i];
-    const double extent = it.hw > 0 ? it.hw : it.r;
-    const double collapsedX =
-        edge == "right" ? ((double)kCollapsedCapPx - extent)
-                        : (g.w - kCollapsedCapPx + extent);
-    baked.items[i].x = it.x + (1.0 - e) * (collapsedX - it.x) + dx;
+    baked.items[i].x = it.x + dx;
     baked.items[i].y = it.y + it.dy;
     if ((int)i == pressIdx) baked.items[i].scale *= 0.9;  // 按压下沉（球与文本同步）
   }

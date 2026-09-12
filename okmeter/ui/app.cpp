@@ -305,19 +305,15 @@ RECT DockApp::workArea() const {
   return work;
 }
 
-// 悬停/按压命中：按烘焙后坐标（tuck + 让位 dy + 卡区偏移 dx）算 2D 归一化距离，
+// 悬停/按压命中：按烘焙后坐标（让位 dy + 卡区偏移 dx）算 2D 归一化距离，
 // ≤1 的最近项命中（胶囊按半宽/半高矩形归一，罗盘卫星与中心分离可点）
 int DockApp::hitItem(const DockGeom& g, int mx, int my, float dx) const {
   int idx = -1;
   double best = 1.0;
-  const double e = emerge_.value;
   for (size_t i = 0; i < g.items.size(); ++i) {
     const ItemGeom& it = g.items[i];
     const double halfX = it.hw > 0 ? it.hw : it.r;
-    const double collapsedX =
-        cfg_.edge == "right" ? ((double)kCollapsedCapPx - halfX)
-                             : (g.w - kCollapsedCapPx + halfX);
-    const double bx = it.x + (1.0 - e) * (collapsedX - it.x) + dx;
+    const double bx = it.x + dx;
     const double by = it.y + it.dy;
     const double nx = (mx - bx) / (halfX + 8.0);
     const double ny = (my - by) / (it.r + 8.0);

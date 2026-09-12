@@ -7,7 +7,6 @@ namespace okmeter {
 
 // 收缩态几何共享常量：app 窗口露出宽度 / 弧线球帽露出宽度（约半球被屏缘裁掉）
 // 收缩态窗口露出 = 球区左半 50%（原型 .dock.ready translate(50%) 同款，见 app.cpp）
-constexpr int kCollapsedCapPx = 12;  // 收缩态球帽露出宽度
 
 struct ItemGeom {
   double x = 0, y = 0;     // 项中心（dock 盒内坐标）

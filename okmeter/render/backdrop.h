@@ -8,6 +8,7 @@
 #include <inspectable.h>
 #include <d3d11.h>
 #include <dxgi.h>
+#include <chrono>
 
 namespace okmeter::render {
 
@@ -64,6 +65,7 @@ private:
   int capX_ = 0, capY_ = 0;  // 捕获显示器左上角虚拟屏幕坐标（纹理原点）
   float luma_ = 0.0f;        // 最近帧均摊亮度（acquire 内网格点采样）
   bool lumaDirty_ = true;    // 新帧到达置位，acquire 采样后清
+  std::chrono::steady_clock::time_point lastLumaTp_{};  // 亮度采样节流（≥300ms）
   Microsoft::WRL::ComPtr<ID3D11Texture2D> lumaStage_;  // 8×8 STAGING 采样缓冲
 
   bool ok_ = false;
