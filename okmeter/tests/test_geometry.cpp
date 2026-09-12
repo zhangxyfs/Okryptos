@@ -30,19 +30,19 @@ TEST(geom_single_item) {
 
 TEST(geom_hover_enlarge_and_squeeze) {
   auto g = layoutArc(5, 30, 14, 900, "right");
-  applyHover(g, 2, 1.34, 10.0, 0.9);   // 球体弧线：原型 .orb.dim scale(.9)
+  applyHover(g, 2, 1.34, 10.0, 1.0);   // 用户裁决：悬停他项不回缩
   CHECK(std::abs(g.items[2].scale - 1.34) < 1e-9);
   CHECK(g.items[1].dy < 0);   // 中心上方项被向上挤
   CHECK(g.items[3].dy > 0);   // 中心下方项被向下挤
   CHECK(std::abs(g.items[1].dy) > std::abs(g.items[0].dy));  // 近者挤得多
   CHECK(std::abs(g.items[1].scale - 1.0) < 1e-9);   // 相邻项只让位不回缩
-  CHECK(std::abs(g.items[0].scale - 0.9) < 1e-9);  // 远端项回缩（原型 .orb.dim scale(.9)，仅球体）
-  CHECK(std::abs(g.items[4].scale - 0.9) < 1e-9);
-  applyHover(g, 2, 1.34, 10.0, 0.9);   // 恢复悬停态，验证越界索引的复位语义
-  applyHover(g, 99, 1.34, 10.0, 0.9);   // 越界正索引 → 复位
+  CHECK(std::abs(g.items[0].scale - 1.0) < 1e-9);  // 远端项不回缩（用户裁决）
+  CHECK(std::abs(g.items[4].scale - 1.0) < 1e-9);
+  applyHover(g, 2, 1.34, 10.0, 1.0);   // 恢复悬停态，验证越界索引的复位语义
+  applyHover(g, 99, 1.34, 10.0, 1.0);   // 越界正索引 → 复位
   CHECK(std::abs(g.items[2].scale - 1.0) < 1e-9);
   CHECK(g.items[0].dy == 0 && g.items[4].dy == 0);
-  applyHover(g, -1, 1.34, 10.0, 0.9);   // 取消悬停
+  applyHover(g, -1, 1.34, 10.0, 1.0);   // 取消悬停
   CHECK(std::abs(g.items[2].scale - 1.0) < 1e-9);
   CHECK(g.items[1].dy == 0 && g.items[3].dy == 0);
 }

@@ -9,7 +9,7 @@ namespace {
 class ArcForm final : public IForm {
 public:
   std::string id() const override { return "arc"; }
-  double hoverDimShrink() const override { return 0.9; }   // 原型 .orb.dim scale(.9)
+  double hoverDimShrink() const override { return 1.0; }   // 用户裁决：悬停他项不回缩（原型 .orb.dim scale(.9) 不采用）
   double hoverDimOpacity() const override { return 0.6; }  // 原型 .orb.dim opacity .6
 
   // 球体弧线：半径 30、中心项最靠屏内（布局细节见 ui/geometry.cpp）
