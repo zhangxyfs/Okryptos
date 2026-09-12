@@ -183,6 +183,17 @@ type RetrieveFeedback struct {
 	Demote        float64 `toml:"demote"`         // 降权系数，默认 0.8；<=0 或 >=1 按 0.8
 }
 
+// RetrieveCoverage 控制关键词通道的"命中词元覆盖度"准入（[retrieve.coverage]
+// 子表）：FTS5 是 OR 匹配，短口语查询的虚词 bigram 会捞进无关条目（事故复盘见
+// docs/2026-09-12-retrieval-noise-solutions.md）；准入要求命中
+// ≥ RequiredCoverage 个不同有效词元（虚词停用表不计入，见 retrieve.EffectiveTerms）。
+// 只作用于准入计数，不影响 FTS 打分与排序。
+type RetrieveCoverage struct {
+	Enabled        bool     `toml:"enabled"`          // 默认 true（见 Default）
+	MinRatio       float64  `toml:"min_ratio"`        // 命中比例下限，默认 0.5；非法值按 0.5（retrieve.RequiredCoverage 归一）
+	ExtraStopTerms []string `toml:"extra_stop_terms"` // 内置虚词表之外的追加层
+}
+
 type Retrieve struct {
 	Alpha float64 `toml:"alpha"`
 	Beta  float64 `toml:"beta"`
@@ -217,6 +228,9 @@ type Retrieve struct {
 	// Feedback 是注入→采纳反馈闭环（[retrieve.feedback] 子表）：采纳归因窗口
 	// = 本会话（只统计"读本会话注入过的条目"）。
 	Feedback RetrieveFeedback `toml:"feedback"`
+	// Coverage 是关键词通道的词元覆盖度准入（[retrieve.coverage] 子表）：
+	// 虚词命中的无关条目因覆盖度不足被拒；纯虚词查询跳过整个关键词通道。
+	Coverage RetrieveCoverage `toml:"coverage"`
 	// DedupTurns 是跨轮注入冷却轮数（默认 3）：同 session 内已注入的检索条目
 	// 冷却 N 个 prompt 轮不再注入（门控轮也计），0=关闭（旧行为，每轮都注入）。
 	// <0 由 EffectiveDedupTurns() 归一为 0（fail-open 方向）。GUI 引导页可配（0~99）。
@@ -303,7 +317,8 @@ func Default() Config {
 			Recency: RetrieveRecency{Enabled: true, Floor: 0.85, Windows: RecencyWindows{
 				Rule: []int{180, 730}, Pitfall: []int{90, 365}, Note: []int{60, 180}, Reference: []int{180, 730},
 			}},
-			Feedback: RetrieveFeedback{Enabled: false, WindowDays: 30, MinInjections: 4, Demote: 0.8}},
+			Feedback: RetrieveFeedback{Enabled: false, WindowDays: 30, MinInjections: 4, Demote: 0.8},
+			Coverage: RetrieveCoverage{Enabled: true, MinRatio: 0.5}},
 		Capture:    Capture{Mode: "propose", TurnInterval: 3},
 		Wiki:       Wiki{StaleCommits: 20},
 		Hooks:      Hooks{TimeoutSec: 10},

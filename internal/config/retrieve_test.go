@@ -131,3 +131,29 @@ func TestUpsertTomlKeyBoundary(t *testing.T) {
 		t.Fatalf("二次 upsert 异常:\n%s", got)
 	}
 }
+
+func TestCoverageDefault(t *testing.T) {
+	cfg := Default()
+	if !cfg.Retrieve.Coverage.Enabled || cfg.Retrieve.Coverage.MinRatio != 0.5 {
+		t.Fatalf("coverage 默认应为 enabled+0.5: %+v", cfg.Retrieve.Coverage)
+	}
+}
+
+func TestCoverageMergedNoAliasing(t *testing.T) {
+	dir := t.TempDir()
+	global := filepath.Join(dir, "global.toml")
+	project := filepath.Join(dir, "project.toml")
+	os.WriteFile(global, []byte("[retrieve.coverage]\nextra_stop_terms = [\"甲乙\"]\n"), 0o644)
+	os.WriteFile(project, []byte("[retrieve.coverage]\nmin_ratio = 0.75\n"), 0o644)
+	cfg, err := LoadMerged(project, global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retrieve.Coverage.MinRatio != 0.75 {
+		t.Fatalf("项目层应覆盖 min_ratio: %+v", cfg.Retrieve.Coverage)
+	}
+	// 全局层数组在项目层未重定义时应保留（且不因合并被污染）
+	if len(cfg.Retrieve.Coverage.ExtraStopTerms) != 1 || cfg.Retrieve.Coverage.ExtraStopTerms[0] != "甲乙" {
+		t.Fatalf("extra_stop_terms 合并异常: %+v", cfg.Retrieve.Coverage.ExtraStopTerms)
+	}
+}
