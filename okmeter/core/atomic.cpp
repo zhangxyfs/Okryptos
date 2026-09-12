@@ -13,13 +13,19 @@ bool atomicWriteText(const std::filesystem::path& file, const std::string& conte
   tmp += L".tmp";
   {
     std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-    if (!out) return false;
+    if (!out) {
+      fwprintf(stderr, L"atomicWriteText: open tmp failed %s gle=%lu\n",
+               file.c_str(), GetLastError());
+      return false;
+    }
     out << content;
     out.flush();
     if (!out) return false;
   }
   if (!MoveFileExW(tmp.c_str(), file.c_str(),
                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    fwprintf(stderr, L"atomicWriteText: MoveFileExW failed %s gle=%lu\n",
+             file.c_str(), GetLastError());
     std::filesystem::remove(tmp, ec);
     return false;
   }

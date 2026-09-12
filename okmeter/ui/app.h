@@ -104,7 +104,7 @@ private:
   void openMenu(int clientX, int clientY, int slot);
   void closeMenu();
   void activateMenu(int idx);
-  void applyMenuMapping(const std::string& v);  // 叶项映射落盘（三级菜单共用）
+  void applyMenuMapping(std::string v);  // 叶项映射落盘（按值：closeMenu 会清空子列向量，引用会悬空）
   double menuAnimT() const;  // 弹出动画进度（0..1，ease-dock 缓动）
   // 背板设置面板：打开（draft=cfg 副本 + 模型枚举 + 对侧屏缘定位 + 并集扩窗）/
   // 关闭（apply=true → normalize+saveConfig+createModules 全量 rebuild；false 丢弃）

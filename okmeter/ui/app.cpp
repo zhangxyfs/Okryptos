@@ -683,13 +683,17 @@ void DockApp::activateMenu(int idx) {
   }
 }
 
-// 叶项映射落盘：mapping → saveConfig → rebuild 立即生效
-void DockApp::applyMenuMapping(const std::string& v) {
+// 叶项映射落盘：mapping → saveConfig → rebuild 立即生效。
+// v 必须按值传入：调用方的 e.value 是对 entries 向量的引用，closeMenu 会
+// clear 子列向量使引用悬空（实测 v 变成 empty → 守卫早退 → 切换静默无效）
+void DockApp::applyMenuMapping(const std::string v) {
   const int slot = menu_.slot;
   closeMenu();
   if (v.empty() || slot < 0 || slot >= cfg_.count) return;
   cfg_.mapping[(size_t)slot] = v;
-  saveConfig(okmeterDir(), cfg_);
+  if (!saveConfig(okmeterDir(), cfg_)) {
+    backdrop_.note(L"applyMenuMapping: saveConfig FAILED gle=%lu", GetLastError());
+  }
   rebuildItems();
   render();
 }
