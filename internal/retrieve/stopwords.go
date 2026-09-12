@@ -18,7 +18,7 @@ var builtinStopTerms = map[string]bool{
 	"那": true, "就": true, "都": true, "也": true, "还": true, "不": true,
 	"没": true, "很": true, "太": true, "被": true, "把": true, "给": true,
 	// 高频虚词/跨词界假词二元组
-	"还是": true, "就是": true, "底的": true, "了的": true, "的是": true,
+	"还是": true, "就是": true, "是就": true, "底的": true, "了的": true, "的是": true,
 	"什么": true, "怎么": true, "这个": true, "那个": true, "我们": true,
 	"你们": true, "他们": true, "可以": true, "没有": true, "一下": true,
 	"现在": true, "已经": true, "这样": true, "那样": true, "知道": true,
@@ -50,22 +50,20 @@ func EffectiveTerms(terms []string, extra []string) []string {
 }
 
 // RequiredCoverage 关键词准入要求的最少命中有效词元数（minimum_should_match
-// 语义）：n=0 → 0（调用方据此跳过关键词通道）；n≥1 → min(n, max(2, ⌈n×ratio⌉))，
-// 即单词元查询要求命中它自己，多词元查询至少命中 2 个且不低于 ratio 比例。
-// ratio<=0 或 >1 按 0.5（fail-open 方向取默认）。
+// 语义）：n=0 → 0（调用方据此跳过关键词通道）；n≥1 → max(1, ⌈n×ratio⌉)。
+// min-1 下限：实词+口语填充是查询常态，单词元命中即可准入（门控太严比太松更伤，
+// 精度由后续 LLM 后置过滤兜底）。ratio 默认 0.25：重叠 bigram 的跨词界假词
+// 约稀释一半，0.25 ≈ 实词 50% 覆盖。ratio<=0 或 >1 按 0.25（fail-open 方向取默认）。
 func RequiredCoverage(n int, ratio float64) int {
 	if n <= 0 {
 		return 0
 	}
 	if ratio <= 0 || ratio > 1 {
-		ratio = 0.5
+		ratio = 0.25
 	}
 	need := int(math.Ceil(float64(n) * ratio))
-	if need < 2 {
-		need = 2
-	}
-	if need > n {
-		need = n
+	if need < 1 {
+		need = 1
 	}
 	return need
 }

@@ -134,8 +134,8 @@ func TestUpsertTomlKeyBoundary(t *testing.T) {
 
 func TestCoverageDefault(t *testing.T) {
 	cfg := Default()
-	if !cfg.Retrieve.Coverage.Enabled || cfg.Retrieve.Coverage.MinRatio != 0.5 {
-		t.Fatalf("coverage 默认应为 enabled+0.5: %+v", cfg.Retrieve.Coverage)
+	if !cfg.Retrieve.Coverage.Enabled || cfg.Retrieve.Coverage.MinRatio != 0.25 {
+		t.Fatalf("coverage 默认应为 enabled+0.25: %+v", cfg.Retrieve.Coverage)
 	}
 }
 

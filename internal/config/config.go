@@ -190,7 +190,7 @@ type RetrieveFeedback struct {
 // 只作用于准入计数，不影响 FTS 打分与排序。
 type RetrieveCoverage struct {
 	Enabled        bool     `toml:"enabled"`          // 默认 true（见 Default）
-	MinRatio       float64  `toml:"min_ratio"`        // 命中比例下限，默认 0.5；非法值按 0.5（retrieve.RequiredCoverage 归一）
+	MinRatio       float64  `toml:"min_ratio"`        // 命中比例下限，默认 0.25；非法值按 0.25（retrieve.RequiredCoverage 归一）
 	ExtraStopTerms []string `toml:"extra_stop_terms"` // 内置虚词表之外的追加层
 }
 
@@ -318,7 +318,7 @@ func Default() Config {
 				Rule: []int{180, 730}, Pitfall: []int{90, 365}, Note: []int{60, 180}, Reference: []int{180, 730},
 			}},
 			Feedback: RetrieveFeedback{Enabled: false, WindowDays: 30, MinInjections: 4, Demote: 0.8},
-			Coverage: RetrieveCoverage{Enabled: true, MinRatio: 0.5}},
+			Coverage: RetrieveCoverage{Enabled: true, MinRatio: 0.25}},
 		Capture:    Capture{Mode: "propose", TurnInterval: 3},
 		Wiki:       Wiki{StaleCommits: 20},
 		Hooks:      Hooks{TimeoutSec: 10},

@@ -27,17 +27,17 @@ func TestEffectiveTerms(t *testing.T) {
 
 func TestRequiredCoverage(t *testing.T) {
 	cases := []struct{ n, want int }{
-		{0, 0}, {1, 1}, {2, 2}, {3, 2}, {4, 2}, {5, 3}, {6, 3}, {8, 4},
+		{0, 0}, {1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 2}, {6, 2}, {8, 2},
 	}
 	for _, c := range cases {
-		if got := RequiredCoverage(c.n, 0.5); got != c.want {
-			t.Errorf("RequiredCoverage(%d, 0.5) = %d, want %d", c.n, got, c.want)
+		if got := RequiredCoverage(c.n, 0.25); got != c.want {
+			t.Errorf("RequiredCoverage(%d, 0.25) = %d, want %d", c.n, got, c.want)
 		}
 	}
-	if got := RequiredCoverage(4, 0); got != 2 {
-		t.Errorf("非法 ratio 应按 0.5: got %d", got)
+	if got := RequiredCoverage(4, 0); got != 1 {
+		t.Errorf("非法 ratio 应按 0.25: got %d", got)
 	}
-	if got := RequiredCoverage(4, 0.75); got != 3 {
-		t.Errorf("RequiredCoverage(4, 0.75) = %d, want 3", got)
+	if got := RequiredCoverage(8, 0.75); got != 6 {
+		t.Errorf("RequiredCoverage(8, 0.75) = %d, want 6", got)
 	}
 }
