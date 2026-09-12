@@ -15,6 +15,7 @@ import (
 
 	"okryptos/internal/embedx"
 	"okryptos/internal/enforce"
+	"okryptos/internal/filterx"
 	"okryptos/internal/index"
 	"okryptos/internal/project"
 	"okryptos/internal/registry"
@@ -227,6 +228,15 @@ func InjectForPrompt(pc *project.Context, sessionID, cwd, promptText string) str
 			logErr("prompt coverage: 覆盖度不足跳过（%s）", strings.Join(info.CoverageRejected, "、"))
 		}
 		hits = h
+		// LLM 后置过滤：对最终候选（分支过滤/冷却/截断后）做相关性裁决，只删不加。
+		// 未配置 LLM 静默空转；超时/失败/解析异常 fail-open 原样放行（filterx 收口）。
+		if len(hits) > 0 {
+			kept, note := filterx.Filter(context.Background(), pc.Config, queryPrompt, hits)
+			if note != "" {
+				logErr("prompt filter: %s", note)
+			}
+			hits = kept
+		}
 	}
 	if len(hits) > 0 {
 		hitsText.WriteString("## 相关知识（需要全文时读取对应文件）\n\n")

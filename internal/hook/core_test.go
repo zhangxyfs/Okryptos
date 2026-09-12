@@ -921,3 +921,32 @@ func TestSelfHealHooksThrottled(t *testing.T) {
 		t.Fatal("超期后应执行自愈并刷新 lastSelfHeal")
 	}
 }
+
+// TestPromptLLMFilter LLM 后置过滤端到端：两条候选均被关键词准入，LLM 裁决只留第 1 条。
+// 候选序说明：两条目同分，hitLess（query.go:154）按 Title 升序再文件名升序打平，实测候选序恒为 [乙, 甲]；mock 裁决 [1] = 保留乙、丢弃甲。
+func TestPromptLLMFilter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": "[1]"}}},
+		})
+	}))
+	defer srv.Close()
+	projDir, kbRoot := setupProject(t)
+	writeEntry(t, kbRoot, "甲.md", "---\ntitle: 甲条目\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n紫晶灵罗 词甲。\n")
+	writeEntry(t, kbRoot, "乙.md", "---\ntitle: 乙条目\ntype: note\ntags: []\ncreated: 2026-01-01\nupdated: 2026-01-01\ndraft: false\n---\n\n紫晶灵罗 词乙。\n")
+	cfg := "[retrieve]\ntop_n = 3\n\n[llm]\nactive = \"测试\"\n[[llm.profiles]]\nname = \"测试\"\nkind = \"openai\"\nbase_url = \"" + srv.URL + "\"\nmodel = \"m\"\n"
+	if err := os.WriteFile(filepath.Join(kbRoot, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := project.FromCwd(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := InjectForPrompt(pc, "s-filter", projDir, "紫晶灵罗")
+	if strings.Contains(out, "甲.md") {
+		t.Fatalf("LLM 裁决丢弃的条目不不应注入, got: %q", out)
+	}
+	if !strings.Contains(out, "乙.md") {
+		t.Fatalf("LLM 保留的条目应注入, got: %q", out)
+	}
+}
