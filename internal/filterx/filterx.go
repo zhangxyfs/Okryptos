@@ -32,7 +32,11 @@ func Filter(ctx context.Context, cfg config.Config, prompt string, hits []index.
 	if !cfg.Retrieve.Filter.Enabled || len(hits) == 0 {
 		return hits, ""
 	}
-	p := cfg.LLM.ActiveProfile()
+	// 识别意图专用 profile 优先（[llm] active_filter 槽），未配置回退普通 active
+	p := cfg.LLM.FilterProfile()
+	if p == nil {
+		p = cfg.LLM.ActiveProfile()
+	}
 	if p == nil {
 		return hits, ""
 	}
@@ -93,6 +97,8 @@ func userPrompt(prompt string, hits []index.Hit) string {
 
 // parseKeep 解析模型输出为 1-based 编号列表：容忍 ```json 围栏与前后杂音
 // （取首个 [ 到末个 ] 之间的内容），越界/重复编号丢弃；空数组合法（全不相关）。
+// fail-closed 收口：原始数组非空但有效编号为 0（编号全部越界/重复）按解析失败
+// 返回 error——模型多半没按约定作答，Filter 走"解析失败保留全部"路径。
 func parseKeep(text string, n int) ([]int, error) {
 	s := strings.TrimSpace(text)
 	i, j := strings.Index(s, "["), strings.LastIndex(s, "]")

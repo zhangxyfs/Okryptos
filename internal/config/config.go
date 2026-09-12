@@ -86,13 +86,19 @@ type LLMProfile struct {
 	APIKey      string `toml:"api_key,omitempty"`
 	Temperature string `toml:"temperature,omitempty"` // 高级参数；空=不传（字符串存储避开 0 值歧义）
 	MaxTokens   int    `toml:"max_tokens,omitempty"`  // 高级参数；0=用调用方默认
+	// Filter 识别意图标记：true 时"设为使用中"进入 active_filter 槽（检索注入的
+	// 意图识别/相关性过滤专用，每轮 prompt 自动调用），与普通 active 槽互不占用。
+	Filter bool `toml:"filter,omitempty"`
 }
 
 // LLM 全局大模型配置（[llm] 段，仅存全局 config.toml，跨项目共用）。
 type LLM struct {
-	Active     string       `toml:"active,omitempty"`   // 使用中 profile 名；空=未配置
-	TimeoutSec int          `toml:"timeout_sec"`        // 生成调用超时；<=0 由调用方按场景定（ping 测试 30s / 条目优化 120s）
-	Profiles   []LLMProfile `toml:"profiles,omitempty"` // TOML 落盘为 [[llm.profiles]]
+	Active string `toml:"active,omitempty"` // 使用中 profile 名；空=未配置
+	// ActiveFilter 识别意图用途的"使用中"profile 名（建议本地小模型/低价在线模型）；
+	// 空=filterx 回退 Active。
+	ActiveFilter string       `toml:"active_filter,omitempty"`
+	TimeoutSec   int          `toml:"timeout_sec"`        // 生成调用超时；<=0 由调用方按场景定（ping 测试 30s / 条目优化 120s）
+	Profiles     []LLMProfile `toml:"profiles,omitempty"` // TOML 落盘为 [[llm.profiles]]
 }
 
 // ActiveProfile 返回使用中 profile；未配置或 active 悬空返回 nil。
@@ -102,6 +108,20 @@ func (l LLM) ActiveProfile() *LLMProfile {
 	}
 	for i := range l.Profiles {
 		if l.Profiles[i].Name == l.Active {
+			return &l.Profiles[i]
+		}
+	}
+	return nil
+}
+
+// FilterProfile 返回识别意图用途的激活 profile；未配置或 active_filter 悬空返回 nil
+// （调用方 filterx 据此回退 ActiveProfile）。
+func (l LLM) FilterProfile() *LLMProfile {
+	if l.ActiveFilter == "" {
+		return nil
+	}
+	for i := range l.Profiles {
+		if l.Profiles[i].Name == l.ActiveFilter {
 			return &l.Profiles[i]
 		}
 	}

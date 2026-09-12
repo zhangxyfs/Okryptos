@@ -295,6 +295,26 @@ func SetActiveLLM(name string) error {
 	})
 }
 
+// SetActiveLLMFilter 切换识别意图用途的使用中 llm profile（active_filter 槽，
+// filterx 专用）；name 空串 = 停用该槽（filterx 回退普通 active）。
+func SetActiveLLMFilter(name string) error {
+	return updateGlobalConfig(func(cfg *config.Config) error {
+		if name != "" {
+			found := false
+			for _, p := range cfg.LLM.Profiles {
+				if p.Name == name {
+					found = true
+				}
+			}
+			if !found {
+				return fmt.Errorf("profile 不存在: %s", name)
+			}
+		}
+		cfg.LLM.ActiveFilter = name
+		return nil
+	})
+}
+
 // SetActiveLLMMaxTokens 只更新使用中 profile 的 max_tokens（0 = 用调用方默认）。
 // 单字段改而不整 profile 覆盖：GUI 模型配置卡的「最大 token」两段式保存走此，
 // 避免误清 temperature 等其他高级参数。无使用中 profile 报错。
@@ -310,7 +330,8 @@ func SetActiveLLMMaxTokens(n int) error {
 	})
 }
 
-// DeleteLLMProfile 删除 llm profile；删除使用中项时 Active 置空。
+// DeleteLLMProfile 删除 llm profile；删除使用中项时 Active 置空（识别意图槽
+// ActiveFilter 同名时同步置空）。
 func DeleteLLMProfile(name string) error {
 	return updateGlobalConfig(func(cfg *config.Config) error {
 		kept := cfg.LLM.Profiles[:0]
@@ -322,6 +343,9 @@ func DeleteLLMProfile(name string) error {
 		cfg.LLM.Profiles = kept
 		if cfg.LLM.Active == name {
 			cfg.LLM.Active = ""
+		}
+		if cfg.LLM.ActiveFilter == name {
+			cfg.LLM.ActiveFilter = ""
 		}
 		return nil
 	})

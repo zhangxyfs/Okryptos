@@ -660,3 +660,27 @@ func TestServerSection(t *testing.T) {
 		t.Fatalf("merged: %+v", merged.Server)
 	}
 }
+
+func TestLLMFilterProfile(t *testing.T) {
+	l := LLM{
+		Active:       "普通",
+		ActiveFilter: "意图",
+		Profiles: []LLMProfile{
+			{Name: "普通", Kind: "openai"},
+			{Name: "意图", Kind: "ollama", Filter: true},
+		},
+	}
+	if p := l.ActiveProfile(); p == nil || p.Name != "普通" {
+		t.Fatalf("ActiveProfile: %+v", p)
+	}
+	if p := l.FilterProfile(); p == nil || p.Name != "意图" {
+		t.Fatalf("FilterProfile: %+v", p)
+	}
+	l.ActiveFilter = "悬空"
+	if p := l.FilterProfile(); p != nil {
+		t.Fatalf("悬空 active_filter 应返回 nil: %+v", p)
+	}
+	if p := (LLM{}).FilterProfile(); p != nil {
+		t.Fatalf("未配置应返回 nil: %+v", p)
+	}
+}

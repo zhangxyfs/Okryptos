@@ -113,3 +113,20 @@ func TestFilterDisabled(t *testing.T) {
 		t.Fatalf("关闭时应原样返回: kept=%d note=%q", len(kept), note)
 	}
 }
+
+// TestFilterPrefersFilterProfile 识别意图槽位优先：active_filter 指向的 profile 被用于
+// 过滤，普通 active 不被调用（两个服务器应答不同，裁决结果可区分走了哪个）。
+func TestFilterPrefersFilterProfile(t *testing.T) {
+	filterSrv := llmServer(t, "[2]", 0)
+	defer filterSrv.Close()
+	generalSrv := llmServer(t, "[1]", 0)
+	defer generalSrv.Close()
+	cfg := cfgWithLLM(generalSrv.URL)
+	cfg.LLM.ActiveFilter = "意图"
+	cfg.LLM.Profiles = append(cfg.LLM.Profiles,
+		config.LLMProfile{Name: "意图", Kind: "openai", BaseURL: filterSrv.URL, Model: "m", Filter: true})
+	kept, _ := Filter(context.Background(), cfg, "查询", testHits())
+	if len(kept) != 1 || kept[0].Filename != "b.md" {
+		t.Fatalf("应使用识别意图槽的裁决 [2]: %+v", kept)
+	}
+}
