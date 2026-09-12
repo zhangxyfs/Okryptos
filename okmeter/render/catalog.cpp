@@ -14,6 +14,9 @@ constexpr FormFactory kFormFactories[] = {
     &createArcForm,
     &createCapsuleForm,
     &createCompassForm,
+    &createLevelForm,
+    &createWaveForm,
+    &createNixieForm,
 };
 constexpr MaterialFactory kMaterialFactories[] = {
     &createDarkMaterial,

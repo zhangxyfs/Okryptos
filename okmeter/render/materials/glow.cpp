@@ -232,7 +232,7 @@ public:
 
     if (ctx.isCenter) {
       ctx.brush->SetColor(glassfx::accentC(0.10f * dim));
-      glassfx::drawShape(dc, c, hw, r, ctx.brush, 6.0f, 3.0f);
+      glassfx::drawShape(dc, c, hw, r, ctx.brush, 6.0f, 3.0f, ctx.cornerR);
     }
 
     // 自适应毛玻璃：形状域裁剪 → 模糊+提饱和+提亮(1.08)背景 → desk 12% 底 + 顶部受光
@@ -240,15 +240,15 @@ public:
     if (ctx.backdrop && ctx.backdrop->ok() && !ctx.backdrop->degraded()) {
       pipe_.refresh(dc, ctx.backdrop);
       lastLuma_ = ctx.backdrop->luma();
-      if (pipe_.ready() && glassfx::pushShapeClip(dc, c, hw, r)) {
+      if (pipe_.ready() && glassfx::pushShapeClip(dc, c, hw, r, ctx.cornerR)) {
         dc->DrawImage(pipe_.output(), D2D1::Point2F(ctx.backdropDX, ctx.backdropDY),
                       D2D1_INTERPOLATION_MODE_LINEAR);
         ctx.brush->SetColor(glassfx::desk(0.12f * dim));
-        glassfx::fillShape(dc, c, hw, r, ctx.brush);
+        glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
         if (topLight_) {
           topLight_->SetStartPoint(D2D1::Point2F(c.x, c.y - r));
           topLight_->SetEndPoint(D2D1::Point2F(c.x, c.y + r));
-          glassfx::fillShape(dc, c, hw, r, topLight_.Get());
+          glassfx::fillShape(dc, c, hw, r, topLight_.Get(), ctx.cornerR);
         }
         dc->PopLayer();
         glassDrawn = true;
@@ -256,13 +256,13 @@ public:
     }
     if (!glassDrawn) {  // 退化：desk-deep 70% + desk 12% + 顶部受光
       ctx.brush->SetColor(glassfx::deskDeep(0.70f * dim));
-      glassfx::fillShape(dc, c, hw, r, ctx.brush);
+      glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
       ctx.brush->SetColor(glassfx::desk(0.12f * dim));
-      glassfx::fillShape(dc, c, hw, r, ctx.brush);
+      glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
       if (topLight_) {
         topLight_->SetStartPoint(D2D1::Point2F(c.x, c.y - r));
         topLight_->SetEndPoint(D2D1::Point2F(c.x, c.y + r));
-        glassfx::fillShape(dc, c, hw, r, topLight_.Get());
+        glassfx::fillShape(dc, c, hw, r, topLight_.Get(), ctx.cornerR);
       }
     }
 
@@ -293,7 +293,7 @@ public:
                                              D2D1::Matrix3x2F::Identity(),
                                              L.k * dim),
                       nullptr);
-        glassfx::drawShape(dc, c, hw, r, edgeLight_.Get(), 2.5f, -1.25f);
+        glassfx::drawShape(dc, c, hw, r, edgeLight_.Get(), 2.5f, -1.25f, ctx.cornerR);
         dc->PopLayer();
       }
     }
@@ -303,13 +303,13 @@ public:
       hlTop_->SetCenter(D2D1::Point2F(c.x - 0.30f * r, c.y - 0.55f * r));
       hlTop_->SetRadiusX(1.2f * hw);
       hlTop_->SetRadiusY(1.2f * r);
-      glassfx::fillShape(dc, c, hw, r, hlTop_.Get());
+      glassfx::fillShape(dc, c, hw, r, hlTop_.Get(), ctx.cornerR);
     }
     if (bottomShade_) {
       bottomShade_->SetCenter(D2D1::Point2F(c.x, c.y + 0.35f * r));
       bottomShade_->SetRadiusX(0.95f * hw);
       bottomShade_->SetRadiusY(0.95f * r);
-      glassfx::fillShape(dc, c, hw, r, bottomShade_.Get());
+      glassfx::fillShape(dc, c, hw, r, bottomShade_.Get(), ctx.cornerR);
     }
 
     // 1px 描边：悬停 accent > 中心 accent 60% > ink 15%（原型 glow border）
@@ -319,7 +319,7 @@ public:
       ctx.brush->SetColor(glassfx::accentC(0.60f * dim));
     else
       ctx.brush->SetColor(glassfx::ink(0.15f * dim));
-    glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f);
+    glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f, ctx.cornerR);
   }
 
   // 详情卡底：86% 深玻璃 + 白 8% 提亮 + ink 16% 描边（v1 卡不做 backdrop blur）

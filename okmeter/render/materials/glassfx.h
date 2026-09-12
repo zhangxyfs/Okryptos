@@ -94,18 +94,19 @@ inline bool pushCircleClip(ID2D1DeviceContext* dc, D2D1_POINT_2F c, float r) {
 inline bool isPill(float halfW, float r) { return halfW > r + 0.01f; }
 
 inline D2D1_ROUNDED_RECT pillRR(D2D1_POINT_2F c, float halfW, float r,
-                                float grow = 0.0f) {
+                                float grow = 0.0f, float corner = -1.0f) {
+  const float cr = corner > 0 ? corner : r;  // corner≤0：角半径=半高（胶囊）
   return D2D1::RoundedRect(
       D2D1::RectF(c.x - halfW - grow, c.y - r - grow,
                   c.x + halfW + grow, c.y + r + grow),
-      r + grow, r + grow);
+      cr + grow, cr + grow);
 }
 
-// 形状填充（胶囊→圆角矩形，圆→椭圆）
+// 形状填充（胶囊→圆角矩形，圆→椭圆）；corner>0 时角半径独立于半高（块状项）
 inline void fillShape(ID2D1DeviceContext* dc, D2D1_POINT_2F c, float halfW, float r,
-                      ID2D1Brush* brush) {
+                      ID2D1Brush* brush, float corner = -1.0f) {
   if (isPill(halfW, r)) {
-    const D2D1_ROUNDED_RECT rr = pillRR(c, halfW, r);
+    const D2D1_ROUNDED_RECT rr = pillRR(c, halfW, r, 0.0f, corner);
     dc->FillRoundedRectangle(&rr, brush);
   } else {
     const D2D1_ELLIPSE e = D2D1::Ellipse(c, r, r);
@@ -115,9 +116,10 @@ inline void fillShape(ID2D1DeviceContext* dc, D2D1_POINT_2F c, float halfW, floa
 
 // 形状描边（grow 外扩用于中心项光晕环）
 inline void drawShape(ID2D1DeviceContext* dc, D2D1_POINT_2F c, float halfW, float r,
-                      ID2D1Brush* brush, float strokeW = 1.0f, float grow = 0.0f) {
+                      ID2D1Brush* brush, float strokeW = 1.0f, float grow = 0.0f,
+                      float corner = -1.0f) {
   if (isPill(halfW, r)) {
-    const D2D1_ROUNDED_RECT rr = pillRR(c, halfW, r, grow);
+    const D2D1_ROUNDED_RECT rr = pillRR(c, halfW, r, grow, corner);
     dc->DrawRoundedRectangle(&rr, brush, strokeW);
   } else {
     const D2D1_ELLIPSE e = D2D1::Ellipse(c, r + grow, r + grow);
@@ -127,13 +129,13 @@ inline void drawShape(ID2D1DeviceContext* dc, D2D1_POINT_2F c, float halfW, floa
 
 // 形状裁剪层（胶囊→圆角矩形几何，圆→pushCircleClip）
 inline bool pushShapeClip(ID2D1DeviceContext* dc, D2D1_POINT_2F c, float halfW,
-                          float r) {
+                          float r, float corner = -1.0f) {
   if (!isPill(halfW, r)) return pushCircleClip(dc, c, r);
   Microsoft::WRL::ComPtr<ID2D1Factory> factory;
   dc->GetFactory(&factory);
   Microsoft::WRL::ComPtr<ID2D1RoundedRectangleGeometry> clip;
   if (!factory ||
-      FAILED(factory->CreateRoundedRectangleGeometry(pillRR(c, halfW, r), &clip)))
+      FAILED(factory->CreateRoundedRectangleGeometry(pillRR(c, halfW, r, 0.0f, corner), &clip)))
     return false;
   const D2D1_RECT_F bounds = D2D1::RectF(c.x - halfW - 1.0f, c.y - r - 1.0f,
                                          c.x + halfW + 1.0f, c.y + r + 1.0f);

@@ -32,6 +32,7 @@ struct OrbStyleCtx {
   bool isHot = false;                     // 悬停项：accent 描边 + 外发光
   float dimmed = 1.0f;
   float backdropDX = 0, backdropDY = 0;
+  float cornerR = 0;                      // 圆角矩形角半径（0=与 r 相同=胶囊；level/wave/nixie 10~12）
 };
 
 class IMaterial {

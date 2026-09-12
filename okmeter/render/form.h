@@ -17,6 +17,8 @@ struct DockItem {
   std::wstring value;  // 紧凑值（球内主文本，Consolas 13px 半粗 白 93%）
   std::wstring label;  // 模型短名 / 口径名（Consolas 8.5px 白 66%）
   double ratio = 0;    // 该项值/全部项最大值（胶囊底部占比条；clamp 4%~100%）
+  double raw = 0;      // 原始数值（电平柱占比/nixie 数码/wave 历史的数值源）
+  std::vector<double> hist;  // 最近 26 次 raw 采样（wave 波形流 sparkline）
 };
 
 // 形态绘制的每帧输入。geom 已由场景烘焙最终位置（tuck/让位/dx 已并入），
@@ -61,5 +63,8 @@ public:
 std::unique_ptr<IForm> createArcForm();
 std::unique_ptr<IForm> createCapsuleForm();
 std::unique_ptr<IForm> createCompassForm();
+std::unique_ptr<IForm> createLevelForm();
+std::unique_ptr<IForm> createWaveForm();
+std::unique_ptr<IForm> createNixieForm();
 
 } // namespace okmeter::render

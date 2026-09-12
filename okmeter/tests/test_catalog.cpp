@@ -5,10 +5,13 @@
 using namespace okmeter;
 
 TEST(catalog_forms) {
-  CHECK_EQ(render::kFormCount, 3);
+  CHECK_EQ(render::kFormCount, 6);
   CHECK(std::strcmp(render::kFormCatalog[0].id, "arc") == 0);
   CHECK(std::strcmp(render::kFormCatalog[1].id, "capsule") == 0);
   CHECK(std::strcmp(render::kFormCatalog[2].id, "compass") == 0);
+  CHECK(std::strcmp(render::kFormCatalog[3].id, "level") == 0);
+  CHECK(std::strcmp(render::kFormCatalog[4].id, "wave") == 0);
+  CHECK(std::strcmp(render::kFormCatalog[5].id, "nixie") == 0);
   for (int i = 0; i < render::kFormCount; ++i) {
     CHECK(render::kFormCatalog[i].name != nullptr);
     CHECK(render::kFormCatalog[i].name[0] != L'\0');
@@ -17,6 +20,7 @@ TEST(catalog_forms) {
   }
   CHECK(render::findForm("arc") == &render::kFormCatalog[0]);
   CHECK(render::findForm("compass") == &render::kFormCatalog[2]);
+  CHECK(render::findForm("nixie") == &render::kFormCatalog[5]);
   CHECK(render::findForm("nope") == nullptr);  // 未知 id → nullptr（调用方兜底）
   CHECK(render::findForm("") == nullptr);
 }

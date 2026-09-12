@@ -65,7 +65,7 @@ public:
     // 中心项：半径+3 accent 10% 光晕环（原型 box-shadow 0 0 0 3px accent 10%）
     if (ctx.isCenter) {
       ctx.brush->SetColor(D2D1::ColorF(kAccent, 0.10f * dim));
-      glassfx::drawShape(dc, c, hw, r, ctx.brush, 6.0f, 3.0f);
+      glassfx::drawShape(dc, c, hw, r, ctx.brush, 6.0f, 3.0f, ctx.cornerR);
     }
 
     // 玻璃底：形状域裁剪层 → 高斯模糊背景（屏幕对齐）→ desk-deep 74% 染色
@@ -73,18 +73,18 @@ public:
     if (ctx.backdrop && ctx.backdrop->ok() && !ctx.backdrop->degraded()) {
       refreshBackdrop(dc, ctx.backdrop);
       lastLuma_ = ctx.backdrop->luma();
-      if (bgBmp_ && blur_ && glassfx::pushShapeClip(dc, c, hw, r)) {
+      if (bgBmp_ && blur_ && glassfx::pushShapeClip(dc, c, hw, r, ctx.cornerR)) {
         dc->DrawImage(blur_.Get(), D2D1::Point2F(ctx.backdropDX, ctx.backdropDY),
                       D2D1_INTERPOLATION_MODE_LINEAR);
         ctx.brush->SetColor(kDeskDeep(0.74f * dim));
-        glassfx::fillShape(dc, c, hw, r, ctx.brush);
+        glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
         dc->PopLayer();
         glassDrawn = true;
       }
     }
     if (!glassDrawn) {  // 退化：纯色 74% 透明底（无模糊）
       ctx.brush->SetColor(kDeskDeep(0.74f * dim));
-      glassfx::fillShape(dc, c, hw, r, ctx.brush);
+      glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
     }
 
     // 顶部内高光（原型 radial-gradient at 32% 26% ink 14% → transparent 62%；
@@ -98,7 +98,7 @@ public:
       hl_->SetCenter(D2D1::Point2F(c.x - 0.36f * r + sx, c.y - 0.48f * r + sy));
       hl_->SetRadiusX(1.3f * hw);
       hl_->SetRadiusY(1.3f * r);
-      glassfx::fillShape(dc, c, hw, r, hl_.Get());
+      glassfx::fillShape(dc, c, hw, r, hl_.Get(), ctx.cornerR);
     }
 
     // 1px 描边：悬停 accent 100% > 中心 accent 60% > hairline 白 13%
@@ -108,7 +108,7 @@ public:
       ctx.brush->SetColor(D2D1::ColorF(kAccent, 0.60f * dim));
     else
       ctx.brush->SetColor(kHairline(0.13f * dim));
-    glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f);
+    glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f, ctx.cornerR);
   }
 
   // 详情卡底：90% 深玻璃 + 1px hairline（v1 卡不做 backdrop blur）

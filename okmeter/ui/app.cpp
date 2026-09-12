@@ -194,8 +194,7 @@ void DockApp::rebuildItems() {
   const int64_t now = nowMs();
   std::vector<int64_t> raw(bindings_.size(), 0);
   int64_t maxV = 0;
-  items_.assign(bindings_.size(), render::DockItem{});
-  for (size_t i = 0; i < bindings_.size(); ++i) {
+  items_.assign(bindings_.size(), render::DockItem{});  for (size_t i = 0; i < bindings_.size(); ++i) {
     const Binding& b = bindings_[i];
     int64_t v = 0;
     if (b.isModel) {
@@ -209,6 +208,20 @@ void DockApp::rebuildItems() {
     raw[i] = v;
     if (v > maxV) maxV = v;
     items_[i].value = wide(fmtCompact(v));
+    items_[i].raw = (double)v;
+    // wave 波形流历史（最近 26 点）：记录**本周期增量**（累计值近乎直线，增量才
+    // 是活动波形）；按绑定键持久保存（rebuild 重建 items_ 不丢）
+    const std::string hkey = b.isModel
+        ? "m:" + b.modelId
+        : "s:" + std::to_string(static_cast<int>(b.scope));
+    auto& hv = histByKey_[hkey];
+    const auto prev = rawByKey_.find(hkey);
+    const double delta = prev == rawByKey_.end() ? 0.0
+        : (double)(v > prev->second ? v - prev->second : 0);
+    rawByKey_[hkey] = v;
+    hv.push_back(delta);
+    if (hv.size() > 26) hv.erase(hv.begin());
+    items_[i].hist = hv;
   }
   // 胶囊占比条：该项值/全部项最大值（原型 updateItem capsule 同款；全零 → 4% 地板）
   for (size_t i = 0; i < raw.size(); ++i)
@@ -332,7 +345,9 @@ void DockApp::rebuildLayout() {
 void DockApp::applyWindowPos() {
   if (!hwnd_ || dragging_) return;  // 拖拽中窗口位置由指针驱动，弹簧不插手
   const RECT work = workArea();
-  const double base = lerp((double)kCollapsedPx, (double)dockW_, emerge_.value);
+  // 收缩态露出左半 50%（原型 .dock.ready translate(50%) 同款；项另以 55% 透明度
+  // 呈现——dim 已在各形态 drawItems 内 0.55+0.45e 处理）
+  const double base = dockW_ * (0.5 + 0.5 * emerge_.value);
   int x, w = dockW_ + (wide_ ? kCardZoneW : 0);
   int y = winY_, h = winH_;
   if (cfg_.edge == "left")
@@ -1350,8 +1365,8 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   dockW_ = (int)g.w;
   winH_ = h;
   winY_ = work.top + ((work.bottom - work.top) - h) / 2;
-  const int x = cfg_.edge == "left" ? work.left + kCollapsedPx - dockW_
-                                    : work.right - kCollapsedPx;
+  const int x = cfg_.edge == "left" ? work.left + dockW_ / 2 - dockW_
+                                    : work.right - dockW_ / 2;  // 收缩态露出左半
 
   hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE |
                               WS_EX_LAYERED,

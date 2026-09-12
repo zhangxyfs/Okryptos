@@ -14,6 +14,7 @@
 #include "settings.h"
 #include "watch.h"
 #include <cstdint>
+#include <unordered_map>
 #include <memory>
 #include <vector>
 
@@ -126,6 +127,8 @@ private:
   Config cfg_;
   std::vector<Binding> bindings_;
   std::vector<render::DockItem> items_;
+  std::unordered_map<std::string, std::vector<double>> histByKey_;  // wave 历史（绑定键 → 26 点增量）
+  std::unordered_map<std::string, int64_t> rawByKey_;               // wave 上次累计（算增量用）
 
   Spring emerge_;
   double emergeTarget_ = 0;

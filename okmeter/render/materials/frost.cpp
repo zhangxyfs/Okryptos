@@ -45,7 +45,7 @@ public:
     // 中心项：半径+3 accent 10% 光晕环（原型 .orb.center box-shadow）
     if (ctx.isCenter) {
       ctx.brush->SetColor(glassfx::accentC(0.10f * dim));
-      glassfx::drawShape(dc, c, hw, r, ctx.brush, 6.0f, 3.0f);
+      glassfx::drawShape(dc, c, hw, r, ctx.brush, 6.0f, 3.0f, ctx.cornerR);
     }
 
     // 磨砂玻璃底：形状域裁剪层 → 模糊+提饱和背景（屏幕对齐）→ 白 12% 染色
@@ -53,20 +53,20 @@ public:
     if (ctx.backdrop && ctx.backdrop->ok() && !ctx.backdrop->degraded()) {
       pipe_.refresh(dc, ctx.backdrop);
       lastLuma_ = ctx.backdrop->luma();
-      if (pipe_.ready() && glassfx::pushShapeClip(dc, c, hw, r)) {
+      if (pipe_.ready() && glassfx::pushShapeClip(dc, c, hw, r, ctx.cornerR)) {
         dc->DrawImage(pipe_.output(), D2D1::Point2F(ctx.backdropDX, ctx.backdropDY),
                       D2D1_INTERPOLATION_MODE_LINEAR);
         ctx.brush->SetColor(glassfx::ink(0.12f * dim));
-        glassfx::fillShape(dc, c, hw, r, ctx.brush);
+        glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
         dc->PopLayer();
         glassDrawn = true;
       }
     }
     if (!glassDrawn) {  // 退化：desk-deep 55% + 白 12% 纯色底（无模糊）
       ctx.brush->SetColor(glassfx::deskDeep(0.55f * dim));
-      glassfx::fillShape(dc, c, hw, r, ctx.brush);
+      glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
       ctx.brush->SetColor(glassfx::ink(0.12f * dim));
-      glassfx::fillShape(dc, c, hw, r, ctx.brush);
+      glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
     }
 
     // 顶部内高光（原型 inset 0 1px 0 ink 16%；跟手光中心向指针微移 ±5px）
@@ -79,7 +79,7 @@ public:
       hl_->SetCenter(D2D1::Point2F(c.x - 0.36f * r + sx, c.y - 0.48f * r + sy));
       hl_->SetRadiusX(1.3f * hw);
       hl_->SetRadiusY(1.3f * r);
-      glassfx::fillShape(dc, c, hw, r, hl_.Get());
+      glassfx::fillShape(dc, c, hw, r, hl_.Get(), ctx.cornerR);
     }
 
     // 1px 描边：悬停 accent 100% > 中心 accent 60% > ink 26%（原型 frost border）
@@ -89,7 +89,7 @@ public:
       ctx.brush->SetColor(glassfx::accentC(0.60f * dim));
     else
       ctx.brush->SetColor(glassfx::ink(0.26f * dim));
-    glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f);
+    glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f, ctx.cornerR);
   }
 
   // 详情卡底：88% 深玻璃 + 白 10% 提亮 + ink 28% 描边（v1 卡不做 backdrop blur）

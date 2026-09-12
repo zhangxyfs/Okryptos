@@ -27,6 +27,9 @@ inline constexpr ModuleMeta kFormCatalog[] = {
     {"arc", L"球体弧线", nullptr, 0},
     {"capsule", L"胶囊量表", nullptr, 1},
     {"compass", L"星环罗盘", nullptr, 2},
+    {"level", L"电平柱", nullptr, 3},
+    {"wave", L"波形流", nullptr, 4},
+    {"nixie", L"辉光数码", nullptr, 5},
 };
 inline constexpr int kFormCount = (int)(sizeof(kFormCatalog) / sizeof(kFormCatalog[0]));
 

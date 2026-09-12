@@ -623,11 +623,28 @@ void SettingsPanel::drawThumb(ID2D1DeviceContext* dc, int kind, int idx,
       rrect(14, 4, 72, 9, 4.5f);
       rrect(22, 18, 56, 9, 4.5f);
       rrect(30, 32, 40, 9, 4.5f);
-    } else {                 // compass：虚线轨道 + 中心 + 四卫星
+    } else if (idx == 2) {   // compass：虚线轨道 + 中心 + 四卫星
       dc->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(50, 22), 17, 17), brush_.Get(),
                       sw, dashStyle_.Get());
       circle(50, 22, 6);
       circle(50, 5, 3); circle(67, 22, 3); circle(50, 39, 3); circle(33, 22, 3);
+    } else if (idx == 3) {   // level：双列电平段（原型 svg 横线段组）
+      line(16, 12, 50, 12); line(16, 18, 50, 18); line(16, 24, 36, 24); line(16, 30, 36, 30);
+      line(58, 8, 84, 8); line(58, 14, 84, 14); line(58, 20, 84, 20);
+      line(58, 26, 72, 26); line(58, 32, 72, 32);
+    } else if (idx == 4) {   // wave：折线（原型 svg path）
+      PathInk p;
+      if (p.open(dc)) {
+        p.m(10, 30); p.l(24, 26); p.l(34, 33); p.l(46, 12);
+        p.l(58, 27); p.l(70, 19); p.l(82, 29); p.l(92, 10);
+        stroke(p.done());
+      }
+    } else {                 // nixie：七段数码 "8"（原型 svg 横竖段）
+      line(38, 8, 50, 8); line(38, 22, 50, 22); line(38, 36, 50, 36);
+      line(38, 10, 38, 20); line(50, 10, 50, 20);
+      line(38, 24, 38, 34); line(50, 24, 50, 34);
+      line(58, 8, 70, 8); line(58, 22, 70, 22); line(58, 36, 70, 36);
+      line(70, 10, 70, 20); line(70, 24, 70, 34);
     }
   } else {                    // ── 材质（原型 material-choices svg）──
     if (idx == 0) {          // dark：圆 + 实心点 + 四刻度
