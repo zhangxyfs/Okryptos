@@ -73,6 +73,8 @@ public:
   virtual bool wantsTick() const { return false; }
   virtual double hoverScale() const { return 1.34; }  // 悬停放大（胶囊 1.08 / 罗盘 1.22）
   virtual double hoverPush() const { return 10; }     // 邻项让位 px（罗盘 0：环形不推挤）
+  virtual double hoverDimShrink() const { return 1.0; }  // 非悬停项回缩（原型 .orb.dim scale(.9) 仅球体弧线；块状项不回缩）
+  virtual double hoverDimOpacity() const { return 0.55; }  // 非悬停项降不透明度（原型 .dim .55；球体 .6）
   // 详情卡卡半径（原型 RADII 表：arc 30 / capsule 22 / 罗盘中心 43 卫星 23）
   virtual double cardRadius(int idx, int mid) const { (void)idx; (void)mid; return 30; }
 };

@@ -76,7 +76,8 @@ DockGeom layoutCompass(int n, double rotDeg, int screenH) {
   return g;
 }
 
-void applyHover(DockGeom& g, int hoverIdx, double hoverScale, double push) {
+void applyHover(DockGeom& g, int hoverIdx, double hoverScale, double push,
+                double dimShrink) {
   if (hoverIdx >= (int)g.items.size()) hoverIdx = -1;  // 越界正索引按复位处理
   for (size_t i = 0; i < g.items.size(); ++i) {
     ItemGeom& it = g.items[i];
@@ -87,8 +88,8 @@ void applyHover(DockGeom& g, int hoverIdx, double hoverScale, double push) {
     }
     const double d = std::abs((double)i - hoverIdx);
     const double amount = push * std::exp(-0.9 * (d - 1));  // 近多远少
-    // 规格 §3.4：相邻球让位（dy），其余球略微回缩（d≥2 收 0.92，原型 .orb.dim 同款）
-    it.scale = d >= 2.0 ? 0.92 : 1.0;
+    // 非悬停项回缩由形态决定（原型 .orb.dim scale(.9) 仅球体弧线；块状项 1.0 不回缩）
+    it.scale = d >= 2.0 ? dimShrink : 1.0;
     it.dy = ((int)i < hoverIdx ? -amount : amount);
   }
 }

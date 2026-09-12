@@ -714,7 +714,8 @@ void DockApp::renderOnce() {
   const RECT work = workArea();
   const int screenH = (int)(work.bottom - work.top);
   DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
-  applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush());
+  applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
+               form_->hoverDimShrink());
   // 菜单向上扩窗时球区整体下移 zoneDY_（卡绘制共用同一 g，锚定随动）
   if (zoneDY_ != 0)
     for (ItemGeom& it : g.items) it.y += zoneDY_;
@@ -1082,7 +1083,8 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     const RECT work = workArea();
     const int screenH = (int)(work.bottom - work.top);
     DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
-    applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush());  // dy 参与命中
+    applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
+               form_->hoverDimShrink());  // dy 参与命中
     const int idx = hitItem(g, mx, my - zoneDY_, (float)zoneDX_);
     if (idx != hoverIdx_) {
       hoverIdx_ = idx;
@@ -1154,7 +1156,8 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     const RECT work = workArea();
     const int screenH = (int)(work.bottom - work.top);
     DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
-    applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush());
+    applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
+               form_->hoverDimShrink());
     const int idx = hitItem(g, (int)(short)LOWORD(lp),
                             (int)(short)HIWORD(lp) - zoneDY_, (float)zoneDX_);
     if (idx != -1) {
@@ -1225,7 +1228,8 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     const RECT work = workArea();
     const int screenH = (int)(work.bottom - work.top);
     DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
-    applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush());
+    applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
+               form_->hoverDimShrink());
     openMenu(mx, my, hitItem(g, mx, my - zoneDY_, (float)zoneDX_));
     return 0;
   }

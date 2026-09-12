@@ -9,6 +9,8 @@ namespace {
 class ArcForm final : public IForm {
 public:
   std::string id() const override { return "arc"; }
+  double hoverDimShrink() const override { return 0.9; }   // 原型 .orb.dim scale(.9)
+  double hoverDimOpacity() const override { return 0.6; }  // 原型 .orb.dim opacity .6
 
   // 球体弧线：半径 30、中心项最靠屏内（布局细节见 ui/geometry.cpp）
   DockGeom layout(int n, int screenH, const std::string& edge) const override {
@@ -21,12 +23,15 @@ public:
     const DockGeom& g = *ctx.geom;
     const size_t n = g.items.size();
     const double e = ctx.e < 0 ? 0 : ctx.e > 1 ? 1 : ctx.e;
-    const float dim = (float)(0.55 + 0.45 * e);  // 收缩态 55%（原型同款）
+    const float dimBase = (float)(0.55 + 0.45 * e);  // 收缩态 55%（原型同款）
+    bool anyHot = false;  // 有悬停项时非悬停项降暗（原型 .dim）
+    for (const ItemGeom& it : g.items) anyHot = anyHot || it.scale > 1.001;
 
     for (size_t i = 0; i < n; ++i) {
       const ItemGeom& it = g.items[i];
       const D2D1_POINT_2F c{ (float)it.x, (float)it.y };
       const bool isHot = it.scale > 1.001;
+      const float dim = dimBase * ((anyHot && !isHot) ? (float)hoverDimOpacity() : 1.0f);  // 原型 .dim 降暗
 
       // 球底（材质）：r 已并入悬停放大，背景采样与屏幕对齐不被放大
       OrbStyleCtx osc{};

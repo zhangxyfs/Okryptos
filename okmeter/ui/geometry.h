@@ -41,6 +41,7 @@ DockGeom layoutCompass(int n, double rotDeg, int screenH);
 
 // 悬停强化：hoverIdx 项放大，其余项沿排布方向让位（近多远少，指数衰减）；
 // hoverIdx<0 复位全部
-void applyHover(DockGeom& g, int hoverIdx, double hoverScale, double push);
+void applyHover(DockGeom& g, int hoverIdx, double hoverScale, double push,
+                double dimShrink = 1.0);
 
 } // namespace okmeter

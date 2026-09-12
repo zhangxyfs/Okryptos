@@ -49,13 +49,16 @@ public:
     const DockGeom& g = *ctx.geom;
     const size_t n = g.items.size();
     const double e = ctx.e < 0 ? 0 : ctx.e > 1 ? 1 : ctx.e;
-    const float dim = (float)(0.55 + 0.45 * e);  // 收缩态 55%（原型同款）
+    const float dimBase = (float)(0.55 + 0.45 * e);  // 收缩态 55%（原型同款）
+    bool anyHot = false;  // 有悬停项时非悬停项降暗（原型 .dim）
+    for (const ItemGeom& it : g.items) anyHot = anyHot || it.scale > 1.001;
     const float luma = ctx.material->backdropLuma();
 
     for (size_t i = 0; i < n; ++i) {
       const ItemGeom& it = g.items[i];
       const D2D1_POINT_2F c{ (float)it.x, (float)it.y };
       const bool isHot = it.scale > 1.001;
+      const float dim = dimBase * ((anyHot && !isHot) ? (float)hoverDimOpacity() : 1.0f);  // 原型 .dim 降暗
 
       OrbStyleCtx osc{};
       osc.d3d = ctx.d3d;

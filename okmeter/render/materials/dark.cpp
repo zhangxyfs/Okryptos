@@ -102,7 +102,7 @@ public:
     }
 
     // 1px 描边：悬停 accent 100% > 中心 accent 60% > hairline 白 13%
-    if (ctx.isHot)
+    if (ctx.isHot && !glassfx::isPill(hw, r))  // 块状项悬停不要 accent 描边（用户裁决：悬停=他项降暗）
       ctx.brush->SetColor(D2D1::ColorF(kAccent, 1.0f * dim));
     else if (ctx.isCenter)
       ctx.brush->SetColor(D2D1::ColorF(kAccent, 0.60f * dim));
