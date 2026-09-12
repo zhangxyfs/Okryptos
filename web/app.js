@@ -4624,7 +4624,7 @@ function renderEmbModal(){
       if(!embForm.mirror) embForm.mirror = "hf-mirror";   // 显示默认同时落草稿（未触碰也按默认提交）
       const mRow = el("div","prow");
       mRow.appendChild(Object.assign(el("span","k"),{textContent:t("fModel")}));
-      const mSel = el("select","pselect"); mSel.style.maxWidth="420px";
+      const mSel = el("select","pselect"); mSel.style.maxWidth="300px";
       (e0.builtin_models||[]).forEach(bm=>{
         const op=el("option"); op.value=bm.id;
         op.textContent = bm.label + (bm.downloaded?t("downloaded"):"");
@@ -4890,7 +4890,7 @@ function renderLlmModal(){
       const l0 = PREFS.llm || {};
       const mRow = el("div","prow");
       mRow.appendChild(Object.assign(el("span","k"),{textContent:t("fModel")}));
-      const mSel = el("select","pselect"); mSel.style.maxWidth="420px";
+      const mSel = el("select","pselect"); mSel.style.maxWidth="300px";
       (l0.builtin_models||[]).forEach(bm=>{
         const op=el("option"); op.value=bm.id;
         op.textContent = bm.label + (bm.downloaded?t("downloaded"):"");
