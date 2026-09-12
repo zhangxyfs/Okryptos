@@ -49,6 +49,8 @@ type Handler struct {
 	doneOnce sync.Once
 	dlMu     sync.Mutex
 	dl       map[string]*dlJob
+	chatDlMu sync.Mutex
+	chatDl   map[string]*dlJob // chat 模型下载任务表（与 embedding 的 dl 隔离，见 chatDlSnapshot）
 	tkMu     sync.Mutex
 	tickets  map[string]assetTicket
 	// OnWrite 条目写入成功后的回调（daemon 注入同步防抖触发），可为 nil。
@@ -58,7 +60,7 @@ type Handler struct {
 // NewHandler 构建路由。beats 收到每次 /api/heartbeat 的信号（非阻塞，可传 nil）；
 // /api/shutdown 会关闭 Done() 返回的通道，由调用方执行 Server.Shutdown。
 func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
-	h := &Handler{webDir: webDir, token: token, beats: beats, done: make(chan struct{}), dl: map[string]*dlJob{}, tickets: map[string]assetTicket{}}
+	h := &Handler{webDir: webDir, token: token, beats: beats, done: make(chan struct{}), dl: map[string]*dlJob{}, chatDl: map[string]*dlJob{}, tickets: map[string]assetTicket{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", h.serveIndex)
 	mux.HandleFunc("GET /index.html", h.serveIndex)
@@ -100,6 +102,8 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/llm/active", h.apiLLMActive)
 	api("POST /api/llm/max-tokens", h.apiLLMMaxTokens)
 	api("POST /api/llm/test", h.apiLLMTest)
+	api("POST /api/llm/download", h.apiLLMDownload)
+	api("POST /api/llm/download/cancel", h.apiLLMDownloadCancel)
 	api("POST /api/entry/optimize", h.apiEntryOptimize)
 	api("GET /api/project/branch-info", h.apiProjectBranchInfo)
 	api("GET /api/project/readme", h.apiProjectReadme)

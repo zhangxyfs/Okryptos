@@ -31,19 +31,24 @@ type dlJob struct {
 }
 
 // dlSnapshot 返回当前下载任务快照（优先 downloading；无任务返回零值）。
+func (h *Handler) dlSnapshot() *dlJob {
+	return dlSnapshotFrom(&h.dlMu, h.dl)
+}
+
+// dlSnapshotFrom 返回指定下载任务表的快照（优先 downloading；无任务返回零值）。
 // key 排序后遍历，顺序稳定——map 随机序会让并发下载的进度条在轮询间乱跳。
 // 逐字段拷贝避免复制 sync.Mutex（go vet copylocks）。
-func (h *Handler) dlSnapshot() *dlJob {
-	h.dlMu.Lock()
-	defer h.dlMu.Unlock()
-	keys := make([]string, 0, len(h.dl))
-	for k := range h.dl {
+func dlSnapshotFrom(mu *sync.Mutex, jobs map[string]*dlJob) *dlJob {
+	mu.Lock()
+	defer mu.Unlock()
+	keys := make([]string, 0, len(jobs))
+	for k := range jobs {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	var pick *dlJob
 	for _, k := range keys {
-		j := h.dl[k]
+		j := jobs[k]
 		pick = j
 		if j.State == "downloading" {
 			break

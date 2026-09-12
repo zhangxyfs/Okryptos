@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"okryptos/internal/chatx"
 )
 
 // TestLLMRoundTrip llm 配置的 保存/掩码回显/掩码提交保留原 key/active 切换/删除置空。
@@ -702,5 +704,160 @@ func TestResolveRefPathContainment(t *testing.T) {
 		if _, ok := resolveRefPath(root, evil); ok {
 			t.Fatalf("traversal ref %q not rejected", evil)
 		}
+	}
+}
+
+// fakeChatModel 把一个测试模型追加进 chatx 清单并注册清理（镜像 embedding_test 的做法）。
+func fakeChatModel(t *testing.T, m chatx.Model) {
+	t.Helper()
+	chatx.Models = append(chatx.Models, m)
+	t.Cleanup(func() { chatx.Models = chatx.Models[:len(chatx.Models)-1] })
+}
+
+// TestLLMBuiltinSave kind=builtin 档保存：清单内 id → 200 且 base_url/api_key 置空忽略
+// （不落盘）；未知 id → 400。GET 响应携带 builtin_models 清单与 chat_download 快照。
+func TestLLMBuiltinSave(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	modelsDir := filepath.Join(okHome, "models")
+	writeModelsDir(t, modelsDir)
+	m := chatx.Model{ID: "fake-chat", Label: "测试模型", Size: 4}
+	fakeChatModel(t, m)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	cfgPath := filepath.Join(okHome, "config.toml")
+
+	// GET：builtin_models 含清单条目（未下载），chat_download 为零值快照
+	_, data := do(t, "GET", srv.URL+"/api/llm", testToken, nil)
+	var view struct {
+		BuiltinModels []struct {
+			ID         string `json:"id"`
+			Label      string `json:"label"`
+			Size       int64  `json:"size"`
+			Downloaded bool   `json:"downloaded"`
+		} `json:"builtin_models"`
+		ChatDownload struct {
+			State string `json:"state"`
+		} `json:"chat_download"`
+	}
+	if err := json.Unmarshal(data, &view); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, bm := range view.BuiltinModels {
+		if bm.ID == "fake-chat" {
+			found = true
+			if bm.Label != "测试模型" || bm.Size != 4 || bm.Downloaded {
+				t.Fatalf("清单条目不对: %+v", bm)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("builtin_models 应含 fake-chat: %s", data)
+	}
+
+	// 清单内 id → 200；base_url/api_key 忽略（置空，不落盘）
+	code, data := do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "内置", "kind": "builtin", "base_url": "https://evil.example.com",
+		"model": "fake-chat", "api_key": "sk-leak",
+	})
+	if code != 200 {
+		t.Fatalf("builtin 清单内保存应 200: %d %s", code, data)
+	}
+	cfgData, _ := os.ReadFile(cfgPath)
+	if strings.Contains(string(cfgData), "sk-leak") || strings.Contains(string(cfgData), "evil.example.com") {
+		t.Fatalf("builtin 档不得落盘 base_url/api_key: %q", cfgData)
+	}
+
+	// 未知 id → 400
+	code, _ = do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "x", "kind": "builtin", "model": "nope",
+	})
+	if code != 400 {
+		t.Fatalf("未知内置模型应 400, got %d", code)
+	}
+}
+
+// TestLLMBuiltinActiveGate 激活 builtin profile 要求模型已下载：未下载 → 409；
+// 落盘后激活成功并写 chat-sidecar.want（chatsc.RequestStart 预热）。
+func TestLLMBuiltinActiveGate(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	modelsDir := filepath.Join(okHome, "models")
+	writeModelsDir(t, modelsDir)
+	m := chatx.Model{ID: "fake-chat", Size: 4}
+	fakeChatModel(t, m)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	code, data := do(t, "POST", srv.URL+"/api/llm/profile", testToken, map[string]any{
+		"name": "内置", "kind": "builtin", "model": "fake-chat",
+	})
+	if code != 200 {
+		t.Fatalf("save: %d %s", code, data)
+	}
+
+	// 未下载 → 409
+	code, _ = do(t, "POST", srv.URL+"/api/llm/active", testToken, map[string]any{"name": "内置"})
+	if code != 409 {
+		t.Fatalf("未下载激活应 409, got %d", code)
+	}
+
+	// 落盘模型 → 激活成功 + want 预热标记
+	if err := os.MkdirAll(modelsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(m.InstalledPath(modelsDir), []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, data = do(t, "POST", srv.URL+"/api/llm/active", testToken, map[string]any{"name": "内置"})
+	if code != 200 {
+		t.Fatalf("已下载激活应 200: %d %s", code, data)
+	}
+	if _, err := os.Stat(filepath.Join(okHome, "chat-sidecar.want")); err != nil {
+		t.Fatalf("激活成功应写 want 预热标记: %v", err)
+	}
+	var view struct {
+		Active string `json:"active"`
+	}
+	if err := json.Unmarshal(data, &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Active != "内置" {
+		t.Fatalf("active 应为 内置: %+v", view)
+	}
+}
+
+// TestLLMDownloadEndpoints 下载端点：已下载 → {state:"done"}；未知模型 → 400；
+// cancel 幂等 200。
+func TestLLMDownloadEndpoints(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	modelsDir := filepath.Join(okHome, "models")
+	writeModelsDir(t, modelsDir)
+	m := chatx.Model{ID: "fake-chat", Size: 4}
+	fakeChatModel(t, m)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// 预置已下载模型
+	if err := os.MkdirAll(modelsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(m.InstalledPath(modelsDir), []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, data := do(t, "POST", srv.URL+"/api/llm/download", testToken, map[string]any{"model_id": "fake-chat"})
+	if code != 200 || !strings.Contains(string(data), `"state":"done"`) {
+		t.Fatalf("已下载应立即 done: %d %s", code, data)
+	}
+
+	// 未知模型 → 400
+	code, _ = do(t, "POST", srv.URL+"/api/llm/download", testToken, map[string]any{"model_id": "nope"})
+	if code != 400 {
+		t.Fatalf("未知模型下载应 400, got %d", code)
+	}
+
+	// cancel 幂等（无任务也 200）
+	code, _ = do(t, "POST", srv.URL+"/api/llm/download/cancel", testToken, map[string]any{"model_id": "fake-chat"})
+	if code != 200 {
+		t.Fatalf("cancel 应 200, got %d", code)
 	}
 }

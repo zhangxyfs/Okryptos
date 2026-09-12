@@ -14,7 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"okryptos/internal/chatsc"
+	"okryptos/internal/chatx"
 	"okryptos/internal/config"
+	"okryptos/internal/embedsidecar"
 	"okryptos/internal/index"
 	"okryptos/internal/llmx"
 	"okryptos/internal/logx"
@@ -72,7 +75,8 @@ func loadGlobalConfig() (config.Config, error) {
 	return config.LoadMerged("", globalConfigPath())
 }
 
-// apiLLMGet 返回全局 llm 配置：active + profiles（api_key 掩码，不回明文）。
+// apiLLMGet 返回全局 llm 配置：active + profiles（api_key 掩码，不回明文）
+// + builtin_models（chatx 清单，含下载状态）+ chat_download（chat 模型下载快照）。
 func (h *Handler) apiLLMGet(w http.ResponseWriter, _ *http.Request) {
 	cfg, err := loadGlobalConfig()
 	if err != nil {
@@ -91,8 +95,18 @@ func (h *Handler) apiLLMGet(w http.ResponseWriter, _ *http.Request) {
 			Filter: p.Filter, Active: p.Name == cfg.LLM.Active,
 		})
 	}
+	modelsDir := embedsidecar.ModelsDir(cfg) // chat 与 embedding 共用同一模型目录
+	builtinModels := make([]map[string]any, 0, len(chatx.Models))
+	for _, m := range chatx.Models {
+		builtinModels = append(builtinModels, map[string]any{
+			"id": m.ID, "label": m.Label, "size": m.Size,
+			"downloaded": m.Installed(modelsDir),
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"active": cfg.LLM.Active, "active_filter": cfg.LLM.ActiveFilter, "profiles": profiles})
+		"active": cfg.LLM.Active, "active_filter": cfg.LLM.ActiveFilter, "profiles": profiles,
+		"builtin_models": builtinModels, "chat_download": h.chatDlSnapshot(),
+	})
 }
 
 // apiLLMProfileSave 新增/同名覆盖保存 profile；activate=true 同时设为使用中。
@@ -119,11 +133,19 @@ func (h *Handler) apiLLMProfileSave(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "名称、模型不能为空")
 		return
 	}
-	if req.Kind != "openai" && req.Kind != "anthropic" && req.Kind != "ollama" {
-		writeErr(w, http.StatusBadRequest, "类型仅支持 openai | anthropic | ollama")
+	if req.Kind != "openai" && req.Kind != "anthropic" && req.Kind != "ollama" && req.Kind != "builtin" {
+		writeErr(w, http.StatusBadRequest, "类型仅支持 openai | anthropic | ollama | builtin")
 		return
 	}
-	if req.Kind != "ollama" && req.BaseURL == "" {
+	if req.Kind == "builtin" {
+		if _, ok := chatx.FindModel(req.Model); !ok {
+			writeErr(w, http.StatusBadRequest, "未知内置模型: "+req.Model)
+			return
+		}
+		// builtin 无 base_url/api_key 概念（sidecar 本机回环免 key）：显式置空忽略，
+		// 防止误填的地址/key 落盘后被误读为可外发凭证。
+		req.BaseURL, req.APIKey = "", ""
+	} else if req.Kind != "ollama" && req.BaseURL == "" {
 		writeErr(w, http.StatusBadRequest, "base_url 不能为空（ollama 可留空，默认 localhost:11434）")
 		return
 	}
@@ -165,7 +187,8 @@ func (h *Handler) apiLLMProfileDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiLLMActive 切换使用中 profile；空 name = 停用。slot="filter" 走识别意图
-// 槽（active_filter），缺省/其他值走普通槽（active）。
+// 槽（active_filter），缺省/其他值走普通槽（active）。激活 builtin profile 要求
+// 模型已下载（未下载 409，镜像 apiEmbeddingActive 语义），成功后写 want 预热 sidecar。
 func (h *Handler) apiLLMActive(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
@@ -173,6 +196,25 @@ func (h *Handler) apiLLMActive(w http.ResponseWriter, r *http.Request) {
 	}
 	if !decodeJSON(w, r, &req) {
 		return
+	}
+	builtin := false
+	if req.Name != "" {
+		cfg, err := loadGlobalConfig()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		for _, p := range cfg.LLM.Profiles {
+			if p.Name == req.Name && p.Kind == "builtin" {
+				m, ok := chatx.FindModel(p.Model)
+				if !ok || !m.Installed(embedsidecar.ModelsDir(cfg)) {
+					writeErr(w, http.StatusConflict, "模型未下载，请先下载")
+					return
+				}
+				builtin = true
+				break
+			}
+		}
 	}
 	var err error
 	if req.Slot == "filter" {
@@ -183,6 +225,9 @@ func (h *Handler) apiLLMActive(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if builtin {
+		chatsc.RequestStart() // 预热：daemon 下轮 reconcile 拉起 sidecar
 	}
 	h.apiLLMGet(w, r)
 }
@@ -229,11 +274,13 @@ func (h *Handler) apiLLMTest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !(req.Kind == "ollama" && req.BaseURL == "") && !httpBaseURLOK(req.BaseURL) {
+	// builtin 档无 base_url/key（sidecar 本机回环）：豁免地址校验与已存 key 回查，
+	// 由 llmx 按 chatsc 状态文件探活（未就绪返回"启动中"并请求拉起）。
+	if req.Kind != "builtin" && !(req.Kind == "ollama" && req.BaseURL == "") && !httpBaseURLOK(req.BaseURL) {
 		writeErr(w, http.StatusBadRequest, "base_url 必须是 http/https URL")
 		return
 	}
-	if req.APIKey == "" || req.APIKey == llmKeyMask {
+	if req.Kind != "builtin" && (req.APIKey == "" || req.APIKey == llmKeyMask) {
 		if cfg, err := loadGlobalConfig(); err == nil {
 			for _, p := range cfg.LLM.Profiles {
 				if p.Name == req.Name {
@@ -255,6 +302,104 @@ func (h *Handler) apiLLMTest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("连接失败: %v", err))
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// ---------- builtin 模型下载（chatx 清单，dlJob 模式镜像 embedding 侧） ----------
+
+// chatDlSnapshot 返回 chat 模型下载任务快照。任务表独立于 embedding（chatDl），
+// 两侧快照互不混入——共用一张表会让 /api/setup/embedding 的 download 快照带上
+// chat 任务（排序选取跨任务类型乱跳）。
+func (h *Handler) chatDlSnapshot() *dlJob {
+	return dlSnapshotFrom(&h.chatDlMu, h.chatDl)
+}
+
+// apiLLMDownload：后台下载内置 chat 模型（镜像 apiEmbeddingDownload；单任务 per-model，
+// 重复调用幂等；已下载立即 done）。
+func (h *Handler) apiLLMDownload(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ModelID string `json:"model_id"`
+		Mirror  string `json:"mirror"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	m, ok := chatx.FindModel(req.ModelID)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "未知内置模型: "+req.ModelID)
+		return
+	}
+	cfg, err := loadGlobalConfig()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	modelsDir := embedsidecar.ModelsDir(cfg)
+	if m.Installed(modelsDir) {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "state": "done"})
+		return
+	}
+	h.chatDlMu.Lock()
+	if old, ok := h.chatDl[req.ModelID]; ok {
+		old.mu.Lock()
+		st := old.State
+		old.mu.Unlock()
+		if st == "downloading" {
+			h.chatDlMu.Unlock()
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "state": "downloading"})
+			return
+		}
+		delete(h.chatDl, req.ModelID) // done/error 残留：清掉后落入新建
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &dlJob{ModelID: req.ModelID, State: "downloading", Total: m.Size, cancel: cancel}
+	h.chatDl[req.ModelID] = job
+	h.chatDlMu.Unlock()
+	go func() {
+		err := chatx.Download(ctx, nil, m, req.Mirror, modelsDir, func(done, total int64) {
+			job.mu.Lock()
+			job.Done = done
+			job.Total = total
+			job.mu.Unlock()
+		})
+		h.chatDlMu.Lock()
+		defer h.chatDlMu.Unlock()
+		job.mu.Lock()
+		defer job.mu.Unlock()
+		switch {
+		case err == nil:
+			job.State = "done"
+			job.Done = job.Total
+		case ctx.Err() != nil:
+			delete(h.chatDl, req.ModelID) // 取消：清空状态（.part 保留可续传）
+		default:
+			job.State = "error"
+			job.Err = err.Error()
+		}
+	}()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "state": "downloading"})
+}
+
+// apiLLMDownloadCancel：取消 chat 模型下载（保留 .part 供续传；无任务幂等 200）。
+func (h *Handler) apiLLMDownloadCancel(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ModelID string `json:"model_id"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	h.chatDlMu.Lock()
+	if job, ok := h.chatDl[req.ModelID]; ok {
+		job.mu.Lock()
+		st := job.State
+		job.mu.Unlock()
+		if st == "downloading" && job.cancel != nil {
+			job.cancel()
+		} else {
+			delete(h.chatDl, req.ModelID) // 非 downloading（done/error 残留）：直接消除
+		}
+	}
+	h.chatDlMu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
