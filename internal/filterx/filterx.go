@@ -118,6 +118,9 @@ func parseKeep(text string, n int) ([]int, error) {
 		seen[k] = true
 		out = append(out, k)
 	}
+	if len(idx) > 0 && len(out) == 0 {
+		return nil, fmt.Errorf("编号全部越界/重复: %q", truncateRunes(s[i:j+1], 80))
+	}
 	return out, nil
 }
 

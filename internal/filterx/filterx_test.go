@@ -130,3 +130,17 @@ func TestFilterPrefersFilterProfile(t *testing.T) {
 		t.Fatalf("应使用识别意图槽的裁决 [2]: %+v", kept)
 	}
 }
+
+// TestFilterAllInvalidKeepsAll 编号全部越界/重复（合法 JSON 但无有效编号）按解析失败
+// 处理：fail-closed 收口，保留全部并给 note。区分 [] （空数组=全不相关，照常全丢）。
+func TestFilterAllInvalidKeepsAll(t *testing.T) {
+	srv := llmServer(t, "[99]", 0)
+	defer srv.Close()
+	kept, note := Filter(context.Background(), cfgWithLLM(srv.URL), "查询", testHits())
+	if len(kept) != 3 {
+		t.Fatalf("编号全越界应保留全部: %+v", kept)
+	}
+	if note == "" {
+		t.Fatal("解析失败应有 note")
+	}
+}
