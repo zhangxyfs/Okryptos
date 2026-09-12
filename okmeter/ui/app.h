@@ -98,9 +98,13 @@ private:
   // 自绘玻璃右键菜单：组装内容（映射组当前值 ✓）→ 测量 → 屏缘内侧定位（不出屏）
   // → 并集扩窗；收起即收回基础矩形，指针已在窗外则恢复 600ms 迟滞
   void buildMenuEntries(int slot);
+  void openSub1(int parentIdx, int subKind);           // 二级：总量四口径/模型厂商分组
+  void openSub2(int parentIdx, const std::string& vendor);  // 三级：厂商下具体模型
+  void placeSubColumns();                              // 子列定位（屏内侧逐级展开+并集矩形）
   void openMenu(int clientX, int clientY, int slot);
   void closeMenu();
   void activateMenu(int idx);
+  void applyMenuMapping(const std::string& v);  // 叶项映射落盘（三级菜单共用）
   double menuAnimT() const;  // 弹出动画进度（0..1，ease-dock 缓动）
   // 背板设置面板：打开（draft=cfg 副本 + 模型枚举 + 对侧屏缘定位 + 并集扩窗）/
   // 关闭（apply=true → normalize+saveConfig+createModules 全量 rebuild；false 丢弃）

@@ -66,6 +66,12 @@ std::string shortName(const std::string& modelId) {
   return p == std::string::npos ? modelId : modelId.substr(p + 1);
 }
 
+// 厂商段：modelId 第一段（/ 前；无 / 则全名）
+std::string vendorOf(const std::string& modelId) {
+  const size_t p = modelId.find('/');
+  return p == std::string::npos ? modelId : modelId.substr(0, p);
+}
+
 const wchar_t* scopeLabel(Scope s) {
   switch (s) {
   case Scope::Session: return L"当前会话";
@@ -377,6 +383,8 @@ void DockApp::applyWindowPos() {
   }
   SetWindowPos(hwnd_, nullptr, x, y, w, h,
                SWP_NOZORDER | SWP_NOACTIVATE);  // 尺寸变化 → WM_SIZE → d3d.resize + render
+  if (menu_.open && (menu_.parent1 >= 0 || menu_.parent2 >= 0))
+    placeSubColumns();  // 扩窗后按新窗口原点重布子列（屏幕坐标不变）
 }
 
 // 设置面板打开期间的跨进程点击穿透：WM_NCHITTEST 的 HTTRANSPARENT 只对同线程
@@ -454,22 +462,17 @@ void DockApp::buildMenuEntries(int slot) {
     title.kind = MenuEntry::Title;
     title.label = L"第 " + std::to_wstring(slot + 1) + L" 项 · " + pos;
     menu_.entries.push_back(std::move(title));
-    const std::string cur = cfg_.mapping[(size_t)slot];
-    auto mapBtn = [&](const std::wstring& label, const std::string& v) {
-      MenuEntry e;
-      e.kind = MenuEntry::Item;
-      e.label = label;
-      e.value = v;
-      e.tick = cur == v;
-      menu_.entries.push_back(std::move(e));
-    };
-    mapBtn(L"默认 · 按最近使用", "auto");
-    mapBtn(L"总量 · 当前会话", "total:session");
-    mapBtn(L"总量 · 今日", "total:today");
-    mapBtn(L"总量 · 本周", "total:week");
-    mapBtn(L"总量 · 全部累计", "total:all");
-    for (const std::string& id : store_->agg().modelsByRecency())
-      mapBtn(L"模型 · " + wide(shortName(id)), "model:" + id);
+    // 一级：总量 ▸ / 模型 ▸（二级展开；不再有"默认 · 按最近使用"项）
+    MenuEntry total;
+    total.kind = MenuEntry::Parent;
+    total.label = L"总量";
+    total.sub = 1;
+    menu_.entries.push_back(std::move(total));
+    MenuEntry models;
+    models.kind = MenuEntry::Parent;
+    models.label = L"模型";
+    models.sub = 2;
+    menu_.entries.push_back(std::move(models));
     MenuEntry sep;
     sep.kind = MenuEntry::Separator;
     menu_.entries.push_back(sep);
@@ -486,6 +489,110 @@ void DockApp::buildMenuEntries(int slot) {
   quit.label = L"退出";
   quit.action = 3;
   menu_.entries.push_back(std::move(quit));
+}
+
+// 二级子列：subKind 1=总量四口径；2=模型厂商分组（按 modelId 首段聚合，按最近用排序）
+void DockApp::openSub1(int parentIdx, int subKind) {
+  menu_.parent1 = parentIdx;
+  menu_.parent2 = -1;
+  menu_.sub2.clear();
+  menu_.sub1.clear();
+  const int slot = menu_.slot;
+  const std::string cur = slot >= 0 && slot < (int)cfg_.mapping.size()
+                              ? cfg_.mapping[(size_t)slot] : "";
+  auto leaf = [&](const std::wstring& label, const std::string& v) {
+    MenuEntry e;
+    e.kind = MenuEntry::Item;
+    e.label = label;
+    e.value = v;
+    e.tick = cur == v;
+    menu_.sub1.entries.push_back(std::move(e));
+  };
+  if (subKind == 1) {
+    leaf(L"当前会话", "total:session");
+    leaf(L"今日用量", "total:today");
+    leaf(L"本周用量", "total:week");
+    leaf(L"全部累计", "total:all");
+  } else {
+    std::vector<std::string> vendors;
+    for (const std::string& id : store_->agg().modelsByRecency()) {
+      const std::string v = vendorOf(id);
+      if (std::find(vendors.begin(), vendors.end(), v) == vendors.end())
+        vendors.push_back(v);
+    }
+    for (const std::string& v : vendors) {
+      MenuEntry e;
+      e.kind = MenuEntry::Parent;
+      e.label = wide(v);
+      e.value = v;
+      e.sub = 3;
+      menu_.sub1.entries.push_back(std::move(e));
+    }
+  }
+  menu_.layout(d3d_);
+  placeSubColumns();
+  applyWindowPos();
+  render();
+}
+
+// 三级子列：某厂商下的具体模型
+void DockApp::openSub2(int parentIdx, const std::string& vendor) {
+  menu_.parent2 = parentIdx;
+  menu_.sub2.clear();
+  const int slot = menu_.slot;
+  const std::string cur = slot >= 0 && slot < (int)cfg_.mapping.size()
+                              ? cfg_.mapping[(size_t)slot] : "";
+  for (const std::string& id : store_->agg().modelsByRecency()) {
+    if (vendorOf(id) != vendor) continue;
+    MenuEntry e;
+    e.kind = MenuEntry::Item;
+    e.label = wide(shortName(id));
+    e.value = "model:" + id;
+    e.tick = cur == e.value;
+    menu_.sub2.entries.push_back(std::move(e));
+  }
+  menu_.layout(d3d_);
+  placeSubColumns();
+  applyWindowPos();
+  render();
+}
+
+// 子列定位：右缘向屏内（左）逐级展开，与父项行顶对齐；左缘反向
+void DockApp::placeSubColumns() {
+  const RECT work = workArea();
+  RECT wr{};
+  GetWindowRect(hwnd_, &wr);
+  const int nx = (int)menu_.rect.left + (int)wr.left;   // 主列屏幕坐标
+  const int ny = (int)menu_.rect.top + (int)wr.top;
+  const bool rightEdge = cfg_.edge == "right";
+  if (menu_.parent1 >= 0 && menu_.parent1 < (int)menu_.entries.size() &&
+      !menu_.sub1.entries.empty()) {
+    const MenuEntry& p = menu_.entries[(size_t)menu_.parent1];
+    int sx = rightEdge ? nx - menu_.sub1.width + 1 : nx + menu_.width - 1;
+    if (sx < work.left + 4) sx = work.left + 4;
+    if (sx + menu_.sub1.width > work.right - 4) sx = work.right - 4 - menu_.sub1.width;
+    int sy = ny + (int)p.y0 - 5;
+    if (sy + menu_.sub1.height > work.bottom - 4) sy = work.bottom - 4 - menu_.sub1.height;
+    if (sy < work.top + 4) sy = work.top + 4;
+    menu_.placeSub(menu_.sub1, (float)(sx - (int)wr.left), (float)(sy - (int)wr.top));
+  }
+  if (menu_.parent2 >= 0 && menu_.parent2 < (int)menu_.sub1.entries.size() &&
+      !menu_.sub2.entries.empty()) {
+    const MenuEntry& p = menu_.sub1.entries[(size_t)menu_.parent2];
+    const int s1x = (int)menu_.sub1.rect.left + (int)wr.left;
+    const int s1y = (int)menu_.sub1.rect.top + (int)wr.top;
+    int sx = rightEdge ? s1x - menu_.sub2.width + 1 : s1x + menu_.sub1.width - 1;
+    if (sx < work.left + 4) sx = work.left + 4;
+    if (sx + menu_.sub2.width > work.right - 4) sx = work.right - 4 - menu_.sub2.width;
+    int sy = s1y + (int)p.y0 - 5;
+    if (sy + menu_.sub2.height > work.bottom - 4) sy = work.bottom - 4 - menu_.sub2.height;
+    if (sy < work.top + 4) sy = work.top + 4;
+    menu_.placeSub(menu_.sub2, (float)(sx - (int)wr.left), (float)(sy - (int)wr.top));
+  }
+  // 外点判定/扩窗矩形 = 全列并集（屏幕坐标）
+  const D2D1_RECT_F b = menu_.bounds();
+  menuScreen_ = RECT{ (int)b.left + (int)wr.left, (int)b.top + (int)wr.top,
+                      (int)b.right + (int)wr.left, (int)b.bottom + (int)wr.top };
 }
 
 void DockApp::openMenu(int clientX, int clientY, int slot) {
@@ -513,6 +620,9 @@ void DockApp::openMenu(int clientX, int clientY, int slot) {
   menu_.slot = slot;
   menu_.open = true;
   menu_.hover = -1;
+  menu_.parent1 = menu_.parent2 = -1;  // 新菜单从一级开始（上次级联状态清除）
+  menu_.sub1.clear();
+  menu_.sub2.clear();
   menuOpenQpc_ = qpcNow();
   // 沿检测基准：打开当帧若键已按下（如右键尚未松开）不误判为收起点击
   prevEsc_ = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
@@ -528,6 +638,9 @@ void DockApp::closeMenu() {
   if (!menu_.open) return;
   menu_.open = false;
   menu_.hover = -1;
+  menu_.parent1 = menu_.parent2 = -1;  // 级联子列一并收起
+  menu_.sub1.clear();
+  menu_.sub2.clear();
   applyWindowPos();     // 窗口收回基础矩形
   POINT pt{};
   GetCursorPos(&pt);
@@ -542,19 +655,43 @@ void DockApp::closeMenu() {
 
 // 激活：映射项 → cfg.mapping[slot] → saveConfig → rebuild 立即生效；动作项分发
 void DockApp::activateMenu(int idx) {
-  if (idx < 0 || idx >= (int)menu_.entries.size()) return;
-  const MenuEntry e = menu_.entries[(size_t)idx];
+  const int col = idx / 1000, i = idx % 1000;
+  if (col == 0) {
+    if (i < 0 || i >= (int)menu_.entries.size()) return;
+    const MenuEntry& e = menu_.entries[(size_t)i];
+    if (e.kind == MenuEntry::Parent) { openSub1(i, e.sub); return; }  // 总量▸/模型▸
+    const int action = e.action;
+    const std::string v = e.value;
+    closeMenu();
+    if (action == 1) { openSettings(); return; }
+    if (action == 2) { flipEdge(); return; }
+    if (action == 3) { exitApp(); return; }
+    applyMenuMapping(v);
+    return;
+  }
+  if (col == 1) {
+    if (i < 0 || i >= (int)menu_.sub1.entries.size()) return;
+    const MenuEntry& e = menu_.sub1.entries[(size_t)i];
+    if (e.kind == MenuEntry::Parent) { openSub2(i, e.value); return; }  // 厂商▸
+    applyMenuMapping(e.value);
+    return;
+  }
+  if (col == 2) {
+    if (i < 0 || i >= (int)menu_.sub2.entries.size()) return;
+    applyMenuMapping(menu_.sub2.entries[(size_t)i].value);
+    return;
+  }
+}
+
+// 叶项映射落盘：mapping → saveConfig → rebuild 立即生效
+void DockApp::applyMenuMapping(const std::string& v) {
   const int slot = menu_.slot;
   closeMenu();
-  if (e.action == 1) { openSettings(); return; }
-  if (e.action == 2) { flipEdge(); return; }
-  if (e.action == 3) { exitApp(); return; }
-  if (e.action == 0 && slot >= 0 && slot < cfg_.count) {
-    cfg_.mapping[(size_t)slot] = e.value;
-    saveConfig(okmeterDir(), cfg_);
-    rebuildItems();
-    render();
-  }
+  if (v.empty() || slot < 0 || slot >= cfg_.count) return;
+  cfg_.mapping[(size_t)slot] = v;
+  saveConfig(okmeterDir(), cfg_);
+  rebuildItems();
+  render();
 }
 
 double DockApp::menuAnimT() const {
@@ -1039,6 +1176,17 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
           }
         }
         openMenu(cx, cy, shotMenuSlot_);
+        // 级联自检：shotDropSlot_ ≥1 时展开二级（1=总量 2=模型），==2 再展开首个厂商三级
+        if (shotDropSlot_ >= 1 && menu_.slot >= 0) {
+          for (int i = 0; i < (int)menu_.entries.size(); ++i)
+            if (menu_.entries[(size_t)i].kind == MenuEntry::Parent &&
+                menu_.entries[(size_t)i].sub == shotDropSlot_) {
+              openSub1(i, shotDropSlot_);
+              if (shotDropSlot_ == 2 && !menu_.sub1.entries.empty())
+                openSub2(0, menu_.sub1.entries[0].value);
+              break;
+            }
+        }
         render();  // openMenu 内 applyWindowPos 扩窗的 resize 首帧可能被丢弃
         Sleep(200);  // 弹出动画 120ms 播完（落盘帧取满透明度）
         render();
@@ -1093,9 +1241,26 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     }
     if (menu_.open) {
       const int mh = menu_.hit(mx, my);
-      if (mh != menu_.hover) {
-        menu_.hover = mh;
+      // hover 按列分发（-2/-1=列内不可点/菜单外 → 全清）
+      int h0 = -1, h1 = -1, h2 = -1;
+      if (mh >= 2000) h2 = mh - 2000;
+      else if (mh >= 1000) h1 = mh - 1000;
+      else if (mh >= 0) h0 = mh;
+      if (h0 != menu_.hover || h1 != menu_.sub1.hover || h2 != menu_.sub2.hover) {
+        menu_.hover = h0;
+        menu_.sub1.hover = h1;
+        menu_.sub2.hover = h2;
         render();
+      }
+      // 悬停父项即展开子列（Windows 菜单同款；悬停到别的父项自动切换）
+      if (h0 >= 0 && h0 < (int)menu_.entries.size() &&
+          menu_.entries[(size_t)h0].kind == MenuEntry::Parent &&
+          menu_.parent1 != h0) {
+        openSub1(h0, menu_.entries[(size_t)h0].sub);
+      } else if (h1 >= 0 && h1 < (int)menu_.sub1.entries.size() &&
+                 menu_.sub1.entries[(size_t)h1].kind == MenuEntry::Parent &&
+                 menu_.parent2 != h1) {
+        openSub2(h1, menu_.sub1.entries[(size_t)h1].value);
       }
     }
     if (settings_.open) {
