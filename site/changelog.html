@@ -115,8 +115,16 @@
    <details id="verNav" open>
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
+      <div class="group-title">2.26.x</div>
+      <a href="#v2-26-0"><span><span class="latest-dot"></span>v2.26.0</span><span class="d">09-13</span></a>
+    </div>
+    <div class="group">
+      <div class="group-title">2.25.x</div>
+      <a href="#v2-25-0"><span>v2.25.0</span><span class="d">09-02</span></a>
+    </div>
+    <div class="group">
       <div class="group-title">2.21.x</div>
-      <a href="#v2-21-0"><span><span class="latest-dot"></span>v2.21.0</span><span class="d">08-20</span></a>
+      <a href="#v2-21-0"><span>v2.21.0</span><span class="d">08-20</span></a>
     </div>
     <div class="group">
       <div class="group-title">2.20.x</div>
@@ -207,8 +215,36 @@
       </div>
     </div>
 
+    <section class="ver" id="v2-26-0">
+      <div class="ver-head"><h2>v2.26.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-09-13</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2260.f1">中文名「归藏」：GUI 顶栏品牌区与浏览器标题随中英切换显示「归藏 / Okryptos」，官网与双语 README 补命名词源与定位语「面向 AI-Agent Hooks 的隐性知识库」</li>
+          <li data-i18n="c.2260.f2">OkMeter token 悬浮条（Windows）：桌面边缘常驻的 token 用量监视条，收缩贴边、悬停滑出；总量（当前会话/今日/本周/累计）与按模型双口径，右键级联菜单即点即切；悬停详情卡；六种形态 × 四种材质，液态玻璃带真实背景折射；背板式设置面板；配置中心开关默认开启，托盘菜单可手动拉起</li>
+          <li data-i18n="c.2260.f3">LLM 本地推理两档：ollama 档免 API key 直连本机 ollama；内置托管档在 GUI 一键下载模型（qwen3 1.7B 首选 / 0.6B 最省 / 4B 非思考最稳，带进度条），下载后全自动本地推理，识别意图过滤零调用费</li>
+          <li data-i18n="c.2260.f4">检索相关性 LLM 后置过滤：注入前把候选条目交 LLM 裁决，只删不加；未配置、超时或解析失败一律保留原结果，不影响既有检索</li>
+          <li data-i18n="c.2260.f5">识别意图双「使用中」槽位：LLM 配置新增「识别意图」专用槽，过滤调用与通用调用可分别指定模型</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li data-i18n="c.2260.i1">关键词通道覆盖度准入：短口语查询不再因命中虚词而误注入无关条目——命中词元数须达比例门槛，纯虚词查询跳过关键词通道</li>
+          <li data-i18n="c.2260.i2">GUI 模型配置弹窗：内置档显示模型体积与资源估算、识别意图说明分行排版、双槽徽标两行展示</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2260.n1">OkMeter 悬浮条仅 Windows 版提供，随安装包分发（绿色版可用但无单实例守护）</li>
+          <li data-i18n="c.2260.n2">内置托管模型需本地下载（640MB~2.5GB），运行时内存占用约 1~4GB，介意资源请选 ollama 档或远程 API 档</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-25-0">
-      <div class="ver-head"><h2>v2.25.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-09-02</time></div>
+      <div class="ver-head"><h2>v2.25.0</h2><time>2026-09-02</time></div>
       <div class="chg">
         <span class="tag tag-improve" data-i18n="t.improve">改进</span>
         <ul>
