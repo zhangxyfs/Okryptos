@@ -229,6 +229,8 @@ void DockApp::rebuildItems() {
         ? "m:" + b.modelId
         : "s:" + std::to_string(static_cast<int>(b.scope));
     auto& hv = histByKey_[hkey];
+    if (hv.empty()) hv.assign(25, 0.0);  // 启动即出全宽平线（wave 需 ≥2 点才绘制），
+                                         // 零值在前随真实增量自然右侧滚出
     const auto prev = rawByKey_.find(hkey);
     const double delta = prev == rawByKey_.end() ? 0.0
         : (double)(v > prev->second ? v - prev->second : 0);
