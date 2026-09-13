@@ -54,6 +54,48 @@ ComPtr<ID2D1Bitmap> bakeNormalMap(ID2D1DeviceContext* dc) {
   return bmp;
 }
 
+// 预烘超椭圆(P=4，拟合圆角矩形)法线位移图：h=(|nx/a|^P+|ny/b|^P)^(1/P)，边界
+// h=1（a/b=形状半轴在裁剪归一坐标中的值，随项宽高比变化→按 a 懒烘缓存）；
+// 中心 58% 零位移，边缘环带沿梯度方向外推，编码与圆形图一致（R/G=X/Y，128=零）。
+// 参考 liquid-glass-react 的 roundedRectSDF 场——位移只发生在边缘环带，内部
+// 保持原样采样，视觉上玻璃体通透、内容仅被边缘"舔"一下。
+ComPtr<ID2D1Bitmap> bakeSuperellipseMap(ID2D1DeviceContext* dc, float a, float b) {
+  constexpr float P = 4.0f;
+  std::vector<BYTE> px((size_t)kMapSize * kMapSize * 4);
+  for (UINT y = 0; y < kMapSize; ++y)
+    for (UINT x = 0; x < kMapSize; ++x) {
+      const float nx = ((float)x / (kMapSize - 1)) * 2.0f - 1.0f;
+      const float ny = ((float)y / (kMapSize - 1)) * 2.0f - 1.0f;
+      const float ax = std::fabs(nx) / a, by = std::fabs(ny) / b;
+      const float h = std::pow(std::pow(ax, P) + std::pow(by, P), 1.0f / P);
+      float band = (h - kMapInner) / (1.0f - kMapInner);
+      band = std::clamp(band, 0.0f, 1.0f);
+      band = band * band * (3.0f - 2.0f * band);  // smoothstep
+      float gx = 1.0f, gy = 0.0f;
+      if (h > 1e-6f) {
+        gx = (nx >= 0.0f ? 1.0f : -1.0f) * std::pow(ax, P - 1.0f) / a;
+        gy = (ny >= 0.0f ? 1.0f : -1.0f) * std::pow(by, P - 1.0f) / b;
+        const float gl = std::hypot(gx, gy);  // 公因子 P/h^(P-1) 归一化时消掉
+        if (gl > 1e-9f) {
+          gx /= gl;
+          gy /= gl;
+        }
+      }
+      BYTE* p = px.data() + ((size_t)y * kMapSize + x) * 4;
+      p[2] = (BYTE)std::clamp(128.0f + gx * band * 127.0f, 0.0f, 255.0f);
+      p[1] = (BYTE)std::clamp(128.0f + gy * band * 127.0f, 0.0f, 255.0f);
+      p[0] = 128;
+      p[3] = 255;
+    }
+  ComPtr<ID2D1Bitmap> bmp;
+  const D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(
+      D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+  if (FAILED(dc->CreateBitmap(D2D1::SizeU(kMapSize, kMapSize), px.data(),
+                              kMapSize * 4, &props, &bmp)))
+    return nullptr;
+  return bmp;
+}
+
 class LiquidMaterial final : public IMaterial {
 public:
   std::string id() const override { return "liquid"; }
@@ -106,40 +148,49 @@ public:
       glassfx::drawShape(dc, c, hw, r, ctx.brush, 6.0f, 3.0f, ctx.cornerR);
     }
 
-    // 玻璃底：全折射路径 / 退化毛玻璃 / 纯色兜底
-    if (fullGlass) {
+    // 玻璃底：折射路径（圆球=单位圆位移场 / 胶囊=超椭圆 P4 圆角矩形域位移场；
+    // 位移之外仅 9% 环境染色，学 liquid-glass-react 的通透——折射图就是锐化
+    // 背景本身，不糊不盖白）/ 退化毛玻璃兜底
+    bool refracted = false;
+    if (refractReady() && ctx.backdrop && ctx.backdrop->ok() &&
+        !ctx.backdrop->degraded()) {
       refreshBackdrop(dc, ctx.backdrop);
       lastLuma_ = ctx.backdrop->luma();
-      if (refractReady() && glassfx::pushCircleClip(dc, c, r)) {
-        // 球区背景（纹理坐标）→ 位移折射 → 微模糊 → 提饱和 → 提亮 → 平移回原点
-        const float pad = std::ceil(r * kCropPadRatio);
-        const float l = c.x - r - pad - ctx.backdropDX;
-        const float t = c.y - r - pad - ctx.backdropDY;
-        (void)crop_->SetValue(D2D1_CROP_PROP_RECT,
-                              D2D1::Vector4F(l, t, c.x + r + pad - ctx.backdropDX,
-                                             c.y + r + pad - ctx.backdropDY));
-        (void)move_->SetValue(D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX,
-                              D2D1::Matrix3x2F::Translation(-l, -t));
-        // 位移图自然尺寸采样 → 缩放到当前裁剪尺寸（单位圆随之对齐球缘 r）
-        const float mapK = 2.0f * (r + pad) / (float)kMapSize;
-        (void)mapScale_->SetValue(D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX,
-                                  D2D1::Matrix3x2F::Scale(mapK, mapK));
-        dc->DrawImage(move_.Get(), D2D1::Point2F(c.x - r - pad, c.y - r - pad),
-                      D2D1_INTERPOLATION_MODE_LINEAR);
-        // 环境色染色：desk-deep 9% + 左上 ink 15% 径向（原型 .orb background）
-        ctx.brush->SetColor(glassfx::deskDeep(0.09f * dim));
-        dc->FillEllipse(&ball, ctx.brush);
-        if (tintHl_) {
-          tintHl_->SetCenter(D2D1::Point2F(c.x - 0.4f * r, c.y - 0.6f * r));
-          tintHl_->SetRadiusX(1.1f * r);
-          tintHl_->SetRadiusY(1.1f * r);
-          dc->FillEllipse(&ball, tintHl_.Get());
+      if (!pill) {
+        if (glassfx::pushCircleClip(dc, c, r)) {
+          // 球区背景（纹理坐标）→ 位移折射 → 微模糊 → 提饱和 → 提亮 → 平移回原点
+          const float pad = std::ceil(r * kCropPadRatio);
+          const float l = c.x - r - pad - ctx.backdropDX;
+          const float t = c.y - r - pad - ctx.backdropDY;
+          (void)crop_->SetValue(D2D1_CROP_PROP_RECT,
+                                D2D1::Vector4F(l, t, c.x + r + pad - ctx.backdropDX,
+                                               c.y + r + pad - ctx.backdropDY));
+          (void)move_->SetValue(D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX,
+                                D2D1::Matrix3x2F::Translation(-l, -t));
+          // 位移图自然尺寸采样 → 缩放到当前裁剪尺寸（单位圆随之对齐球缘 r）
+          const float mapK = 2.0f * (r + pad) / (float)kMapSize;
+          (void)mapScale_->SetValue(D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX,
+                                    D2D1::Matrix3x2F::Scale(mapK, mapK));
+          mapScale_->SetInput(0, mapBmp_.Get());  // 胶囊路径可能换过位移图
+          dc->DrawImage(move_.Get(), D2D1::Point2F(c.x - r - pad, c.y - r - pad),
+                        D2D1_INTERPOLATION_MODE_LINEAR);
+          // 环境色染色：desk-deep 9% + 左上 ink 15% 径向（原型 .orb background）
+          ctx.brush->SetColor(glassfx::deskDeep(0.09f * dim));
+          dc->FillEllipse(&ball, ctx.brush);
+          if (tintHl_) {
+            tintHl_->SetCenter(D2D1::Point2F(c.x - 0.4f * r, c.y - 0.6f * r));
+            tintHl_->SetRadiusX(1.1f * r);
+            tintHl_->SetRadiusY(1.1f * r);
+            dc->FillEllipse(&ball, tintHl_.Get());
+          }
+          dc->PopLayer();
+          refracted = true;
         }
-        dc->PopLayer();
+      } else {
+        refracted = drawPillRefraction(dc, ctx);
       }
-    } else {
-      drawFrostFallback(dc, ctx);
     }
+    if (!refracted) drawFrostFallback(dc, ctx);
 
     // 不均匀边缘光（全玻璃与退化毛玻璃都画）：上/左亮、下/右暗。
     // 圆：环带几何直接填双向线性渐变（原型 inset 四向 box-shadow 组合）；
@@ -280,6 +331,49 @@ private:
     }
   }
 
+  // 胶囊/块状项折射：与圆球同一条 位移→微模糊→提饱和→提亮 链，位移场换成
+  // 超椭圆(P4) 圆角矩形域（liquid-glass-react 的 roundedRectSDF 思路）；
+  // 形状域裁剪绘制，环境染色与圆球同款（保持通透）。位移图按半轴比懒烘。
+  bool drawPillRefraction(ID2D1DeviceContext* dc, const OrbStyleCtx& ctx) const {
+    const D2D1_POINT_2F c = ctx.center;
+    const float r = ctx.r;
+    const float hw = ctx.halfW > 0 ? ctx.halfW : ctx.r;
+    const float dim = ctx.dimmed;
+    const float pad = std::ceil(r * kCropPadRatio);
+    const float a = hw / (hw + pad);  // 形状半轴（裁剪归一；b 与 a 同批烘制）
+    if (pillMapA_ < 0.0f || std::fabs(a - pillMapA_) > 0.004f) {
+      pillMapBmp_ = bakeSuperellipseMap(dc, a, r / (r + pad));
+      pillMapA_ = pillMapBmp_ ? a : -1.0f;
+    }
+    if (!pillMapBmp_ || !glassfx::pushShapeClip(dc, c, hw, r, ctx.cornerR))
+      return false;
+    const float l = c.x - hw - pad - ctx.backdropDX;
+    const float t = c.y - r - pad - ctx.backdropDY;
+    (void)crop_->SetValue(D2D1_CROP_PROP_RECT,
+                          D2D1::Vector4F(l, t, c.x + hw + pad - ctx.backdropDX,
+                                         c.y + r + pad - ctx.backdropDY));
+    (void)move_->SetValue(D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX,
+                          D2D1::Matrix3x2F::Translation(-l, -t));
+    (void)mapScale_->SetValue(
+        D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX,
+        D2D1::Matrix3x2F::Scale(2.0f * (hw + pad) / (float)kMapSize,
+                                2.0f * (r + pad) / (float)kMapSize));
+    mapScale_->SetInput(0, pillMapBmp_.Get());
+    dc->DrawImage(move_.Get(), D2D1::Point2F(c.x - hw - pad, c.y - r - pad),
+                  D2D1_INTERPOLATION_MODE_LINEAR);
+    // 环境色染色同圆球：desk-deep 9% + 左上 ink 15% 径向
+    ctx.brush->SetColor(glassfx::deskDeep(0.09f * dim));
+    glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
+    if (tintHl_) {
+      tintHl_->SetCenter(D2D1::Point2F(c.x - 0.4f * hw, c.y - 0.6f * r));
+      tintHl_->SetRadiusX(1.1f * hw);
+      tintHl_->SetRadiusY(1.1f * r);
+      glassfx::fillShape(dc, c, hw, r, tintHl_.Get(), ctx.cornerR);
+    }
+    dc->PopLayer();
+    return true;
+  }
+
   bool refractReady() const {
     return bgBmp_ && crop_ && disp_ && mapBmp_ && mapScale_ && move_;
   }
@@ -290,12 +384,21 @@ private:
     gen_ = d3d->generation();
     crop_.Reset();
     disp_.Reset();
+    dispG_.Reset();
+    dispB_.Reset();
+    isoR_.Reset();
+    isoG_.Reset();
+    isoB_.Reset();
+    blendRG_.Reset();
+    blendRGB_.Reset();
     blurSm_.Reset();
     sat_.Reset();
     bright_.Reset();
     move_.Reset();
     mapScale_.Reset();
     mapBmp_.Reset();
+    pillMapBmp_.Reset();
+    pillMapA_ = -1.0f;
     bgBmp_.Reset();
     frostPipe_.reset();
     hotGlow_.Reset();
@@ -338,7 +441,65 @@ private:
       m._44 = 1.0f;
       (void)bright_->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, m);
       disp_->SetInputEffect(0, crop_.Get());
-      blurSm_->SetInputEffect(0, disp_.Get());
+      // 边缘色散（liquid-glass-react 招牌效果）：R/G/B 三通道各按 1.0/0.9/0.8
+      // 比例位移、各自隔离后经 screen 混合——中心零位移区三通道采样同点，
+      // screen 逐通道混合恒等原图，彩边只出现在位移环带。任一节点创建失败
+      // → 退回无色散链（折射本体不受影响）。
+      const bool okAb =
+          SUCCEEDED(dc->CreateEffect(glassfx::kClsidDisplacement, &dispG_)) &&
+          SUCCEEDED(dc->CreateEffect(glassfx::kClsidDisplacement, &dispB_)) &&
+          SUCCEEDED(dc->CreateEffect(glassfx::kClsidColorMatrix, &isoR_)) &&
+          SUCCEEDED(dc->CreateEffect(glassfx::kClsidColorMatrix, &isoG_)) &&
+          SUCCEEDED(dc->CreateEffect(glassfx::kClsidColorMatrix, &isoB_)) &&
+          SUCCEEDED(dc->CreateEffect(glassfx::kClsidBlend, &blendRG_)) &&
+          SUCCEEDED(dc->CreateEffect(glassfx::kClsidBlend, &blendRGB_));
+      if (okAb) {
+        (void)dispG_->SetValue(D2D1_DISPLACEMENTMAP_PROP_SCALE, kDispScale * 0.9f);
+        (void)dispB_->SetValue(D2D1_DISPLACEMENTMAP_PROP_SCALE, kDispScale * 0.8f);
+        (void)dispG_->SetValue(D2D1_DISPLACEMENTMAP_PROP_X_CHANNEL_SELECT,
+                               D2D1_CHANNEL_SELECTOR_R);
+        (void)dispG_->SetValue(D2D1_DISPLACEMENTMAP_PROP_Y_CHANNEL_SELECT,
+                               D2D1_CHANNEL_SELECTOR_G);
+        (void)dispB_->SetValue(D2D1_DISPLACEMENTMAP_PROP_X_CHANNEL_SELECT,
+                               D2D1_CHANNEL_SELECTOR_R);
+        (void)dispB_->SetValue(D2D1_DISPLACEMENTMAP_PROP_Y_CHANNEL_SELECT,
+                               D2D1_CHANNEL_SELECTOR_G);
+        D2D1_MATRIX_5X4_F mR{};
+        mR._11 = 1.0f;
+        mR._44 = 1.0f;
+        D2D1_MATRIX_5X4_F mG{};
+        mG._22 = 1.0f;
+        mG._44 = 1.0f;
+        D2D1_MATRIX_5X4_F mB{};
+        mB._33 = 1.0f;
+        mB._44 = 1.0f;
+        (void)isoR_->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, mR);
+        (void)isoG_->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, mG);
+        (void)isoB_->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, mB);
+        (void)blendRG_->SetValue(D2D1_BLEND_PROP_MODE,
+                                 (UINT32)D2D1_BLEND_MODE_SCREEN);
+        (void)blendRGB_->SetValue(D2D1_BLEND_PROP_MODE,
+                                  (UINT32)D2D1_BLEND_MODE_SCREEN);
+        isoR_->SetInputEffect(0, disp_.Get());
+        dispG_->SetInputEffect(0, crop_.Get());
+        isoG_->SetInputEffect(0, dispG_.Get());
+        dispB_->SetInputEffect(0, crop_.Get());
+        isoB_->SetInputEffect(0, dispB_.Get());
+        blendRG_->SetInputEffect(0, isoR_.Get());
+        blendRG_->SetInputEffect(1, isoG_.Get());
+        blendRGB_->SetInputEffect(0, blendRG_.Get());
+        blendRGB_->SetInputEffect(1, isoB_.Get());
+        blurSm_->SetInputEffect(0, blendRGB_.Get());
+      } else {
+        dispG_.Reset();
+        dispB_.Reset();
+        isoR_.Reset();
+        isoG_.Reset();
+        isoB_.Reset();
+        blendRG_.Reset();
+        blendRGB_.Reset();
+        blurSm_->SetInputEffect(0, disp_.Get());
+      }
       sat_->SetInputEffect(0, blurSm_.Get());
       bright_->SetInputEffect(0, sat_.Get());
       move_->SetInputEffect(0, bright_.Get());
@@ -346,6 +507,8 @@ private:
       if (mapBmp_) {
         mapScale_->SetInput(0, mapBmp_.Get());
         disp_->SetInputEffect(1, mapScale_.Get());
+        if (dispG_) dispG_->SetInputEffect(1, mapScale_.Get());
+        if (dispB_) dispB_->SetInputEffect(1, mapScale_.Get());
       }
     } else {
       crop_.Reset();  // refractReady() 判空 → 自动退化毛玻璃
@@ -398,9 +561,13 @@ private:
   mutable unsigned gen_ = 0;
   // 折射链资源
   mutable ComPtr<ID2D1Effect> crop_, disp_, blurSm_, sat_, bright_, move_;
-  mutable ComPtr<ID2D1Effect> mapScale_;  // 位移图 128² → 裁剪尺寸 缩放
-  mutable ComPtr<ID2D1Bitmap> mapBmp_;    // 预烘法线位移图
-  mutable ComPtr<ID2D1Bitmap1> bgBmp_;    // 最新背景帧
+  mutable ComPtr<ID2D1Effect> dispG_, dispB_, isoR_, isoG_, isoB_, blendRG_,
+      blendRGB_;                              // 边缘色散（可选，创建失败退无色散）
+  mutable ComPtr<ID2D1Effect> mapScale_;      // 位移图 128² → 裁剪尺寸 缩放
+  mutable ComPtr<ID2D1Bitmap> mapBmp_;        // 预烘法线位移图（圆球）
+  mutable ComPtr<ID2D1Bitmap> pillMapBmp_;    // 预烘超椭圆位移图（胶囊，按半轴比懒烘）
+  mutable float pillMapA_ = -1.0f;            // pillMapBmp_ 烘制时的归一水平半轴
+  mutable ComPtr<ID2D1Bitmap1> bgBmp_;        // 最新背景帧
   mutable glassfx::BackdropPipe frostPipe_;  // 退化毛玻璃管线
   mutable ComPtr<ID2D1RadialGradientBrush> hotGlow_, floatShadow_, tintHl_;
   mutable ComPtr<ID2D1RadialGradientBrush> hlTop_, specular_;
