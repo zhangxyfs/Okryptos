@@ -51,6 +51,18 @@ std::filesystem::path zcodeHome() { return homeOf(L"OK_ZCODE_HOME", L".zcode"); 
 
 std::filesystem::path workbuddyHome() { return homeOf(L"WORKBUDDY_HOME", L".workbuddy"); }
 
+std::filesystem::path reasonixHome() {
+  for (const wchar_t* env : { L"OK_REASONIX_HOME", L"REASONIX_HOME" }) {
+    const std::wstring e = envOrEmpty(env);
+    if (!e.empty()) return std::filesystem::path(e);
+  }
+  const std::wstring ad = envOrEmpty(L"APPDATA");
+  if (!ad.empty()) return std::filesystem::path(ad) / "reasonix";
+  return homeOf(L"", L".reasonix");
+}
+
+std::filesystem::path hanakoHome() { return homeOf(L"HANAKO_HOME", L".hanako"); }
+
 std::filesystem::path okmeterDir() {
   const std::wstring up = envOrEmpty(L"USERPROFILE");
   std::filesystem::path base = up.empty() ? std::filesystem::path(".")
@@ -59,6 +71,11 @@ std::filesystem::path okmeterDir() {
   std::error_code ec;
   std::filesystem::create_directories(d, ec);
   return d;
+}
+
+std::filesystem::path userProfile() {
+  const std::wstring up = envOrEmpty(L"USERPROFILE");
+  return up.empty() ? std::filesystem::path(".") : std::filesystem::path(up);
 }
 
 std::string pathU8(const std::filesystem::path& p) {

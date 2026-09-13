@@ -1,8 +1,10 @@
 #include "app.h"
 #include "../adapters/claude/adapter.h"
 #include "../adapters/codex/adapter.h"
+#include "../adapters/hanako/adapter.h"
 #include "../adapters/kimi/adapter.h"
 #include "../adapters/qwen/adapter.h"
+#include "../adapters/reasonix/adapter.h"
 #include "../adapters/workbuddy/adapter.h"
 #include "../adapters/zcode/adapter.h"
 #include "../core/fmt.h"
@@ -1643,6 +1645,8 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   adapters_.push_back(std::make_unique<QwenAdapter>(qwenHome(), store_.get()));
   adapters_.push_back(std::make_unique<ZcodeAdapter>(zcodeHome(), store_.get()));
   adapters_.push_back(std::make_unique<WorkbuddyAdapter>(workbuddyHome(), store_.get()));
+  adapters_.push_back(std::make_unique<ReasonixAdapter>(reasonixHome(), store_.get()));
+  adapters_.push_back(std::make_unique<HanakoAdapter>(hanakoHome(), store_.get()));
   loadConfig(okmeterDir(), cfg_);
   cfg_.normalize();
   createModules();  // 形态/材质注册表创建（布局与渲染都经 form_）
@@ -1654,7 +1658,10 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
                                              codexHome(),
                                              qwenHome() / "projects",
                                              zcodeHome() / "cli" / "rollout",
-                                             workbuddyHome() / "projects" }) {
+                                             workbuddyHome() / "projects",
+                                             reasonixHome(),
+                                             userProfile() / ".reasonix",
+                                             hanakoHome() / "logs" }) {
     std::error_code ec;
     if (!std::filesystem::exists(root, ec)) continue;
     auto w = std::make_unique<DirWatcher>();
@@ -1739,11 +1746,11 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
     }
   } else {
     // 等待集 = 动画定时器 + 各 RDCW 完成事件：帧时钟停摆期目录变更仍能即时唤醒 poll
-    HANDLE waitHandles[8];
+    HANDLE waitHandles[12];
     DWORD nWait = 0;
     waitHandles[nWait++] = animTimer_;
     for (auto& w : watchers_)
-      if (w->eventHandle() && nWait < 8) waitHandles[nWait++] = w->eventHandle();
+      if (w->eventHandle() && nWait < 12) waitHandles[nWait++] = w->eventHandle();
     for (;;) {
       MsgWaitForMultipleObjectsEx(nWait, waitHandles, INFINITE, QS_ALLINPUT,
                                   MWMO_INPUTAVAILABLE);

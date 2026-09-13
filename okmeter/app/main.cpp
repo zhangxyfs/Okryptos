@@ -2,8 +2,10 @@
 // --scan 保留 Plan 1 控制台冒烟（扫描真实 home 打印各口径总量）
 #include "../adapters/claude/adapter.h"
 #include "../adapters/codex/adapter.h"
+#include "../adapters/hanako/adapter.h"
 #include "../adapters/kimi/adapter.h"
 #include "../adapters/qwen/adapter.h"
+#include "../adapters/reasonix/adapter.h"
 #include "../adapters/workbuddy/adapter.h"
 #include "../adapters/zcode/adapter.h"
 #include "../core/aggregator.h"
@@ -47,6 +49,8 @@ static int runSmoke() {
   srcs.push_back({"qwen", std::make_unique<QwenAdapter>(qwenHome(), &store)});
   srcs.push_back({"zcode", std::make_unique<ZcodeAdapter>(zcodeHome(), &store)});
   srcs.push_back({"workbuddy", std::make_unique<WorkbuddyAdapter>(workbuddyHome(), &store)});
+  srcs.push_back({"reasonix", std::make_unique<ReasonixAdapter>(reasonixHome(), &store)});
+  srcs.push_back({"hanako", std::make_unique<HanakoAdapter>(hanakoHome(), &store)});
   int n = 0;
   for (auto& s : srcs) {
     const int c = s.adapter->poll([&](const UsageEvent& e) { agg.add(e); });

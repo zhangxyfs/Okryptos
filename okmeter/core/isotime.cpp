@@ -42,4 +42,18 @@ int64_t isoToMs(const std::string& iso) {
   return sec * 1000 + ms - (int64_t)offMin * 60000;
 }
 
+int64_t localToMs(int y, int mo, int d, int h, int mi, int s, int ms) {
+  std::tm t{};
+  t.tm_year = y - 1900;
+  t.tm_mon = mo - 1;
+  t.tm_mday = d;
+  t.tm_hour = h;
+  t.tm_min = mi;
+  t.tm_sec = s;
+  t.tm_isdst = -1;
+  const int64_t sec = (int64_t)std::mktime(&t);
+  if (sec < 0) return 0;
+  return sec * 1000 + ms;
+}
+
 } // namespace okmeter
