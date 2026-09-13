@@ -105,11 +105,10 @@ footer .copy { margin-top: 10px; }
   /* 页脚链接允许换行 */
   footer a { display: inline-block; margin: 4px 8px; }
 
-  /* 操作按钮收紧（Gitea 文字标签隐藏，只留图标） */
+  /* 操作按钮收紧 */
   nav .actions { gap: 7px; margin-left: 10px; }
   .icon-btn { width: 30px; height: 30px; }
   .repo-btn { padding: 0 7px; }
-  .repo-btn span { display: none; }
 }
 
 /* ── 导航右侧操作区（语言 / 主题 / 仓库） ── */
@@ -125,7 +124,6 @@ nav .actions { display: flex; align-items: center; gap: 10px; margin-left: 18px;
 .lang-toggle { width: auto; padding: 0 9px; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; }
 .repo-btn { width: auto; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; text-decoration: none; }
 .repo-btn:hover { color: var(--primary); }
-.repo-btn img.gitea-logo { width: 18px; height: 18px; display: block; }
 .lang-toggle span { color: var(--text-3); transition: color .15s; }
 .lang-toggle span.on { color: var(--primary); }
 .lang-toggle .sep { color: var(--border); margin: 0 3px; font-weight: 400; }

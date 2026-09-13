@@ -99,8 +99,8 @@
         <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
         <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>
       </button>
-      <a class="icon-btn repo-btn" href="https://z7dream-gitea.iepose.cn/zhangxyfs/Okryptos" target="_blank" rel="noopener" aria-label="源码仓库 / Repository" title="源码仓库">
-        <img class="gitea-logo" src="assets/gitea.svg" alt="Gitea"><span>Gitea</span>
+      <a class="icon-btn repo-btn" href="https://github.com/zhangxyfs/Okryptos" target="_blank" rel="noopener" aria-label="源码仓库 / Repository" title="源码仓库">
+        <span>GitHub</span>
       </a>
     </div>
   </div>
@@ -129,7 +129,7 @@
     <div class="group">
       <div class="group-title" data-i18n="d.g4">更多</div>
       <a href="changelog.html" data-i18n="nav.changelog">更新日志</a>
-      <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/Okryptos/src/branch/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener" data-i18n="d.g4a">架构文档（仓库）</a>
+      <a href="https://github.com/zhangxyfs/Okryptos/blob/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener" data-i18n="d.g4a">架构文档（仓库）</a>
     </div>
   </aside>
 
@@ -238,7 +238,7 @@ message = "本次会话修改了代码但未更新变更日志，请先按规范
       <li data-i18n="d.s8l2"><b>语义通道</b>：OpenAI 兼容 embedding + 余弦相似度，召回「问法不同但意思相近」的条目；准入走模型无关的语义门槛（以本次查询余弦分布为参照，头部相对中位数有显著分离才启用，<code>min_gap</code> 默认 0.25 可调）</li>
       <li data-i18n="d.s8l3"><b>草稿条目不进检索通道</b>：FTS 与向量都排除，批准后自动参与</li>
     </ul>
-    <p data-i18n="d.s8tail">1 万条条目下单次查询约 30ms；embedding 服务不可用时自动降级为纯关键词检索，注入永不缺席。实现细节见<a href="https://z7dream-gitea.iepose.cn/zhangxyfs/Okryptos/src/branch/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">架构文档第 17 章</a>。</p>
+    <p data-i18n="d.s8tail">1 万条条目下单次查询约 30ms；embedding 服务不可用时自动降级为纯关键词检索，注入永不缺席。实现细节见<a href="https://github.com/zhangxyfs/Okryptos/blob/master/docs/ARCHITECTURE.md" target="_blank" rel="noopener">架构文档第 17 章</a>。</p>
 
     <h2 id="hooks" data-i18n="d.s9h">工作原理</h2>
     <p data-i18n="d.s9p">以 Kimi Code 为例，AI 助手在三个时机调用 <code>ok</code>（其他 agent 经各自适配器等价触发）：</p>
@@ -259,7 +259,7 @@ message = "本次会话修改了代码但未更新变更日志，请先按规范
     <div data-i18n="d.foot">
       <a href="index.html">首页</a>·
       <a href="changelog.html">更新日志</a>·
-      <a href="https://z7dream-gitea.iepose.cn/zhangxyfs/Okryptos" target="_blank" rel="noopener">源码仓库</a>
+      <a href="https://github.com/zhangxyfs/Okryptos" target="_blank" rel="noopener">源码仓库</a>
     </div>
     <div class="copy">© 2026 ZXY · MIT License</div>
   </div>
