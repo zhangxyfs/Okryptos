@@ -3,6 +3,7 @@
 #include "../adapters/codex/adapter.h"
 #include "../adapters/kimi/adapter.h"
 #include "../adapters/qwen/adapter.h"
+#include "../adapters/zcode/adapter.h"
 #include "../core/fmt.h"
 #include "../core/paths.h"
 #include "../core/store.h"
@@ -1639,6 +1640,7 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   adapters_.push_back(std::make_unique<ClaudeAdapter>(claudeHome(), store_.get()));
   adapters_.push_back(std::make_unique<CodexAdapter>(codexHome(), store_.get()));
   adapters_.push_back(std::make_unique<QwenAdapter>(qwenHome(), store_.get()));
+  adapters_.push_back(std::make_unique<ZcodeAdapter>(zcodeHome(), store_.get()));
   loadConfig(okmeterDir(), cfg_);
   cfg_.normalize();
   createModules();  // 形态/材质注册表创建（布局与渲染都经 form_）
@@ -1648,7 +1650,8 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   for (const std::filesystem::path& root : { kimiHome() / "sessions",
                                              claudeHome() / "projects",
                                              codexHome(),
-                                             qwenHome() / "projects" }) {
+                                             qwenHome() / "projects",
+                                             zcodeHome() / "cli" / "rollout" }) {
     std::error_code ec;
     if (!std::filesystem::exists(root, ec)) continue;
     auto w = std::make_unique<DirWatcher>();

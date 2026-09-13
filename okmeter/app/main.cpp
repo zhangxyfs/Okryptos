@@ -4,6 +4,7 @@
 #include "../adapters/codex/adapter.h"
 #include "../adapters/kimi/adapter.h"
 #include "../adapters/qwen/adapter.h"
+#include "../adapters/zcode/adapter.h"
 #include "../core/aggregator.h"
 #include "../core/paths.h"
 #include "../core/store.h"
@@ -43,6 +44,7 @@ static int runSmoke() {
   srcs.push_back({"claude", std::make_unique<ClaudeAdapter>(claudeHome(), &store)});
   srcs.push_back({"codex", std::make_unique<CodexAdapter>(codexHome(), &store)});
   srcs.push_back({"qwen", std::make_unique<QwenAdapter>(qwenHome(), &store)});
+  srcs.push_back({"zcode", std::make_unique<ZcodeAdapter>(zcodeHome(), &store)});
   int n = 0;
   for (auto& s : srcs) {
     const int c = s.adapter->poll([&](const UsageEvent& e) { agg.add(e); });

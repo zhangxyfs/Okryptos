@@ -47,6 +47,8 @@ std::filesystem::path codexHome() { return homeOf(L"CODEX_HOME", L".codex"); }
 
 std::filesystem::path qwenHome() { return homeOf(L"QWEN_HOME", L".qwen"); }
 
+std::filesystem::path zcodeHome() { return homeOf(L"OK_ZCODE_HOME", L".zcode"); }
+
 std::filesystem::path okmeterDir() {
   const std::wstring up = envOrEmpty(L"USERPROFILE");
   std::filesystem::path base = up.empty() ? std::filesystem::path(".")
