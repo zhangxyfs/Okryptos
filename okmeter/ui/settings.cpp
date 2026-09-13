@@ -758,9 +758,9 @@ void SettingsPanel::draw(render::D3DContext& d3d, render::IMaterial& material) {
     for (const auto& pl : posLabels_)
       txt(pl.first, posFmt_.Get(), pl.second, gfx::ink(0.50f));
     // 开关行文案
-    txt(L"数字合并 cache 命中进 input", bodyFmt_.Get(), swText_, gfx::ink(0.90f));
+    txt(L"数字合并 cache 命中进输入", bodyFmt_.Get(), swText_, gfx::ink(0.90f));
     smallFmt_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-    txt(L"关闭后，详情卡将 input 拆为 常规 / cache 读 / cache 新建 三行",
+    txt(L"关闭后，详情卡将输入拆为 常规 / cache 读 / cache 新建 三行",
         smallFmt_.Get(), swSmall_, gfx::ink(0.50f));
     txt(L"保持显示", bodyFmt_.Get(), pinText_, gfx::ink(0.90f));
     txt(L"开启后，鼠标移开不再自动收回，dock 常显展开",

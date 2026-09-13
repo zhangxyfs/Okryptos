@@ -143,6 +143,16 @@ Sums Aggregator::modelWeek(const std::string& id, int64_t nowMs) const {
   return out;
 }
 
+Sums Aggregator::modelMonth(const std::string& id, int64_t nowMs) const {
+  const ModelStat* m = model(id);
+  if (!m) return Sums{};
+  const int ym = dayKey(nowMs) / 100;  // dayKey=yyyymmdd → 月键 yyyymm
+  Sums out;
+  for (const auto& [k, s] : m->byDay)
+    if (k / 100 == ym) out.plus(s);
+  return out;
+}
+
 Sums Aggregator::modelSession(const std::string& id) const {
   const ModelStat* m = model(id);
   if (!m) return Sums{};

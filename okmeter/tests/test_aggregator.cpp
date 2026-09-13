@@ -89,6 +89,18 @@ TEST(agg_modelweek_respects_monday_boundary) {
   CHECK_EQ(a.week(now).total(), 65);                 // 全局口径同界
 }
 
+TEST(agg_modelmonth_respects_month_boundary) {
+  Aggregator a;
+  a.add(ev("m/a", "s1", 10, 0, 0, 0, msOf(2026, 8, 31, 23, 59)));  // 上月
+  a.add(ev("m/a", "s1", 20, 0, 0, 0, msOf(2026, 9, 1, 0, 0)));     // 本月1日
+  a.add(ev("m/a", "s1", 40, 0, 0, 0, msOf(2026, 9, 13, 9, 30)));   // 本月中
+  a.add(ev("m/b", "s1", 5, 0, 0, 0, msOf(2026, 9, 8, 10, 0)));     // 本月，另一模型
+  const int64_t now = msOf(2026, 9, 13, 12, 0);
+  CHECK_EQ(a.modelMonth("m/a", now).total(), 60);  // 本月两笔，上月不计
+  CHECK_EQ(a.modelMonth("m/b", now).total(), 5);
+  CHECK_EQ(a.modelMonth("m/ghost", now).total(), 0);  // 未观测模型 → 0
+}
+
 TEST(agg_json_roundtrip) {
   const int64_t now = msOf(2026, 9, 9, 12, 0);
   Aggregator a;

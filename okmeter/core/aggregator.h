@@ -49,6 +49,7 @@ public:
   }
   Sums modelToday(const std::string& id, int64_t nowMs) const;
   Sums modelWeek(const std::string& id, int64_t nowMs) const;
+  Sums modelMonth(const std::string& id, int64_t nowMs) const;
   Sums modelSession(const std::string& id) const;
 
   // 序列化（state.json）
