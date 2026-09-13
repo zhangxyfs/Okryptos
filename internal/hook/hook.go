@@ -209,7 +209,11 @@ func selfHealHooks() {
 	}
 	for _, a := range agentx.Detected() {
 		if err := a.EnsureHooks(exe); err != nil {
-			logErr("self-heal hooks (%s): %v", a.ID(), err)
+			// config.toml 缺失 = 首跑/隔离 home 常态，自愈会自行创建，不记日志
+			//（此前每周期刷 "self-heal hooks: open ...: no such file" 误报）
+			if !os.IsNotExist(err) {
+				logErr("self-heal hooks (%s): %v", a.ID(), err)
+			}
 		}
 	}
 	// 技能同窗口自愈（R3 B-01）：烘焙的 exe 过期时重写；缺失/外来不动
