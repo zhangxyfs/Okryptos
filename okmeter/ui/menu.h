@@ -51,6 +51,7 @@ public:
   MenuColumn sub1, sub2;
   int parent1 = -1;         // 主列中展开 sub1 的条目下标（-1=未展开）
   int parent2 = -1;         // sub1 中展开 sub2 的条目下标
+  int subDir = 1;           // 子列展开方向：+1 向右（父项画 ▸ 于行尾）-1 向左（◂ 于行首）
 
   void layout(render::D3DContext& d3d);   // 文本测量 → 各列 width/height + 行区间
   void place(float x, float y);           // 主列定位（rect 左上）

@@ -24,8 +24,6 @@ constexpr float kMapRowH = 44.0f;     // map-row padding 5×2 + gsel 34
 constexpr float kGselH = 34.0f;       // gsel padding 8×2 + ~18
 constexpr float kPosColW = 132.0f;    // map-row 位置列宽
 constexpr float kMapGap = 12.0f;      // map-row gap
-constexpr float kDropItemH = 28.0f;   // drop button padding 7×2 + ~14
-constexpr float kDropMaxH = 280.0f;   // drop max-height
 constexpr float kSwitchW = 40.0f, kSwitchH = 22.0f;  // .sw
 constexpr float kContentW = kSettingsPanelW - 2 * 15.0f;  // 298
 
@@ -157,30 +155,13 @@ bool SettingsPanel::ensure(render::D3DContext& d3d) {
          }();
 }
 
-void SettingsPanel::begin(const Config& cur, std::vector<std::string> models) {
+void SettingsPanel::begin(const Config& cur) {
   draft = cur;
-  models_ = std::move(models);
   open = true;
   scrollY = 0;
   hover = -1;
-  dropGsel_ = -1;
-  dropScroll_ = 0;
+  menuSlot = -1;
   wheelResBody_ = 0;
-  wheelResDrop_ = 0;
-}
-
-std::vector<std::pair<std::string, std::wstring>>
-SettingsPanel::optionsFor(int slot) const {
-  (void)slot;  // 各槽位选项全集相同
-  std::vector<std::pair<std::string, std::wstring>> opts;
-  opts.emplace_back("auto", L"默认 · 按最近使用");
-  opts.emplace_back("total:session", L"总量 · 当前会话");
-  opts.emplace_back("total:today", L"总量 · 今日");
-  opts.emplace_back("total:week", L"总量 · 本周");
-  opts.emplace_back("total:all", L"总量 · 全部累计");
-  for (const std::string& id : models_)
-    opts.emplace_back("model:" + id, L"模型 · " + wide(id));
-  return opts;
 }
 
 std::wstring SettingsPanel::valueLabel(const std::string& v) const {
@@ -198,8 +179,6 @@ void SettingsPanel::layout(render::D3DContext& d3d) {
   secs_.clear();
   posLabels_.clear();
   hover = -1;
-  dropGsel_ = -1;
-  dropScroll_ = 0;
   // 头/尾三按钮固定前三个（矩形由 place 填充）
   ctrls_.push_back(Ctrl{Ctrl::CloseX, 0, 0, {}, false});
   ctrls_.push_back(Ctrl{Ctrl::CancelBtn, 0, 0, {}, false});
@@ -376,63 +355,15 @@ int SettingsPanel::maxScroll() const {
   return (std::max)(0, contentH_ - (int)bodyH());
 }
 
-void SettingsPanel::closeDrop() {
-  if (dropGsel_ < 0) return;
-  ctrls_.resize(dropStart_);
-  dropGsel_ = -1;
-  dropScroll_ = 0;
-  wheelResDrop_ = 0;
+D2D1_RECT_F SettingsPanel::gselRect(int ctrlIdx) const {
+  const Ctrl& g = ctrls_[(size_t)ctrlIdx];
+  return D2D1::RectF(rect.left + kPadX + g.rc.left,
+                     rect.top + kHdH + g.rc.top - (float)scrollY,
+                     rect.left + kPadX + g.rc.right,
+                     rect.top + kHdH + g.rc.bottom - (float)scrollY);
 }
 
-void SettingsPanel::openDrop(render::D3DContext& d3d, int gselCtrl) {
-  closeDrop();
-  const Ctrl& g = ctrls_[(size_t)gselCtrl];
-  const auto opts = optionsFor(g.a);
-  const bool hasDev = ensure(d3d);
-  float tw = g.rc.right - g.rc.left;  // min-width = 按钮宽（原型同款）
-  if (hasDev) {
-    for (const auto& o : opts) {
-      ComPtr<IDWriteTextLayout> tl;
-      if (FAILED(d3d.dwrite()->CreateTextLayout(o.second.c_str(),
-                                                (UINT32)o.second.size(),
-                                                bodyFmt_.Get(), 2000.0f, 100.0f, &tl)))
-        continue;
-      DWRITE_TEXT_METRICS m{};
-      if (FAILED(tl->GetMetrics(&m))) continue;
-      const float need = m.width + 20.0f + 26.0f;  // padding 10×2 + ✓ 列
-      if (need > tw) tw = need;
-    }
-  }
-  const float panelW = rect.right - rect.left;
-  const float panelH = rect.bottom - rect.top;
-  if (tw > panelW - 16.0f) tw = panelW - 16.0f;
-  float dx = kPadX + g.rc.left;
-  if (dx + tw > panelW - 8.0f) dx = panelW - 8.0f - tw;
-  const int n = (int)opts.size();
-  const int vis = (std::min)(n, (int)((kDropMaxH - 10.0f) / kDropItemH));
-  const float dh = 10.0f + (float)vis * kDropItemH;
-  const float gy = kHdH + g.rc.top - (float)scrollY;  // gsel 面板坐标 y
-  float dy = gy + (g.rc.bottom - g.rc.top) + 6.0f;    // 默认下展
-  if (dy + dh > panelH - 8.0f) dy = gy - 6.0f - dh;   // 放不下改上展
-  if (dy < 8.0f) dy = 8.0f;
-  dropRc_ = D2D1::RectF(dx, dy, dx + tw, dy + dh);
-  dropStart_ = ctrls_.size();
-  for (int i = 0; i < n; ++i) {
-    Ctrl c;
-    c.kind = Ctrl::DropItem;
-    c.a = g.a;
-    c.b = i;
-    c.body = false;
-    c.rc = D2D1::RectF(dx + 5.0f, dy + 5.0f + (float)i * kDropItemH,
-                       dx + tw - 5.0f, dy + 5.0f + (float)(i + 1) * kDropItemH);
-    ctrls_.push_back(c);
-  }
-  dropGsel_ = gselCtrl;
-  dropScroll_ = 0;
-  wheelResDrop_ = 0;
-}
-
-int SettingsPanel::click(render::D3DContext& d3d, int idx) {
+int SettingsPanel::click(render::D3DContext& /*d3d*/, int idx) {
   if (idx < 0 || idx >= (int)ctrls_.size()) return 0;
   const Ctrl& c = ctrls_[(size_t)idx];
   switch (c.kind) {
@@ -457,16 +388,7 @@ int SettingsPanel::click(render::D3DContext& d3d, int idx) {
     draft.pinned = !draft.pinned;
     return 1;
   case Ctrl::Gsel:
-    if (dropGsel_ == idx) closeDrop();
-    else openDrop(d3d, idx);
-    return 1;
-  case Ctrl::DropItem: {
-    const auto opts = optionsFor(c.a);
-    if (c.b >= 0 && c.b < (int)opts.size())
-      draft.mapping[(size_t)c.a] = opts[(size_t)c.b].first;
-    closeDrop();
-    return 1;
-  }
+    return 3;  // 级联映射菜单由 app 打开（右键 GlassMenu 同款）
   default:
     return 0;  // CloseX/CancelBtn/SaveBtn 由 app 处理
   }
@@ -476,14 +398,6 @@ int SettingsPanel::hit(int x, int y) const {
   if (!open) return -1;
   const float px = (float)x - rect.left;
   const float py = (float)y - rect.top;
-  // 下拉浮层（面板坐标，仅可见行内命中；行随内部滚动换算）
-  if (dropGsel_ >= 0 && px >= dropRc_.left && px < dropRc_.right &&
-      py >= dropRc_.top && py < dropRc_.bottom) {
-    const int row = (int)((py - dropRc_.top - 5.0f + (float)dropScroll_) / kDropItemH);
-    for (size_t i = dropStart_; i < ctrls_.size(); ++i)
-      if (ctrls_[i].b == row) return (int)i;
-    return -1;  // 浮层 padding 区
-  }
   const float panelW = rect.right - rect.left;
   const float panelH = rect.bottom - rect.top;
   if (px < 0 || px >= panelW || py < 0 || py >= panelH) return -1;
@@ -497,8 +411,7 @@ int SettingsPanel::hit(int x, int y) const {
     const float cx = px - kPadX;
     const float cy = py - kHdH + (float)scrollY;
     if (cx >= 0 && cx < kContentW) {
-      const size_t end = dropGsel_ >= 0 ? dropStart_ : ctrls_.size();
-      for (size_t i = 3; i < end; ++i) {
+      for (size_t i = 3; i < ctrls_.size(); ++i) {
         const Ctrl& c = ctrls_[i];
         if (!c.body) continue;
         if (cx >= c.rc.left && cx < c.rc.right && cy >= c.rc.top && cy < c.rc.bottom)
@@ -513,9 +426,6 @@ bool SettingsPanel::contains(int x, int y) const {
   if (!open) return false;
   const float px = (float)x - rect.left;
   const float py = (float)y - rect.top;
-  if (dropGsel_ >= 0 && px >= dropRc_.left && px < dropRc_.right &&
-      py >= dropRc_.top && py < dropRc_.bottom)
-    return true;
   return px >= 0 && px < rect.right - rect.left && py >= 0 &&
          py < rect.bottom - rect.top;
 }
@@ -536,26 +446,11 @@ bool SettingsPanel::wheelAt(int x, int y, int delta) {
   if (!open) return false;
   const float px = (float)x - rect.left;
   const float py = (float)y - rect.top;
-  // 小 delta 残差累积：wheelRes += delta 后按 120 取整行数、余数留存，
-  // 高精度触摸板/无极滚轮的逐事件小 delta 不再被整除丢弃（上滚 delta>0 → scrollY 减）
-  if (dropGsel_ >= 0 && px >= dropRc_.left && px < dropRc_.right &&
-      py >= dropRc_.top && py < dropRc_.bottom) {
-    wheelResDrop_ += delta;
-    const int step = (wheelResDrop_ / 120) * 44;
-    wheelResDrop_ %= 120;
-    const int n = (int)(ctrls_.size() - dropStart_);
-    const int maxS =
-        (std::max)(0, (int)(10.0f + (float)n * kDropItemH -
-                            (dropRc_.bottom - dropRc_.top)));
-    const int ns = (std::min)((std::max)(0, dropScroll_ - step), maxS);
-    if (ns == dropScroll_) return false;
-    dropScroll_ = ns;
-    return true;
-  }
   const float panelH = rect.bottom - rect.top;
   if (px < 0 || px >= rect.right - rect.left || py < kHdH || py >= panelH - kFtH)
     return false;
-  closeDrop();  // 体区滚动即关浮层（原型 .p-bd scroll → closeDrop 同款）
+  // 小 delta 残差累积：wheelRes += delta 后按 120 取整行数、余数留存，
+  // 高精度触摸板/无极滚轮的逐事件小 delta 不再被整除丢弃（上滚 delta>0 → scrollY 减）
   wheelResBody_ += delta;
   const int step = (wheelResBody_ / 120) * 44;
   wheelResBody_ %= 120;
@@ -768,8 +663,7 @@ void SettingsPanel::draw(render::D3DContext& d3d, render::IMaterial& material) {
     smallFmt_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
 
     // 控件（体区内容坐标）
-    const size_t end = dropGsel_ >= 0 ? dropStart_ : ctrls_.size();
-    for (size_t i = 3; i < end; ++i) {
+    for (size_t i = 3; i < ctrls_.size(); ++i) {
       const Ctrl& c = ctrls_[i];
       if (!c.body) continue;
       const bool hov = (int)i == hover;
@@ -824,12 +718,12 @@ void SettingsPanel::draw(render::D3DContext& d3d, render::IMaterial& material) {
         break;
       }
       case Ctrl::Gsel: {
-        const bool openDrop_ = dropGsel_ == (int)i;
+        const bool menuOpen = c.a == menuSlot;  // 级联菜单打开中：accent 描边
         brush_->SetColor(gfx::ink(hov ? 0.09f : 0.05f));
         const D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(c.rc, 8.0f, 8.0f);
         dc->FillRoundedRectangle(&rr, brush_.Get());
-        brush_->SetColor(openDrop_ ? gfx::accentC(0.60f)
-                                   : gfx::ink(hov ? 0.30f : 0.13f));
+        brush_->SetColor(menuOpen ? gfx::accentC(0.60f)
+                                  : gfx::ink(hov ? 0.30f : 0.13f));
         dc->DrawRoundedRectangle(&rr, brush_.Get(), 1.0f);
         const D2D1_RECT_F tr = D2D1::RectF(c.rc.left + 12.0f, c.rc.top,
                                            c.rc.right - 26.0f, c.rc.bottom);
@@ -919,46 +813,6 @@ void SettingsPanel::draw(render::D3DContext& d3d, render::IMaterial& material) {
     };
     btn(1, L"取消", false);
     btn(2, L"保存并生效", true);
-  }
-
-  // ── 下拉浮层（.drop）：玻璃底 + 当前项 accent 底 + ✓，内部滚动 ──
-  if (dropGsel_ >= 0) {
-    dc->SetTransform(D2D1::Matrix3x2F::Translation(rect.left, rect.top) * baseTm);
-    material.drawCardBack(dc, dropRc_, 10.0f);
-    dc->PushAxisAlignedClip(&dropRc_, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-    const std::string cur = ctrl(dropGsel_).a < (int)draft.mapping.size()
-        ? draft.mapping[(size_t)ctrl(dropGsel_).a] : "auto";
-    const auto opts = optionsFor(ctrl(dropGsel_).a);
-    for (size_t i = dropStart_; i < ctrls_.size(); ++i) {
-      const Ctrl& c = ctrls_[i];
-      const D2D1_RECT_F r = D2D1::RectF(c.rc.left, c.rc.top - (float)dropScroll_,
-                                        c.rc.right, c.rc.bottom - (float)dropScroll_);
-      if (r.bottom < dropRc_.top || r.top > dropRc_.bottom) continue;
-      const bool on = (size_t)c.b < opts.size() && opts[(size_t)c.b].first == cur;
-      const bool hov = (int)i == hover;
-      if (on || hov) {
-        brush_->SetColor(on ? gfx::accentC(0.18f) : gfx::ink(0.09f));
-        const D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, 6.0f, 6.0f);
-        dc->FillRoundedRectangle(&rr, brush_.Get());
-      }
-      if ((size_t)c.b < opts.size()) {
-        const D2D1_RECT_F tr = D2D1::RectF(r.left + 10.0f, r.top, r.right - 26.0f,
-                                           r.bottom);
-        drawTextTrimmed(d3d, opts[(size_t)c.b].second, bodyFmt_.Get(), tr,
-                        gfx::ink(0.90f));
-      }
-      if (on) {  // ✓ 两笔描边（菜单同款）
-        brush_->SetColor(gfx::accentC(1.0f));
-        const float cx = r.right - 16.0f;
-        const float cy = (r.top + r.bottom) * 0.5f;
-        dc->DrawLine(D2D1::Point2F(cx - 4.0f, cy + 0.5f),
-                     D2D1::Point2F(cx - 1.0f, cy + 3.5f), brush_.Get(), 1.6f);
-        dc->DrawLine(D2D1::Point2F(cx - 1.0f, cy + 3.5f),
-                     D2D1::Point2F(cx + 5.0f, cy - 3.5f), brush_.Get(), 1.6f);
-      }
-    }
-    dc->PopAxisAlignedClip();
-    dc->SetTransform(baseTm);
   }
 }
 

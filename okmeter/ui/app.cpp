@@ -341,9 +341,11 @@ void DockApp::rebuildLayout() {
   applyWindowPos();
 }
 
-// 统一窗口矩形落窗：基础矩形（弹簧 e 露出宽 + 卡区 wide 268）与菜单屏幕矩形求并集
-// （菜单打开时窗口扩出菜单区，同 swapchain 绘制，参照卡区扩展做法）；zoneDX_/zoneDY_
-// 记球区在窗口内的偏移，命中与绘制共用
+// 统一窗口矩形落窗：基础矩形（弹簧 e 露出宽 + 卡区 wide 268）与菜单/设置面板
+// 屏幕矩形求并集（菜单与面板可同时打开——设置面板的指标级联下拉就是右键同款
+// 菜单；同 swapchain 绘制，参照卡区扩展做法）。先算并集最终原点再放置菜单/面板
+// （边并边放会让先放的浮层被后续原点移动带跑）；zoneDX_/zoneDY_ 记球区在窗口内
+// 的偏移，命中与绘制共用
 void DockApp::applyWindowPos() {
   if (!hwnd_ || dragging_) return;  // 拖拽中窗口位置由指针驱动，弹簧不插手
   const RECT work = workArea();
@@ -359,32 +361,30 @@ void DockApp::applyWindowPos() {
   // 亮度采样区 = dock 基础矩形对应背景（自适应墨色用；勿用菜单/面板并集矩形——
   // 采样对象是条目背后的亮度）
   backdrop_.setLumaRegion(x, y, w, h);
-  zoneDX_ = (wide_ && cfg_.edge == "right") ? kCardZoneW : 0;
-  zoneDY_ = 0;
+  // 并集矩形（屏幕坐标）
+  int ux = x, uy = y, ur = x + w, ub = y + h;
   if (menu_.open) {
-    const int nx = (std::min)(x, (int)menuScreen_.left);
-    const int ny = (std::min)(y, (int)menuScreen_.top);
-    const int nr = (std::max)(x + w, (int)menuScreen_.right);
-    const int nb = (std::max)(y + h, (int)menuScreen_.bottom);
-    zoneDX_ += x - nx;
-    zoneDY_ = y - ny;
-    menu_.place((float)(menuScreen_.left - nx), (float)(menuScreen_.top - ny));
-    x = nx; y = ny; w = nr - nx; h = nb - ny;
+    ux = (std::min)(ux, (int)menuScreen_.left);
+    uy = (std::min)(uy, (int)menuScreen_.top);
+    ur = (std::max)(ur, (int)menuScreen_.right);
+    ub = (std::max)(ub, (int)menuScreen_.bottom);
   }
-  // 设置面板打开：窗口并集扩出面板区（dock 对侧屏缘，联合窗口横贯全屏；
+  // 设置面板打开：并集扩出面板区（dock 对侧屏缘，联合窗口横贯全屏；
   // 中部空白区点击穿透由 WM_NCHITTEST 兜底）
   if (settings_.open) {
-    const int nx = (std::min)(x, (int)panelScreen_.left);
-    const int ny = (std::min)(y, (int)panelScreen_.top);
-    const int nr = (std::max)(x + w, (int)panelScreen_.right);
-    const int nb = (std::max)(y + h, (int)panelScreen_.bottom);
-    zoneDX_ += x - nx;
-    zoneDY_ = y - ny;
-    settings_.place((float)(panelScreen_.left - nx), (float)(panelScreen_.top - ny),
-                    (float)(panelScreen_.bottom - panelScreen_.top));
-    x = nx; y = ny; w = nr - nx; h = nb - ny;
+    ux = (std::min)(ux, (int)panelScreen_.left);
+    uy = (std::min)(uy, (int)panelScreen_.top);
+    ur = (std::max)(ur, (int)panelScreen_.right);
+    ub = (std::max)(ub, (int)panelScreen_.bottom);
   }
-  SetWindowPos(hwnd_, nullptr, x, y, w, h,
+  zoneDX_ = (wide_ && cfg_.edge == "right" ? kCardZoneW : 0) + (x - ux);
+  zoneDY_ = y - uy;
+  if (menu_.open)
+    menu_.place((float)(menuMainScreen_.left - ux), (float)(menuMainScreen_.top - uy));
+  if (settings_.open)
+    settings_.place((float)(panelScreen_.left - ux), (float)(panelScreen_.top - uy),
+                    (float)(panelScreen_.bottom - panelScreen_.top));
+  SetWindowPos(hwnd_, nullptr, ux, uy, ur - ux, ub - uy,
                SWP_NOZORDER | SWP_NOACTIVATE);  // 尺寸变化 → WM_SIZE → d3d.resize + render
   if (menu_.open && (menu_.parent1 >= 0 || menu_.parent2 >= 0))
     placeSubColumns();  // 扩窗后按新窗口原点重布子列（屏幕坐标不变）
@@ -401,10 +401,11 @@ void DockApp::syncClickThru() {
   if (settings_.open) {
     POINT pt{};
     GetCursorPos(&pt);
-    // 可命中区 = 面板矩形（含打开的下拉浮层）∪ 球区竖条（详情卡区仅展示不吞点击）
+    // 可命中区 = 面板矩形 ∪ 打开的级联映射菜单 ∪ 球区竖条（详情卡区仅展示不吞点击）
     RECT wr{};
     GetWindowRect(hwnd_, &wr);
-    const bool inPanel = settings_.contains(pt.x - (int)wr.left, pt.y - (int)wr.top);
+    bool inPanel = settings_.contains(pt.x - (int)wr.left, pt.y - (int)wr.top);
+    if (menu_.open && PtInRect(&menuScreen_, pt)) inPanel = true;
     const RECT work = workArea();
     const RECT ballZone{ cfg_.edge == "right" ? work.right - dockW_ : work.left,
                          winY_,
@@ -494,15 +495,20 @@ void DockApp::buildMenuEntries(int slot) {
   menu_.entries.push_back(std::move(quit));
 }
 
+// 当前映射值：设置面板的级联下拉取 draft（两段式保存），球区右键菜单取已生效 cfg
+std::string DockApp::mappingOf(int slot) const {
+  const std::vector<std::string>& m =
+      menuForSettings_ ? settings_.draft.mapping : cfg_.mapping;
+  return slot >= 0 && slot < (int)m.size() ? m[(size_t)slot] : "";
+}
+
 // 二级子列：subKind 1=总量四口径；2=模型厂商分组（按 modelId 首段聚合，按最近用排序）
 void DockApp::openSub1(int parentIdx, int subKind) {
   menu_.parent1 = parentIdx;
   menu_.parent2 = -1;
   menu_.sub2.clear();
   menu_.sub1.clear();
-  const int slot = menu_.slot;
-  const std::string cur = slot >= 0 && slot < (int)cfg_.mapping.size()
-                              ? cfg_.mapping[(size_t)slot] : "";
+  const std::string cur = mappingOf(menu_.slot);
   auto leaf = [&](const std::wstring& label, const std::string& v) {
     MenuEntry e;
     e.kind = MenuEntry::Item;
@@ -542,9 +548,7 @@ void DockApp::openSub1(int parentIdx, int subKind) {
 void DockApp::openSub2(int parentIdx, const std::string& vendor) {
   menu_.parent2 = parentIdx;
   menu_.sub2.clear();
-  const int slot = menu_.slot;
-  const std::string cur = slot >= 0 && slot < (int)cfg_.mapping.size()
-                              ? cfg_.mapping[(size_t)slot] : "";
+  const std::string cur = mappingOf(menu_.slot);
   for (const std::string& id : store_->agg().modelsByRecency()) {
     if (vendorOf(id) != vendor) continue;
     MenuEntry e;
@@ -560,18 +564,19 @@ void DockApp::openSub2(int parentIdx, const std::string& vendor) {
   render();
 }
 
-// 子列定位：右缘向屏内（左）逐级展开，与父项行顶对齐；左缘反向
+// 子列定位：沿 menuDir_ 朝屏内逐级展开（球区菜单朝屏内，设置下拉朝面板内侧），
+// 与父项行顶对齐
 void DockApp::placeSubColumns() {
   const RECT work = workArea();
   RECT wr{};
   GetWindowRect(hwnd_, &wr);
   const int nx = (int)menu_.rect.left + (int)wr.left;   // 主列屏幕坐标
   const int ny = (int)menu_.rect.top + (int)wr.top;
-  const bool rightEdge = cfg_.edge == "right";
+  const bool towardLeft = menuDir_ < 0;
   if (menu_.parent1 >= 0 && menu_.parent1 < (int)menu_.entries.size() &&
       !menu_.sub1.entries.empty()) {
     const MenuEntry& p = menu_.entries[(size_t)menu_.parent1];
-    int sx = rightEdge ? nx - menu_.sub1.width + 1 : nx + menu_.width - 1;
+    int sx = towardLeft ? nx - menu_.sub1.width + 1 : nx + menu_.width - 1;
     if (sx < work.left + 4) sx = work.left + 4;
     if (sx + menu_.sub1.width > work.right - 4) sx = work.right - 4 - menu_.sub1.width;
     int sy = ny + (int)p.y0 - 5;
@@ -584,7 +589,7 @@ void DockApp::placeSubColumns() {
     const MenuEntry& p = menu_.sub1.entries[(size_t)menu_.parent2];
     const int s1x = (int)menu_.sub1.rect.left + (int)wr.left;
     const int s1y = (int)menu_.sub1.rect.top + (int)wr.top;
-    int sx = rightEdge ? s1x - menu_.sub2.width + 1 : s1x + menu_.sub1.width - 1;
+    int sx = towardLeft ? s1x - menu_.sub2.width + 1 : s1x + menu_.sub1.width - 1;
     if (sx < work.left + 4) sx = work.left + 4;
     if (sx + menu_.sub2.width > work.right - 4) sx = work.right - 4 - menu_.sub2.width;
     int sy = s1y + (int)p.y0 - 5;
@@ -601,6 +606,11 @@ void DockApp::placeSubColumns() {
 void DockApp::openMenu(int clientX, int clientY, int slot) {
   buildMenuEntries(slot);
   menu_.layout(d3d_);
+  menuForSettings_ = false;
+  settingsMenuOwner_ = -1;
+  settings_.menuSlot = -1;
+  menuDir_ = cfg_.edge == "right" ? -1 : 1;  // 朝屏内侧级联（右缘向左，左缘向右）
+  menu_.subDir = menuDir_;                   // 箭头随展开方向（左 ◂ 右 ▸）
   POINT pt{ clientX, clientY };
   ClientToScreen(hwnd_, &pt);
   const RECT work = workArea();
@@ -620,6 +630,7 @@ void DockApp::openMenu(int clientX, int clientY, int slot) {
   if (sy + mh > work.bottom - 8) sy = work.bottom - 8 - mh;
   if (sy < work.top + 8) sy = work.top + 8;
   menuScreen_ = RECT{ sx, sy, sx + mw, sy + mh };
+  menuMainScreen_ = menuScreen_;  // 主列定位基准（级联展开后并集变大，主列不动）
   menu_.slot = slot;
   menu_.open = true;
   menu_.hover = -1;
@@ -644,6 +655,9 @@ void DockApp::closeMenu() {
   menu_.parent1 = menu_.parent2 = -1;  // 级联子列一并收起
   menu_.sub1.clear();
   menu_.sub2.clear();
+  menuForSettings_ = false;
+  settingsMenuOwner_ = -1;
+  settings_.menuSlot = -1;
   applyWindowPos();     // 窗口收回基础矩形
   POINT pt{};
   GetCursorPos(&pt);
@@ -656,7 +670,78 @@ void DockApp::closeMenu() {
   render();
 }
 
-// 激活：映射项 → cfg.mapping[slot] → saveConfig → rebuild 立即生效；动作项分发
+// 设置面板指标下拉：复用右键同一 GlassMenu 的侧向级联（默认 · 按最近使用 +
+// 总量 + 模型 父项，勾选/级联/动画/沿检测全同款），主列锚定 gsel 行正下方
+// （放不下翻上方）、与 gsel 对齐，子列朝屏内逐级展开，箭头方向 = 展开方向
+// （向左 ◂ 向右 ▸）；叶项由 applyMenuMapping 改 draft（两段式保存，不即时落盘）
+
+// 主列锚定：贴 owner gsel 行正下方（原型 drop 下展同款），水平与 gsel 对齐
+//（朝屏内一侧生长），下方放不下翻到行上方
+void DockApp::placeSettingsMenu() {
+  RECT wr{};
+  GetWindowRect(hwnd_, &wr);
+  const D2D1_RECT_F gr = settings_.gselRect(settingsMenuOwner_);  // 窗口客户区坐标
+  const RECT work = workArea();
+  const int mw = menu_.width, mh = menu_.height;
+  int sx = menuDir_ > 0 ? (int)wr.left + (int)gr.left
+                        : (int)wr.left + (int)gr.right - mw;
+  if (sx < work.left + 8) sx = work.left + 8;
+  if (sx + mw > work.right - 8) sx = work.right - 8 - mw;  // 屏缘侧不出屏
+  int sy = (int)wr.top + (int)gr.bottom + 4;  // 默认下展
+  if (sy + mh > work.bottom - 8)
+    sy = (int)wr.top + (int)gr.top - 4 - mh;  // 下方放不下 → 翻到行上方
+  if (sy < work.top + 8) sy = work.top + 8;
+  menuScreen_ = RECT{ sx, sy, sx + mw, sy + mh };
+  menuMainScreen_ = menuScreen_;  // 主列定位基准（级联展开后并集变大，主列不动）
+}
+
+void DockApp::openSettingsMenu(int gselCtrl) {
+  const int slot = settings_.ctrl(gselCtrl).a;
+  menuForSettings_ = true;  // 先于 mappingOf 置位（勾选源取 draft）
+  settingsMenuOwner_ = gselCtrl;
+  settings_.menuSlot = slot;
+  const std::string cur = mappingOf(slot);
+  menu_.entries.clear();
+  MenuEntry def;
+  def.kind = MenuEntry::Item;
+  def.label = L"默认 · 按最近使用";
+  def.value = "auto";
+  def.tick = cur.empty() || cur == "auto";
+  menu_.entries.push_back(std::move(def));
+  MenuEntry total;
+  total.kind = MenuEntry::Parent;
+  total.label = L"总量";
+  total.sub = 1;
+  menu_.entries.push_back(std::move(total));
+  MenuEntry models;
+  models.kind = MenuEntry::Parent;
+  models.label = L"模型";
+  models.sub = 2;
+  menu_.entries.push_back(std::move(models));
+  menu_.layout(d3d_);
+  // 朝屏内级联：面板在左（dock 右缘）→ 向右展开；面板在右 → 向左（箭头随向）
+  menuDir_ = cfg_.edge == "right" ? 1 : -1;
+  menu_.subDir = menuDir_;
+  menu_.slot = slot;
+  menu_.open = true;
+  menu_.hover = -1;
+  menu_.parent1 = menu_.parent2 = -1;
+  menu_.sub1.clear();
+  menu_.sub2.clear();
+  placeSettingsMenu();
+  menuOpenQpc_ = qpcNow();
+  // 沿检测基准：打开当帧若键已按下（如左键尚未松开）不误判为收起点击
+  prevEsc_ = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+  prevLmb_ = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+  prevRmb_ = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+  applyWindowPos();   // 菜单区纳入窗口（与面板区并集扩窗 → WM_SIZE → render）
+  syncClickThru();    // 菜单区纳入可命中（面板外的菜单区不再穿透）
+  render();
+}
+
+// 激活：映射项 → cfg.mapping[slot] → saveConfig → rebuild 立即生效（设置面板的
+// 级联下拉改 draft）；动作项分发。动作项先 closeMenu；映射叶项由 applyMenuMapping
+// 收尾（它要先取 menuForSettings_ 再 closeMenu，不能在此提前收）
 void DockApp::activateMenu(int idx) {
   const int col = idx / 1000, i = idx % 1000;
   if (col == 0) {
@@ -665,10 +750,9 @@ void DockApp::activateMenu(int idx) {
     if (e.kind == MenuEntry::Parent) { openSub1(i, e.sub); return; }  // 总量▸/模型▸
     const int action = e.action;
     const std::string v = e.value;
-    closeMenu();
-    if (action == 1) { openSettings(); return; }
-    if (action == 2) { flipEdge(); return; }
-    if (action == 3) { exitApp(); return; }
+    if (action == 1) { closeMenu(); openSettings(); return; }
+    if (action == 2) { closeMenu(); flipEdge(); return; }
+    if (action == 3) { closeMenu(); exitApp(); return; }
     applyMenuMapping(v);
     return;
   }
@@ -686,13 +770,22 @@ void DockApp::activateMenu(int idx) {
   }
 }
 
-// 叶项映射落盘：mapping → saveConfig → rebuild 立即生效。
+// 叶项映射落盘：mapping → saveConfig → rebuild 立即生效；设置面板的级联下拉只改
+// draft（两段式保存，保存并生效时统一落盘）。
 // v 必须按值传入：调用方的 e.value 是对 entries 向量的引用，closeMenu 会
 // clear 子列向量使引用悬空（实测 v 变成 empty → 守卫早退 → 切换静默无效）
 void DockApp::applyMenuMapping(const std::string v) {
   const int slot = menu_.slot;
+  const bool forSettings = menuForSettings_;
   closeMenu();
-  if (v.empty() || slot < 0 || slot >= cfg_.count) return;
+  if (v.empty() || slot < 0) return;
+  if (forSettings) {
+    if (slot < (int)settings_.draft.mapping.size())
+      settings_.draft.mapping[(size_t)slot] = v;  // 草稿：gsel 文本随下次 render 更新
+    render();
+    return;
+  }
+  if (slot >= cfg_.count) return;
   cfg_.mapping[(size_t)slot] = v;
   if (!saveConfig(okmeterDir(), cfg_)) {
     backdrop_.note(L"applyMenuMapping: saveConfig FAILED gle=%lu", GetLastError());
@@ -762,14 +855,14 @@ void DockApp::syncFrames() {
   if (needsFrames()) startFrames(); else stopFrames();
 }
 
-// 打开设置面板：draft=cfg 副本 + 模型枚举（下拉"模型 · id"）+ 停靠 dock 对侧屏缘
+// 打开设置面板：draft=cfg 副本 + 停靠 dock 对侧屏缘
 //（原型 openSettings：顶 14 底 58 边距 14，classList left=edge==right）；
 // 并集扩窗 + 保持展开（holdOpen）；面板皮肤跟随当前生效材质（草稿不即时换肤）
 void DockApp::openSettings() {
   if (settings_.open) return;
   backdrop_.note(L"openSettings 入口（诊断消息触发或菜单）");
   closeMenu();
-  settings_.begin(cfg_, store_->agg().modelsByRecency());
+  settings_.begin(cfg_);
   settings_.layout(d3d_);
   const RECT work = workArea();
   const int h = (int)(work.bottom - work.top) - 14 - 58;
@@ -790,6 +883,7 @@ void DockApp::openSettings() {
 // false 丢弃草稿。面板关闭后窗口收回基础矩形，指针已在窗外则恢复 600ms 迟滞
 void DockApp::closeSettings(bool apply) {
   if (!settings_.open) return;
+  closeMenu();  // 指标级联下拉随面板一并收起
   if (apply) {
     cfg_ = settings_.draft;
     cfg_.normalize();
@@ -826,6 +920,10 @@ void DockApp::activateSettings(int idx) {
     return;
   }
   const int r = settings_.click(d3d_, idx);
+  if (r == 3) {
+    openSettingsMenu(idx);  // 指标下拉钮 → 级联映射菜单（右键 GlassMenu 同款）
+    return;
+  }
   if (r == 2) {
     settings_.layout(d3d_);  // 球数变化 → 映射行重排
     applyWindowPos();        // layout 重建 ctrls_（头尾按钮矩形清零）→ 重新落窗填充
@@ -874,7 +972,8 @@ void DockApp::renderOnce() {
               (cfg_.count - 1) / 2, emerge_.value, cfg_.edge, dx,
               (float)(monX - wr.left), (float)(monY - wr.top),
               material_->id() == "glow" ? pressIdx_ : -1);  // 按压下沉仅沉浸光感
-  if (card_.valid && hoverIdx_ >= 0 && hoverIdx_ < (int)g.items.size() &&
+  // 菜单打开期间不画详情卡：右键时悬停卡与菜单级联列叠加层级太乱
+  if (card_.valid && !menu_.open && hoverIdx_ >= 0 && hoverIdx_ < (int)g.items.size() &&
       emerge_.value > 0.5) {
     // 垂直夹取基准用当前真实客户区高度（联合窗口下 winH_ 只是球区高度，
     // 菜单/设置面板扩窗后窗口更高——错用 winH_ 会把卡 clamp 到顶部）
@@ -901,28 +1000,9 @@ void DockApp::renderOnce() {
                       hoverIdx_, form_->cardRadius(hoverIdx_, (cfg_.count - 1) / 2));
     }
   }
-  // 自绘玻璃右键菜单：弹出动画 120ms（透明度 + 向屏缘 6px 滑入，原型 cardin 同款）；
-  // 无模态泵，动画帧照常驱动
-  if (menu_.open) {
-    const double t = menuAnimT();
-    if (t < 1.0) {
-      const float off =
-          (float)((1.0 - t) * 6.0) * (cfg_.edge == "right" ? 1.0f : -1.0f);
-      ID2D1DeviceContext* dc = d3d_.dc();
-      dc->SetTransform(D2D1::Matrix3x2F::Translation(off, 0.0f));
-      const D2D1_LAYER_PARAMETERS lp = D2D1::LayerParameters(
-          D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-          D2D1::IdentityMatrix(), (float)t);
-      dc->PushLayer(&lp, nullptr);
-      menu_.draw(d3d_, *material_);
-      dc->PopLayer();
-      dc->SetTransform(D2D1::IdentityMatrix());
-    } else {
-      menu_.draw(d3d_, *material_);
-    }
-  }
   // 背板设置面板：滑入动画 180ms（透明度 + 自 dock 侧 10px 滑入，原型 panelin 同款）；
-  // 面板底由 material.drawCardBack 供皮（跟随当前生效材质，草稿不即时换肤）
+  // 面板底由 material.drawCardBack 供皮（跟随当前生效材质，草稿不即时换肤）。
+  // 面板先于菜单绘制：设置面板的指标级联下拉锚在面板区域内，菜单必须压面板顶层
   if (settings_.open) {
     const double t = panelAnimT();
     if (t < 1.0) {
@@ -939,6 +1019,26 @@ void DockApp::renderOnce() {
       dc->SetTransform(D2D1::IdentityMatrix());
     } else {
       settings_.draw(d3d_, *material_);
+    }
+  }
+  // 自绘玻璃菜单（球区右键 / 设置面板级联下拉共用）：弹出动画 120ms（透明度 +
+  // 向级联方向反向 6px 滑入，原型 cardin 同款）；无模态泵，动画帧照常驱动
+  if (menu_.open) {
+    const double t = menuAnimT();
+    if (t < 1.0) {
+      const float off =
+          (float)((1.0 - t) * 6.0) * (menuDir_ < 0 ? 1.0f : -1.0f);
+      ID2D1DeviceContext* dc = d3d_.dc();
+      dc->SetTransform(D2D1::Matrix3x2F::Translation(off, 0.0f));
+      const D2D1_LAYER_PARAMETERS lp = D2D1::LayerParameters(
+          D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+          D2D1::IdentityMatrix(), (float)t);
+      dc->PushLayer(&lp, nullptr);
+      menu_.draw(d3d_, *material_);
+      dc->PopLayer();
+      dc->SetTransform(D2D1::IdentityMatrix());
+    } else {
+      menu_.draw(d3d_, *material_);
     }
   }
 #if defined(OKM_ANIM_DIAG)
@@ -1117,7 +1217,7 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
         openSettings();  // 内部并集扩窗 + render
         if (shotDropSlot_ >= 0 && shotDropSlot_ < 1000) {
           const int gi = settings_.gselCtrl(shotDropSlot_);
-          if (gi >= 0) (void)settings_.click(d3d_, gi);  // 打开指标下拉浮层
+          if (gi >= 0) activateSettings(gi);  // 打开该槽位的指标级联映射菜单
         }
         if (shotDropSlot_ >= 1000) {
           // --shotcount 自检：走 activateSettings 真实路径点球数 chip（值为球数）
@@ -1271,7 +1371,9 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       }
     }
     if (settings_.open) {
-      const int sh = settings_.hit(mx, my);
+      // 指针在级联下拉菜单上时清面板悬停（菜单压面板边缘，底下控件不高亮）
+      const int sh =
+          (menu_.open && menu_.contains(mx, my)) ? -1 : settings_.hit(mx, my);
       if (sh != settings_.hover) {
         settings_.hover = sh;
         render();
@@ -1302,25 +1404,24 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     SetTimer(hwnd_, kTimerRetract, 600, nullptr);  // 600ms 迟滞后收回
     return 0;
   case WM_LBUTTONDOWN: {
-    // 设置面板打开期间：左键一律走面板命中（不按压/不起拖）；浮层外点击先关浮层
-    //（点在浮层 owner 下拉钮上则吞掉——与原型 pointerdown 关浮层 + 开关语义一致）
-    if (settings_.open) {
-      const int mx = (int)(short)LOWORD(lp), my = (int)(short)HIWORD(lp);
+    const int mx = (int)(short)LOWORD(lp), my = (int)(short)HIWORD(lp);
+    // 菜单打开期间（球区右键菜单 / 设置面板指标级联下拉共用）：菜单内按下等
+    // WM_LBUTTONUP 激活条目；菜单外按下收起——球区菜单吞掉该击（不触发按压/拖拽），
+    // 设置下拉落在面板上的点击收起后继续生效（owner 下拉钮吞掉，防刚收即重开）
+    if (menu_.open) {
+      if (menu_.contains(mx, my)) return 0;
+      const int owner = settingsMenuOwner_;  // closeMenu 会复位，先取
+      closeMenu();
+      if (!settings_.open) return 0;
       const int idx = settings_.hit(mx, my);
-      if (settings_.dropOpen() &&
-          (idx < 0 || settings_.ctrl(idx).kind != SettingsPanel::Ctrl::DropItem)) {
-        const int owner = settings_.dropOwner();
-        settings_.closeDrop();
-        if (idx < 0 || idx == owner) { render(); return 0; }
-      }
-      if (idx >= 0) activateSettings(idx);
+      if (idx < 0 || idx == owner) { render(); return 0; }
+      activateSettings(idx);
       return 0;
     }
-    // 菜单打开期间：菜单外左键 = 收起（吞掉，不触发按压/拖拽）；菜单内由
-    // WM_LBUTTONUP 激活条目
-    if (menu_.open) {
-      if (!menu_.contains((int)(short)LOWORD(lp), (int)(short)HIWORD(lp)))
-        closeMenu();
+    // 设置面板打开期间：左键一律走面板命中（不按压/不起拖）
+    if (settings_.open) {
+      const int idx = settings_.hit(mx, my);
+      if (idx >= 0) activateSettings(idx);
       return 0;
     }
     // 按压反馈（沉浸光感：scale .9 + 扩散环）与拖拽预备共存：
@@ -1351,13 +1452,13 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     return 0;
   }
   case WM_LBUTTONUP:
-    if (settings_.open) return 0;  // 面板期间：按下侧已吞/处理，松开无事
-    // 菜单打开期间：松开落在可点条目上 → 激活（按下侧已在 WM_LBUTTONDOWN 吞掉）
+    // 菜单打开期间：松开落在可点条目上 → 激活（按下侧已在 WM_LBUTTONDOWN 吞掉/收起）
     if (menu_.open) {
       const int idx = menu_.hit((int)(short)LOWORD(lp), (int)(short)HIWORD(lp));
       if (idx >= 0) activateMenu(idx);
       return 0;
     }
+    if (settings_.open) return 0;  // 面板期间：按下侧已吞/处理，松开无事
     if (dragArmed_) {
       // ReleaseCapture 会同步派发 WM_CAPTURECHANGED（其处理器复位拖拽状态），
       // 必须先取标志再释放
@@ -1416,10 +1517,12 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     dragging_ = false;
     return 0;
   case WM_NCHITTEST:
-    // 设置面板打开时联合窗口横贯全屏：面板/下拉浮层/dock 球区以外回 HTTRANSPARENT
+    // 设置面板打开时联合窗口横贯全屏：面板/级联菜单/dock 球区以外回 HTTRANSPARENT
     // 穿透，否则中部透明区挡住桌面点击（屏幕坐标 → 客户区判定）
     if (settings_.open) {
       POINT pt{ (int)(short)LOWORD(lp), (int)(short)HIWORD(lp) };
+      if (menu_.open && PtInRect(&menuScreen_, pt))
+        return DefWindowProcW(hwnd_, msg, wp, lp);  // 级联菜单区可命中
       ScreenToClient(hwnd_, &pt);
       const RECT dz{ zoneDX_, zoneDY_, zoneDX_ + dockW_, zoneDY_ + winH_ };
       if (!settings_.contains(pt.x, pt.y) && !PtInRect(&dz, pt))
@@ -1428,7 +1531,7 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd_, msg, wp, lp);
   case WM_INPUT: {
     // 设置面板滚轮（NOACTIVATE 窗口收不到 WM_MOUSEWHEEL——滚轮消息发给焦点窗口；
-    // run() 注册 RIDEV_INPUTSINK 原始输入后台收轮）：浮层上滚浮层、体区上滚体区
+    // run() 注册 RIDEV_INPUTSINK 原始输入后台收轮）：滚体区内容
     if (!settings_.open) return 0;
     RAWINPUT raw{};
     UINT size = sizeof(raw);
@@ -1439,6 +1542,12 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
         (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL)) {
       POINT pt{};
       GetCursorPos(&pt);
+      // 体区滚动即收级联下拉（锚定行随滚动移位，原型 closeDrop 同款）；
+      // 收菜单会触发并集收窗，客户区坐标须在收窗后重取
+      if (menuForSettings_ && !PtInRect(&menuScreen_, pt)) {
+        closeMenu();
+        GetCursorPos(&pt);
+      }
       ScreenToClient(hwnd_, &pt);
       const int delta = (int)(short)raw.data.mouse.usButtonData;
       if (settings_.wheelAt(pt.x, pt.y, delta)) render();

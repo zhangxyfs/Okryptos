@@ -189,19 +189,29 @@ void GlassMenu::drawCol(render::D3DContext& d3d, render::IMaterial& material,
       dc->FillRoundedRectangle(&rr, brush_.Get());
     }
     brush_->SetColor(render::glassfx::ink(e.kind == MenuEntry::Disabled ? 0.35f : 0.90f));
-    const D2D1_RECT_F tr =
-        D2D1::RectF(x0 + kItemPadX, y0, x1 - kItemPadX - kTickW, y1);
+    // 向左展开的父项：◂ 占行首 kTickW，文本右移；其余文本贴行首、行尾留给 ✓/▸
+    const bool leftArrow = e.kind == MenuEntry::Parent && subDir < 0;
+    const float tx = x0 + kItemPadX + (leftArrow ? kTickW : 0.0f);
+    const D2D1_RECT_F tr = D2D1::RectF(tx, y0, x1 - kItemPadX - kTickW, y1);
     dc->DrawText(e.label.c_str(), (UINT32)e.label.size(), itemFmt_.Get(), &tr,
                  brush_.Get());
     if (e.kind == MenuEntry::Parent) {
-      // ▸ 展开指示（两笔描边）
+      // 展开指示随子列方向：向右 ▸ 于行尾，向左 ◂ 于行首（两笔描边）
       brush_->SetColor(render::glassfx::ink(0.50f));
-      const float cx = x1 - kItemPadX - 6.0f;
       const float cy = (y0 + y1) * 0.5f;
-      dc->DrawLine(D2D1::Point2F(cx - 1.5f, cy - 4.5f),
-                   D2D1::Point2F(cx + 3.5f, cy), brush_.Get(), 1.6f);
-      dc->DrawLine(D2D1::Point2F(cx + 3.5f, cy),
-                   D2D1::Point2F(cx - 1.5f, cy + 4.5f), brush_.Get(), 1.6f);
+      if (subDir < 0) {
+        const float cx = x0 + kItemPadX + 6.0f;
+        dc->DrawLine(D2D1::Point2F(cx + 1.5f, cy - 4.5f),
+                     D2D1::Point2F(cx - 3.5f, cy), brush_.Get(), 1.6f);
+        dc->DrawLine(D2D1::Point2F(cx - 3.5f, cy),
+                     D2D1::Point2F(cx + 1.5f, cy + 4.5f), brush_.Get(), 1.6f);
+      } else {
+        const float cx = x1 - kItemPadX - 6.0f;
+        dc->DrawLine(D2D1::Point2F(cx - 1.5f, cy - 4.5f),
+                     D2D1::Point2F(cx + 3.5f, cy), brush_.Get(), 1.6f);
+        dc->DrawLine(D2D1::Point2F(cx + 3.5f, cy),
+                     D2D1::Point2F(cx - 1.5f, cy + 4.5f), brush_.Get(), 1.6f);
+      }
     } else if (e.tick) {
       // ✓ 用描边画（Segoe UI 字形回退不稳，两笔更脆且与原型 tick 同义）
       brush_->SetColor(render::glassfx::accentC(1.0f));

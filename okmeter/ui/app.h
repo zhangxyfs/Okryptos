@@ -57,7 +57,7 @@ public:
   // shotPath 非空 = 自检截图模式：启动后强制展开中心球，2.5s 后存 PNG 退出；
   // shotMenuSlot != -2 时截图前打开自绘菜单（-1=空白菜单，≥0=该槽位球菜单）；
   // shotSettings=true 时截图前打开背板设置面板（180ms 滑入播完后落盘）；
-  // shotDropSlot ≥0 时同时打开该槽位的指标下拉浮层
+  // shotDropSlot ≥0 时同时打开该槽位的指标级联映射菜单
   int run(HINSTANCE inst, const std::wstring& shotPath = L"", int shotMenuSlot = -2,
           bool shotSettings = false, int shotDropSlot = -1,
           bool shotCollapsed = false);
@@ -83,8 +83,9 @@ private:
   void rebuildItems();    // resolveBindings + 文本缓存（值/短名/占比）+ 详情卡重组
   void rebuildCard();     // 按 hoverIdx 组装详情卡（hover 变化/数据刷新时调用）
   void rebuildLayout();   // 工作区/边 → dockW_/winH_/winY_ 重算 + applyWindowPos
-  // 统一窗口矩形：基础（弹簧 e + 卡区 wide）∪ 菜单屏幕矩形（菜单打开时）；
-  // zoneDX_/zoneDY_ = 球区在窗口内的偏移（卡区/菜单区让位），SetWindowPos 落窗
+  // 统一窗口矩形：基础（弹簧 e + 卡区 wide）∪ 菜单屏幕矩形 ∪ 设置面板矩形
+  //（先并集后放置：菜单/面板都按最终原点定位）；zoneDX_/zoneDY_ = 球区在窗口内
+  // 的偏移（卡区/菜单区/面板区让位），SetWindowPos 落窗
   void applyWindowPos();
   void syncClickThru();  // 设置面板期按指针位置动态开关整窗 WS_EX_TRANSPARENT
   void updatePosition() { applyWindowPos(); }
@@ -105,6 +106,12 @@ private:
   void closeMenu();
   void activateMenu(int idx);
   void applyMenuMapping(std::string v);  // 叶项映射落盘（按值：closeMenu 会清空子列向量，引用会悬空）
+  // 设置面板指标下拉：复用右键同一 GlassMenu 的侧向级联（默认 + 总量/模型父项，
+  // 箭头随展开方向：向左 ◂ 向右 ▸），主列锚定 gsel 行下方（放不下翻上）、
+  // 子列朝屏内侧逐级展开；叶项只改 draft（两段式保存，不即时落盘）
+  void openSettingsMenu(int gselCtrl);
+  void placeSettingsMenu();  // 主列锚定 owner gsel 行（下展优先，放不下翻上）
+  std::string mappingOf(int slot) const;  // 当前映射值（设置菜单取 draft，球区菜单取 cfg）
   double menuAnimT() const;  // 弹出动画进度（0..1，ease-dock 缓动）
   // 背板设置面板：打开（draft=cfg 副本 + 模型枚举 + 对侧屏缘定位 + 并集扩窗）/
   // 关闭（apply=true → normalize+saveConfig+createModules 全量 rebuild；false 丢弃）
@@ -147,8 +154,13 @@ private:
   bool wide_ = false;         // 窗口含 268px 卡区（展开态）
   render::DetailCard card_;   // 悬停详情卡缓存（rebuildCard 重组）
   GlassMenu menu_;            // 自绘右键菜单（open 时窗口并集扩出菜单区）
-  RECT menuScreen_{};         // 菜单屏幕矩形（打开时定位，扩窗/夹取基准）
+  RECT menuScreen_{};         // 菜单全列并集屏幕矩形（扩窗/外点收起判定）
+  RECT menuMainScreen_{};     // 主列自身屏幕矩形（级联展开后主列定位基准——
+                              // 勿用并集左缘，否则向左级联时每开一级主列左跳一列宽）
   LARGE_INTEGER menuOpenQpc_{};  // 菜单打开时刻（120ms 弹出动画计时）
+  int menuDir_ = -1;          // 菜单级联方向：-1=向左 +1=向右（球区菜单朝屏内；设置下拉朝面板内侧）
+  bool menuForSettings_ = false;  // 当前菜单是设置面板的指标级联下拉（叶项改 draft）
+  int settingsMenuOwner_ = -1;    // 设置下拉的 owner gsel 控件下标（收拢后吞 owner 点击防重开）
   SettingsPanel settings_;    // 背板设置面板（open 时窗口并集扩出面板区）
   RECT panelScreen_{};        // 面板屏幕矩形（dock 对侧屏缘，打开时定位）
   LARGE_INTEGER panelOpenQpc_{}; // 面板打开时刻（180ms 滑入动画计时）
