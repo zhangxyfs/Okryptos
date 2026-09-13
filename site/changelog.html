@@ -116,7 +116,8 @@
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
       <div class="group-title">2.26.x</div>
-      <a href="#v2-26-0"><span><span class="latest-dot"></span>v2.26.0</span><span class="d">09-13</span></a>
+      <a href="#v2-26-1"><span><span class="latest-dot"></span>v2.26.1</span><span class="d">09-13</span></a>
+      <a href="#v2-26-0"><span>v2.26.0</span><span class="d">09-13</span></a>
     </div>
     <div class="group">
       <div class="group-title">2.25.x</div>
@@ -215,8 +216,32 @@
       </div>
     </div>
 
+    <section class="ver" id="v2-26-1">
+      <div class="ver-head"><h2>v2.26.1</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-09-13</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2261.f1">OkMeter 支持九家 Agent 采集：Kimi Code 之外新增 Claude Code、Codex、Qwen Code、ZCode、WorkBuddy、Reasonix、OpenHanako、DeepSeek Harness 八个适配器——各家本地会话日志的 token 用量自动进统计，右键「模型」菜单按工具分组呈现；各目录均有变更监听，有新数据即时刷新</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-improve" data-i18n="t.improve">改进</span>
+        <ul>
+          <li data-i18n="c.2261.i1">波形流形态启动即有全宽平线，不再等历史数据攒够；流向随缘镜像——dock 在屏幕左缘时从右往左流、在右缘时从左往右流，"现在"恒定朝向屏幕中心</li>
+          <li data-i18n="c.2261.i2">右键菜单打开期间不再叠加悬停详情卡；设置面板指标映射下拉改用与右键一致的多级级联菜单，修复菜单自行左跑与被设置面板遮挡的问题</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2261.n1">各家 Agent 的 token 口径已做归一（缓存读/缓存写单独拆分）；OpenCode 因用量存在 sqlite 中暂不支持</li>
+          <li data-i18n="c.2261.n2">DeepSeek Harness 的会话日志为压缩格式，统计走其会话投影缓存，模型名按默认配置近似</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-26-0">
-      <div class="ver-head"><h2>v2.26.0</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-09-13</time></div>
+      <div class="ver-head"><h2>v2.26.0</h2><time>2026-09-13</time></div>
       <div class="chg">
         <span class="tag tag-new" data-i18n="t.new">新功能</span>
         <ul>
