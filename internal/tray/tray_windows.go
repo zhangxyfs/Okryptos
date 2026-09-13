@@ -35,6 +35,7 @@ const (
 	idiApplication   = 32512
 	idMenuQuit       = 1001
 	idMenuCheckUpdate = 1002
+	idMenuOkmeter    = 1003
 	hwndMessage      = ^uintptr(2) // (HWND)-3
 )
 
@@ -116,6 +117,7 @@ type Tray struct {
 	version       string
 	openGUI       func() uintptr
 	onCheckUpdate func()
+	onOkmeter     func()
 	onQuit        func()
 	hwnd          uintptr // 消息窗口
 	threadID      uint32
@@ -129,10 +131,11 @@ var current *Tray
 
 // Run 创建托盘图标并跑消息循环，阻塞至 ctx 取消（daemon 退出链路）。
 // openGUI 打开浏览器 GUI 并返回新窗口 hwnd；onCheckUpdate 由菜单"检查更新"触发
-// （开浏览器直达 misc 页版本卡）；onQuit 由菜单"退出"触发。
-func Run(ctx context.Context, version string, openGUI func() uintptr, onCheckUpdate func(), onQuit func()) {
+// （开浏览器直达 misc 页版本卡）；onOkmeter 由菜单"Token 监视器"触发（拉起
+// 同目录 OkMeter.exe）；onQuit 由菜单"退出"触发。onOkmeter 为 nil 时菜单项隐藏。
+func Run(ctx context.Context, version string, openGUI func() uintptr, onCheckUpdate func(), onOkmeter func(), onQuit func()) {
 	runtime.LockOSThread() // 消息队列绑定线程：锁定防 goroutine 迁移，不解锁（线程专职消息循环）
-	t := &Tray{version: version, openGUI: openGUI, onCheckUpdate: onCheckUpdate, onQuit: onQuit}
+	t := &Tray{version: version, openGUI: openGUI, onCheckUpdate: onCheckUpdate, onOkmeter: onOkmeter, onQuit: onQuit}
 	current = t
 	defer func() { current = nil }()
 	if err := t.init(); err != nil {
@@ -252,6 +255,10 @@ func (t *Tray) showMenu() {
 	procAppendMenuW.Call(menu, mfSeparator, 0, 0)
 	checkUpd, _ := windows.UTF16PtrFromString("检查更新")
 	procAppendMenuW.Call(menu, mfString, idMenuCheckUpdate, uintptr(unsafe.Pointer(checkUpd)))
+	if t.onOkmeter != nil {
+		om, _ := windows.UTF16PtrFromString("Token 监视器")
+		procAppendMenuW.Call(menu, mfString, idMenuOkmeter, uintptr(unsafe.Pointer(om)))
+	}
 	quit, _ := windows.UTF16PtrFromString("退出")
 	procAppendMenuW.Call(menu, mfString, idMenuQuit, uintptr(unsafe.Pointer(quit)))
 
@@ -265,6 +272,9 @@ func (t *Tray) showMenu() {
 	// （同 openOrFocus 注释的 M-05 理由）；结果窗口不需聚焦管理，fire-and-forget。
 	if cmd == idMenuCheckUpdate && t.onCheckUpdate != nil {
 		go t.onCheckUpdate()
+	}
+	if cmd == idMenuOkmeter && t.onOkmeter != nil {
+		go t.onOkmeter()
 	}
 	if cmd == idMenuQuit && t.onQuit != nil {
 		t.onQuit()

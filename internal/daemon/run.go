@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -136,6 +137,22 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 				// index.html 抹 token 时 replaceState 只保留 pathname+search，
 				// hash 里的参数活不到 app.js
 				func() { OpenBrowserFunc(info.URL() + "/?go=misc#token=" + info.Token) },
+				// Token 监视器：拉起同目录 OkMeter.exe（单实例守卫在 OkMeter 侧，
+				// 重复点击静默退出不叠实例）；不存在则该项为空时菜单隐藏
+				func() {
+					exe, err := os.Executable()
+					if err != nil {
+						return
+					}
+					om := filepath.Join(filepath.Dir(exe), "OkMeter.exe")
+					if _, err := os.Stat(om); err != nil {
+						fmt.Fprintf(stderr, "okmeter: %s 不存在\n", om)
+						return
+					}
+					if err := exec.Command(om).Start(); err != nil {
+						fmt.Fprintf(stderr, "okmeter: 拉起失败 %v\n", err)
+					}
+				},
 				func() { go func() { _ = srv.Shutdown(context.Background()) }() })
 		}()
 	}

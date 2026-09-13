@@ -31,7 +31,7 @@ build\okmeter-tests.exe || (popd & exit /b 1)
 
 echo [3/3] 编译 OkMeter.exe...
 rc /nologo /fo build\version.res version.rc || (popd & exit /b 1)
-cl %FLAGS% app\main.cpp %CORE% %ADAPT% %UI_CORE% %UI_WIN% %RENDER% build\version.res %SYSLIBS% /Fo:build\ /Fe:build\OkMeter.exe || (popd & exit /b 1)
+cl %FLAGS% app\main.cpp %CORE% %ADAPT% %UI_CORE% %UI_WIN% %RENDER% build\version.res %SYSLIBS% /Fo:build\ /Fe:build\OkMeter.exe /link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup || (popd & exit /b 1)
 
 echo 完成：build\OkMeter.exe
 popd

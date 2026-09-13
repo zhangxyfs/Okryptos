@@ -60,6 +60,17 @@ static std::wstring argWide(const char* s) {
 
 int main(int argc, char** argv) {
   if (argc > 1 && std::string(argv[1]) == "--scan") return runSmoke();
+  // 单实例守卫（托盘拉起/双击重复启动静默退出；自检 --shot 系列不受限——
+  // 自检实例 2.5s 自毁，不与常驻实例互斥）
+  const bool isShot = argc > 2 && std::string(argv[1]).rfind("--shot", 0) == 0;
+  HANDLE instMutex = nullptr;
+  if (!isShot) {
+    instMutex = CreateMutexW(nullptr, TRUE, L"Global\\OkMeter.SingleInstance");
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+      if (instMutex) CloseHandle(instMutex);
+      return 0;  // 已有实例：静默退出（托盘重复拉起语义）
+    }
+  }
   DockApp app;
   if (argc > 2 && std::string(argv[1]) == "--shot")
     return app.run(GetModuleHandleW(nullptr), argWide(argv[2]));

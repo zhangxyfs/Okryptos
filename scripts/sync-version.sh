@@ -38,6 +38,16 @@ for f in cmd/ok/winres.json cmd/okd/winres.json cmd/okmanager/winres.json cmd/ok
   fi
 done
 
+# OkMeter（C++）version.rc：FILEVERSION/PRODUCTVERSION 逗号四段 + StringFileInfo 字符串四段
+VC="$(echo "$VERSION.0" | tr '.' ',')"
+f=okmeter/version.rc
+if grep -q "\"FileVersion\", \"${VERSION4}" "$f" && grep -q "^FILEVERSION ${VC}" "$f"; then
+  echo "$f: 已是 ${VERSION4}，无需变更"
+else
+  sed -i -E "s~^(FILEVERSION|PRODUCTVERSION) [0-9,.]+~\1 ${VC}~; s~\"(FileVersion|ProductVersion)\", \"[0-9.]+~\"\1\", \"${VERSION4}~g" "$f"
+  echo "$f: 版本资源 → ${VERSION4}"
+fi
+
 # 官网：VER 变量、Release 直链、安装/下载文案里的版本号
 # 覆盖 site/index.html（VER + 直链 + version 徽标）、site/changelog.html（下载按钮文案）、
 # site/assets/site.js（英文字典里的直链与文案）

@@ -23,6 +23,14 @@ done
 go build -ldflags "-s -w -H windowsgui -X okryptos/internal/version.Version=$VERSION" -o dist/ok.exe ./cmd/ok
 go build -ldflags "-s -w -H windowsgui -X okryptos/internal/version.Version=$VERSION" -o dist/okd.exe ./cmd/okd
 go build -ldflags "-s -w -H windowsgui -X okryptos/internal/version.Version=$VERSION" -o dist/OkManager.exe ./cmd/okmanager
+# OkMeter（C++ 原生 token 监视器）：MSVC 构建（单测+exe 一体）。
+# 注意：本机有 OkMeter 实例在跑会占用 exe 导致 LNK1104——发布前先关掉运行实例
+MSYS_NO_PATHCONV=1 cmd //c "okmeter\\build.bat" > /dev/null || {
+  echo "错误：okmeter 构建失败（若有运行中的 OkMeter 实例请先关闭）" >&2
+  exit 1
+}
+[ -f okmeter/build/OkMeter.exe ] || { echo "错误：okmeter/build/OkMeter.exe 未产出" >&2; exit 1; }
+cp okmeter/build/OkMeter.exe dist/OkMeter.exe
 # okdeploy 一键部署器：独立 artifact（dist/deploy/），不进安装包（iss 不打 dist/deploy）
 mkdir -p dist/deploy
 go build -ldflags "-s -w -H windowsgui -X okryptos/internal/version.Version=$VERSION" -o dist/deploy/okdeploy-windows-amd64.exe ./cmd/okdeploy
