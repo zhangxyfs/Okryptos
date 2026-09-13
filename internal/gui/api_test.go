@@ -1722,6 +1722,53 @@ func TestGateGlobalDefault(t *testing.T) {
 	}
 }
 
+// /api/okmeter：全局开关 okmeter_enabled 的 GET 默认值（缺文件 = true）/
+// POST 落盘 / 复读 / 重复设置幂等（顶层键唯一且不落入任何小节）。
+func TestOKMeterRoundTrip(t *testing.T) {
+	h, _, okHome := newEnv(t)
+	mkProject(t, okHome, "demo")
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	globalCfg := filepath.Join(okHome, "config.toml")
+	projCfg := filepath.Join(okHome, "projects", "demo", "config.toml")
+
+	// 缺省 GET → 默认 enabled=true（缺省/不存在即 true）
+	code, data := do(t, "GET", srv.URL+"/api/okmeter", testToken, nil)
+	if code != 200 || !strings.Contains(string(data), `"enabled":true`) {
+		t.Fatalf("okmeter get default: status = %d, body %s", code, data)
+	}
+	// POST enabled=false → 全局落盘顶层键
+	code, data = do(t, "POST", srv.URL+"/api/okmeter", testToken, map[string]any{"enabled": false})
+	if code != 200 || !strings.Contains(string(data), `"enabled":false`) {
+		t.Fatalf("okmeter set: status = %d, body %s", code, data)
+	}
+	gData, err := os.ReadFile(globalCfg)
+	if err != nil {
+		t.Fatalf("global config not written: %v", err)
+	}
+	if !strings.Contains(string(gData), "okmeter_enabled = false") {
+		t.Fatalf("global config should contain okmeter_enabled = false: %q", gData)
+	}
+	// 项目 config 不得被写（端点仅全局）
+	if _, err := os.Stat(projCfg); !os.IsNotExist(err) {
+		t.Fatalf("project config must stay untouched, stat err = %v", err)
+	}
+	// 复读 → enabled=false
+	code, data = do(t, "GET", srv.URL+"/api/okmeter", testToken, nil)
+	if code != 200 || !strings.Contains(string(data), `"enabled":false`) {
+		t.Fatalf("okmeter re-get: status = %d, body %s", code, data)
+	}
+	// 再设 true → 原位替换而非重复追加
+	code, _ = do(t, "POST", srv.URL+"/api/okmeter", testToken, map[string]any{"enabled": true})
+	if code != 200 {
+		t.Fatalf("okmeter re-enable: status = %d", code)
+	}
+	gData, _ = os.ReadFile(globalCfg)
+	if strings.Count(string(gData), "okmeter_enabled") != 1 || !strings.Contains(string(gData), "okmeter_enabled = true") {
+		t.Fatalf("okmeter_enabled 应唯一且为 true: %q", gData)
+	}
+}
+
 // /api/inject：mandatory_max_tokens 的 GET 默认值 / POST 落盘 / 非法值 400 / 重复设置幂等。
 func TestInjectMandatoryMaxRoundTrip(t *testing.T) {
 	h, _, okHome := newEnv(t)

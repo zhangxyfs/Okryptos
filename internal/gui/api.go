@@ -92,6 +92,8 @@ func NewHandler(webDir, token string, beats chan<- struct{}) *Handler {
 	api("POST /api/capture", h.apiCaptureSet)
 	api("GET /api/gate", h.apiGateGet)
 	api("POST /api/gate", h.apiGateSet)
+	api("GET /api/okmeter", h.apiOKMeterGet)
+	api("POST /api/okmeter", h.apiOKMeterSet)
 	api("GET /api/inject", h.apiInjectGet)
 	api("POST /api/inject", h.apiInjectSet)
 	api("GET /api/retrieve", h.apiRetrieveGet)
@@ -1567,6 +1569,43 @@ func (h *Handler) apiGateSet(w http.ResponseWriter, r *http.Request) {
 		"builtin": retrieve.BuiltinPhrases(),
 		"extra":   extra,
 	})
+}
+
+// apiOKMeterGet 返回 token 统计工具（OkMeter）自动拉起开关：全局 config.toml
+// 顶层键 okmeter_enabled，缺省 true。
+func (h *Handler) apiOKMeterGet(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.Load(globalConfigPath())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": cfg.OKMeterEnabled})
+}
+
+// apiOKMeterSet 切换 OkMeter 自动拉起开关（即开即存，仅存全局 config.toml）；
+// enabled 缺省（null）= 不变。落盘走 config.SetOKMeterEnabled（顶层键 upsert）。
+func (h *Handler) apiOKMeterSet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	cfgPath := globalConfigPath()
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	enabled := cfg.OKMeterEnabled
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+		if err := config.SetOKMeterEnabled(cfgPath, enabled); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled})
 }
 
 // cleanGatePhrases 校验并清洗 extra 短语：trim+折叠连续空白、按归一化形去重、

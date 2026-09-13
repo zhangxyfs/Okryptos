@@ -5,6 +5,6 @@ package tray
 import "context"
 
 // Run 非 Windows 平台无托盘，阻塞至 ctx 取消。
-func Run(ctx context.Context, version string, openGUI func() uintptr, onCheckUpdate func(), onQuit func()) {
+func Run(ctx context.Context, version string, openGUI func() uintptr, onCheckUpdate func(), onOkmeter func(), onQuit func()) {
 	<-ctx.Done()
 }

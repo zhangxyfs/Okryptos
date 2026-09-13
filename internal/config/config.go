@@ -326,7 +326,11 @@ type Server struct {
 }
 
 type Config struct {
-	Embedding  Embedding     `toml:"embedding"`
+	// OKMeterEnabled 控制 token 统计工具（OkMeter）是否随 okd 自动拉起；默认 true
+	//（见 Default——缺省/不存在即 true，显式写 false 才关闭）。仅存全局
+	// config.toml 顶层键（顶层键必须位于首个小节前，见 SetOKMeterEnabled）。
+	OKMeterEnabled bool          `toml:"okmeter_enabled"`
+	Embedding       Embedding     `toml:"embedding"`
 	Inject     Inject        `toml:"inject"`
 	Retrieve   Retrieve      `toml:"retrieve"`
 	Enforce    []EnforceRule `toml:"enforce"`
@@ -346,7 +350,8 @@ type Config struct {
 
 func Default() Config {
 	return Config{
-		Embedding:  Embedding{TimeoutSec: 5},
+		OKMeterEnabled: true,
+		Embedding:      Embedding{TimeoutSec: 5},
 		Inject:     Inject{MaxTokens: 800, MandatoryMaxTokens: 2000},
 		Retrieve:   Retrieve{Alpha: 1.0, Beta: 1.0, TopN: 2, DedupTurns: 3, MinScore: 0.5, MinGap: 0.25, Fusion: "rrf", RrfK: 60,
 			Gate:    RetrieveGate{Enabled: true},

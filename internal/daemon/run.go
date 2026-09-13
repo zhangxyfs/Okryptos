@@ -176,6 +176,8 @@ func Run(webDir string, stdout, stderr io.Writer) int {
 	}
 	defer chatMgr.Stop()
 	go chatJanitor(chatMgr)
+	// OkMeter（token 统计工具）保活：全局开关开 + 同目录 exe 在位 + 未运行 → 随 okd 拉起
+	go okmeterJanitor(stderr)
 	// 同步 ticker：每分钟检查一轮，启用同步且到点的项目跑 SyncOnce（失败仅记日志）
 	startSyncJanitor(stdout)
 	fmt.Fprintf(stdout, "Okryptos daemon: %s\n", info.URL())

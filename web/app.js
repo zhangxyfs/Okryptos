@@ -110,6 +110,8 @@ const I18N = {
     lNone:"未配置（✨ 优化不可用）",
     hTitle:"Hook 超时", hDesc:"写入各 agent hooks 的超时秒数。2026-08-04 曾发生 Windows 高负载下 5s 超时致 PostToolUse 整会话静默丢失，故默认 10", hSec:"超时（秒）",
     gtTitle:"泛化门控", gtDesc:"命中内置/自定义短语的泛化 prompt 跳过检索注入与 embed 调用；全局生效（对所有项目生效）",
+    omTitle:"Token 统计工具", omDesc:"开启后，okd 运行时自动拉起 token 监视器（OkMeter）；关闭后不再自动拉起",
+    omOn:"自动拉起 OkMeter",
     gtOn:"启用门控", gtStatus:"内置 {b} 条 · 自定义 {n} 条", gtManage:"管理短语表",
     gtBuiltin:"内置短语（只读，随版本演进）", gtCustom:"自定义短语", gtAdd:"+ 添加", gtPh:"新短语…",
     eDlReady:"✓ 模型已就绪（{dim} 维），sidecar 按需拉起、空闲自动退出",
@@ -339,6 +341,8 @@ const I18N = {
     lNone:"Not configured (✨ polish unavailable)",
     hTitle:"Hook timeout", hDesc:"Timeout seconds written into each agent's hooks. On 2026-08-04 a 5s timeout under Windows load silently dropped PostToolUse for an entire session — hence default 10", hSec:"Timeout (s)",
     gtTitle:"Generalization gate", gtDesc:"Prompts matching builtin/custom phrases skip retrieval injection and embed calls; applies globally to all projects",
+    omTitle:"Token meter", omDesc:"When on, okd automatically launches the token meter (OkMeter) while running; when off, it is no longer auto-launched",
+    omOn:"Auto-launch OkMeter",
     gtOn:"Enable gate", gtStatus:"{b} builtin · {n} custom", gtManage:"Manage phrases",
     gtBuiltin:"Builtin phrases (read-only, evolve with releases)", gtCustom:"Custom phrases", gtAdd:"+ Add", gtPh:"New phrase…",
     eDlReady:"✓ Model ready ({dim} dim); sidecar starts on demand and exits when idle",
@@ -4050,7 +4054,7 @@ function flashPrefs(key){
   setTimeout(()=>{ prefsFb[key] = false; clearFb("prefs:"+key); }, 1500);   // 同 pSave：只摘除反馈节点不整页重渲
 }
 function loadPrefs(){ PREFS = lazyPage(PREFS, { errs:{} }, refreshPrefs); }
-// 聚合拉取（多请求并行，非新聚合端点）；冷却/沉淀/门控/规则四件为全局配置，不带 project
+// 聚合拉取（多请求并行，非新聚合端点）；冷却/沉淀/门控/规则/token统计五件为全局配置，不带 project
 function refreshPrefs(){
   api("/api/status").then(st=>{
     const project = (st.projects && st.projects[0] && st.projects[0].name) || "";
@@ -4058,7 +4062,7 @@ function refreshPrefs(){
       emb: api("/api/setup/embedding"+(project?"?project="+encodeURIComponent(project):"")),
       llm: api("/api/llm"),
       retr: api("/api/retrieve"), cap: api("/api/capture"),
-      gate: api("/api/gate"), rules: api("/api/enforce/rules"),
+      gate: api("/api/gate"), om: api("/api/okmeter"), rules: api("/api/enforce/rules"),
     };
     const keys = Object.keys(jobs);
     return Promise.all(keys.map(k=>jobs[k].catch(e=>({ __err:e.message })))).then(vals=>{
@@ -4360,6 +4364,31 @@ function renderPrefs(){
     const mg = el("button","btn"); mg.textContent = t("gtManage");
     mg.onclick = ()=>{ gateDraft = (g.extra||[]).slice(); gateErr = ""; gateModal = true; render(); };
     right.appendChild(mg);
+    r.appendChild(right);
+    c.appendChild(r);
+    d.appendChild(c);
+  }
+  // 7.5 Token 统计工具（全局）：开关即开即存，泛化门控同款单行卡（无保存按钮）
+  if(PREFS.errs.om){
+    d.appendChild(prefsNoteCard(t("omTitle"), t("omDesc"), t("xLoadFail")+PREFS.errs.om, true));
+  } else {
+    const c = el("div","pcard");
+    c.appendChild(Object.assign(el("h3"),{textContent:t("omTitle")}));
+    c.appendChild(Object.assign(el("div","pdesc"),{textContent:t("omDesc")}));
+    const r = el("div","prow"); r.style.margin = "0";
+    r.appendChild(Object.assign(el("span","k"),{textContent:t("omOn")}));
+    const o = PREFS.om || { enabled:true };   // 缺省 true：与后端 okmeter_enabled 默认语义一致
+    r.appendChild(pswitch(!!o.enabled, ()=>{
+      const want = !o.enabled;
+      prefsErr.om = "";
+      api("/api/okmeter", { method:"POST", body:{ enabled:want } }).then(nr=>{
+        PREFS.om = nr; flashPrefs("om");
+      }).catch(err=>{ prefsErr.om = err.message; render(); });
+    }));
+    const right = el("span");
+    right.style.cssText = "margin-left:auto;display:flex;align-items:center;gap:10px;flex:none";
+    if(prefsFb.om) right.appendChild(savedFb("prefs:om"));
+    if(prefsErr.om) right.appendChild(Object.assign(el("span","fb2 err"),{textContent:prefsErr.om}));
     r.appendChild(right);
     c.appendChild(r);
     d.appendChild(c);
