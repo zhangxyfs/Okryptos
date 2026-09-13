@@ -15,12 +15,17 @@
 html { scroll-behavior: smooth; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  background: var(--bg);
-  color: var(--text);
   line-height: 1.7;
   -webkit-font-smoothing: antialiased;
   /* 兜底：任何意外超宽元素都不再产生页面级横向滚动（clip 不影响 sticky 定位） */
   overflow-x: clip;
+  /* 浅色主视觉同语言：极淡的蓝/青径向光晕 fixed 底纹 */
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(1100px 560px at 82% -12%, rgba(37,99,235,.055), transparent 62%),
+    radial-gradient(880px 480px at 6% -6%, rgba(14,165,233,.045), transparent 58%);
+  background-attachment: fixed;
+  color: var(--text);
 }
 .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
 
@@ -51,8 +56,11 @@ nav .links a.active { color: var(--primary); font-weight: 600; }
   transition: transform .15s, box-shadow .15s, background .15s;
 }
 .btn:hover { transform: translateY(-2px); }
-.btn-primary { background: var(--primary); color: #fff; box-shadow: 0 4px 14px rgba(37,99,235,.35); }
-.btn-primary:hover { background: var(--primary-dark); }
+.btn-primary {
+  background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%); color: #fff;
+  box-shadow: 0 4px 16px rgba(37,99,235,.32), 0 0 28px rgba(14,165,233,.16);
+}
+.btn-primary:hover { background: linear-gradient(135deg, #1d4ed8 0%, #0284c7 100%); }
 .btn-ghost { background: #fff; color: var(--text); border: 1px solid var(--border); margin-left: 14px; }
 .btn-ghost:hover { border-color: var(--primary); color: var(--primary); }
 
