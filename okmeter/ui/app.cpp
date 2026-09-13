@@ -1,6 +1,7 @@
 #include "app.h"
 #include "../adapters/claude/adapter.h"
 #include "../adapters/codex/adapter.h"
+#include "../adapters/dsh/adapter.h"
 #include "../adapters/hanako/adapter.h"
 #include "../adapters/kimi/adapter.h"
 #include "../adapters/qwen/adapter.h"
@@ -1647,6 +1648,7 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   adapters_.push_back(std::make_unique<WorkbuddyAdapter>(workbuddyHome(), store_.get()));
   adapters_.push_back(std::make_unique<ReasonixAdapter>(reasonixHome(), store_.get()));
   adapters_.push_back(std::make_unique<HanakoAdapter>(hanakoHome(), store_.get()));
+  adapters_.push_back(std::make_unique<DshAdapter>(dshHome(), store_.get()));
   loadConfig(okmeterDir(), cfg_);
   cfg_.normalize();
   createModules();  // 形态/材质注册表创建（布局与渲染都经 form_）
@@ -1661,7 +1663,8 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
                                              workbuddyHome() / "projects",
                                              reasonixHome(),
                                              userProfile() / ".reasonix",
-                                             hanakoHome() / "logs" }) {
+                                             hanakoHome() / "logs",
+                                             dshHome() / "storages" }) {
     std::error_code ec;
     if (!std::filesystem::exists(root, ec)) continue;
     auto w = std::make_unique<DirWatcher>();

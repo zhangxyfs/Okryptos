@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS  // sscanf 解析固定格式时间戳（MSVC C4996 降噪）
 #include "adapter.h"
 #include "../../core/isotime.h"
 #include "../../core/minjson.h"

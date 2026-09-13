@@ -63,6 +63,14 @@ std::filesystem::path reasonixHome() {
 
 std::filesystem::path hanakoHome() { return homeOf(L"HANAKO_HOME", L".hanako"); }
 
+std::filesystem::path dshHome() {
+  for (const wchar_t* env : { L"OK_DSH_HOME", L"DSH_HOME" }) {
+    const std::wstring e = envOrEmpty(env);
+    if (!e.empty()) return std::filesystem::path(e);
+  }
+  return homeOf(L"", L".dsh");
+}
+
 std::filesystem::path okmeterDir() {
   const std::wstring up = envOrEmpty(L"USERPROFILE");
   std::filesystem::path base = up.empty() ? std::filesystem::path(".")
