@@ -28,6 +28,25 @@ std::filesystem::path kimiHome() {
   return std::filesystem::path(".kimi-code");
 }
 
+namespace {
+
+// env 优先，否则 USERPROFILE/<fallback>
+std::filesystem::path homeOf(const wchar_t* env, const wchar_t* fallback) {
+  const std::wstring e = envOrEmpty(env);
+  if (!e.empty()) return std::filesystem::path(e);
+  const std::wstring up = envOrEmpty(L"USERPROFILE");
+  if (!up.empty()) return std::filesystem::path(up) / fallback;
+  return std::filesystem::path(fallback);
+}
+
+} // namespace
+
+std::filesystem::path claudeHome() { return homeOf(L"CLAUDE_CONFIG_HOME", L".claude"); }
+
+std::filesystem::path codexHome() { return homeOf(L"CODEX_HOME", L".codex"); }
+
+std::filesystem::path qwenHome() { return homeOf(L"QWEN_HOME", L".qwen"); }
+
 std::filesystem::path okmeterDir() {
   const std::wstring up = envOrEmpty(L"USERPROFILE");
   std::filesystem::path base = up.empty() ? std::filesystem::path(".")

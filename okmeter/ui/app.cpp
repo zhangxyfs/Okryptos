@@ -1,5 +1,8 @@
 #include "app.h"
+#include "../adapters/claude/adapter.h"
+#include "../adapters/codex/adapter.h"
 #include "../adapters/kimi/adapter.h"
+#include "../adapters/qwen/adapter.h"
 #include "../core/fmt.h"
 #include "../core/paths.h"
 #include "../core/store.h"
@@ -284,7 +287,9 @@ void DockApp::rebuildCard() {
 
 void DockApp::pollData() {
   Aggregator& agg = store_->agg();
-  const int arrived = kimi_->poll([&](const UsageEvent& e) { agg.add(e); });
+  int arrived = 0;
+  for (auto& a : adapters_)
+    arrived += a->poll([&](const UsageEvent& e) { agg.add(e); });
   lastPollMs_ = nowMs();
   if (arrived > 0) {
     store_->flush();            // 零新事件不落盘（state.json 无变化，省一次原子写）
@@ -1079,7 +1084,9 @@ void DockApp::animTick() {
   const int64_t now = nowMs();
   if (now - lastWatchMs_ >= 500) {
     lastWatchMs_ = now;
-    if (watch_.signaled()) pollData();
+    bool hit = false;  // 每个 watcher 都要调 signaled（内含复位+重投），不能短路
+    for (auto& w : watchers_) hit = w->signaled() || hit;
+    if (hit) pollData();
   }
   // 菜单打开期间：Escape 收起；窗外点击收起（NOACTIVATE 窗口收不到 WM_KEYDOWN 与
   // 窗外点击，动画帧里 GetAsyncKeyState 沿检测兜底；窗内点击走消息处理同效收起）
@@ -1628,13 +1635,26 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   // 数据接线（单线程：全部对象随 UI 线程生灭）
   store_ = std::make_unique<Store>(okmeterDir());
   store_->load();
-  kimi_ = std::make_unique<KimiAdapter>(kimiHome(), store_.get());
+  adapters_.push_back(std::make_unique<KimiAdapter>(kimiHome(), store_.get()));
+  adapters_.push_back(std::make_unique<ClaudeAdapter>(claudeHome(), store_.get()));
+  adapters_.push_back(std::make_unique<CodexAdapter>(codexHome(), store_.get()));
+  adapters_.push_back(std::make_unique<QwenAdapter>(qwenHome(), store_.get()));
   loadConfig(okmeterDir(), cfg_);
   cfg_.normalize();
   createModules();  // 形态/材质注册表创建（布局与渲染都经 form_）
 
-  // 目录变更监听：RDCW 即时触发 poll；失败则 2s 轮询维持原行为（不退避）
-  watchActive_ = watch_.start(kimiHome() / "sessions");
+  // 目录变更监听：每个已存在的 agent 数据根一个 RDCW，触发即时 poll；
+  // 全部失败/目录不存在则 2s 轮询维持原行为（不退避）
+  for (const std::filesystem::path& root : { kimiHome() / "sessions",
+                                             claudeHome() / "projects",
+                                             codexHome(),
+                                             qwenHome() / "projects" }) {
+    std::error_code ec;
+    if (!std::filesystem::exists(root, ec)) continue;
+    auto w = std::make_unique<DirWatcher>();
+    if (w->start(root)) watchers_.push_back(std::move(w));
+  }
+  watchActive_ = !watchers_.empty();
 
   // 初始窗口：收缩态（e=0，右缘露出 24px）；起始落主屏工作区（hwnd 未创建，
   // workArea() 回退 SPI_GETWORKAREA），多屏位置由后续拖拽/重建接管
@@ -1712,9 +1732,12 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
       DispatchMessageW(&msg);
     }
   } else {
-    // 等待集 = 动画定时器 + RDCW 完成事件：帧时钟停摆期目录变更仍能即时唤醒 poll
-    HANDLE waitHandles[2] = { animTimer_, watch_.eventHandle() };
-    const DWORD nWait = waitHandles[1] ? 2 : 1;
+    // 等待集 = 动画定时器 + 各 RDCW 完成事件：帧时钟停摆期目录变更仍能即时唤醒 poll
+    HANDLE waitHandles[8];
+    DWORD nWait = 0;
+    waitHandles[nWait++] = animTimer_;
+    for (auto& w : watchers_)
+      if (w->eventHandle() && nWait < 8) waitHandles[nWait++] = w->eventHandle();
     for (;;) {
       MsgWaitForMultipleObjectsEx(nWait, waitHandles, INFINITE, QS_ALLINPUT,
                                   MWMO_INPUTAVAILABLE);
@@ -1727,7 +1750,9 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
           (void)CancelWaitableTimer(animTimer_);  // 防御：stopFrames 已取消，不应到达
         }
       }
-      if (watch_.signaled()) pollData();  // RDCW 触发提前 poll（signaled 内含复位+重投）
+      bool watchHit = false;  // 每个 watcher 都要调 signaled（内含复位+重投）
+      for (auto& w : watchers_) watchHit = w->signaled() || watchHit;
+      if (watchHit) pollData();  // RDCW 触发提前 poll
       bool quit = false;
       while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
         if (msg.message == WM_QUIT) { quit = true; break; }

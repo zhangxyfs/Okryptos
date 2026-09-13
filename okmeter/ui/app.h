@@ -21,7 +21,7 @@
 namespace okmeter {
 
 class Store;
-class KimiAdapter;
+class IAdapter;
 
 // 单线程契约：poll 与渲染读都在 UI 线程，由定时器串行驱动（aggregator.h 约定）。
 // 动画时钟为高分辨率可等待定时器 16ms（MsgWaitForMultipleObjectsEx 消息循环；
@@ -131,10 +131,10 @@ private:
   std::unique_ptr<render::IMaterial> material_;  // 材质（cfg.material，注册表创建）
   bool sessionNotif_ = false;         // WTS 会话通知已注册
   HWND hwnd_ = nullptr;
-  DirWatcher watch_;          // sessions 目录 RDCW 监听（start 失败则纯轮询）
+  std::vector<std::unique_ptr<DirWatcher>> watchers_;  // 各 agent 数据目录 RDCW 监听（空则纯轮询）
 
   std::unique_ptr<Store> store_;
-  std::unique_ptr<KimiAdapter> kimi_;
+  std::vector<std::unique_ptr<IAdapter>> adapters_;  // 各 agent 采集适配器（kimi/claude/codex/qwen）
   Config cfg_;
   std::vector<Binding> bindings_;
   std::vector<render::DockItem> items_;

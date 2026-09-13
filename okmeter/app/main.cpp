@@ -1,6 +1,9 @@
 // app/main.cpp —— 入口：默认启动 dock（Plan 2 起为产品形态）；
 // --scan 保留 Plan 1 控制台冒烟（扫描真实 home 打印各口径总量）
+#include "../adapters/claude/adapter.h"
+#include "../adapters/codex/adapter.h"
 #include "../adapters/kimi/adapter.h"
+#include "../adapters/qwen/adapter.h"
 #include "../core/aggregator.h"
 #include "../core/paths.h"
 #include "../core/store.h"
@@ -8,7 +11,9 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <string>
+#include <vector>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -31,13 +36,22 @@ static int runSmoke() {
   SetConsoleOutputCP(CP_UTF8);
   Store store(okmeterDir());
   store.load();
-  KimiAdapter kimi(kimiHome(), &store);
   Aggregator& agg = store.agg();
-  const int n = kimi.poll([&](const UsageEvent& e) { agg.add(e); });
+  struct Src { const char* id; std::unique_ptr<IAdapter> adapter; };
+  std::vector<Src> srcs;
+  srcs.push_back({"kimi", std::make_unique<KimiAdapter>(kimiHome(), &store)});
+  srcs.push_back({"claude", std::make_unique<ClaudeAdapter>(claudeHome(), &store)});
+  srcs.push_back({"codex", std::make_unique<CodexAdapter>(codexHome(), &store)});
+  srcs.push_back({"qwen", std::make_unique<QwenAdapter>(qwenHome(), &store)});
+  int n = 0;
+  for (auto& s : srcs) {
+    const int c = s.adapter->poll([&](const UsageEvent& e) { agg.add(e); });
+    std::printf("%-8s + %d new usage records\n", s.id, c);
+    n += c;
+  }
   store.flush();
 
-  std::printf("kimi-home: %s\n+ %d new usage records\n\n",
-              pathU8(kimiHome()).c_str(), n);
+  std::printf("\ntotal + %d\n\n", n);
   const int64_t now = nowMs();
   printSums("session", agg.session());
   printSums("today", agg.today(now));
