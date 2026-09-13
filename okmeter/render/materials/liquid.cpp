@@ -192,25 +192,45 @@ public:
     }
     if (!refracted) drawFrostFallback(dc, ctx);
 
-    // 不均匀边缘光（全玻璃与退化毛玻璃都画）：上/左亮、下/右暗。
+    // 指针光源（跟手光统一语义：球心→指针方向 + 320px 距离衰减），边缘光与
+    // 镜面高光共用；无指针时边缘光保持原型默认左上亮/右下暗
+    const glassfx::PtrLight L = glassfx::ptrLight(px_, py_, hasPtr_, c);
+
+    // 不均匀边缘光（全玻璃与退化毛玻璃都画）：上/左亮、下/右暗；有指针时亮侧
+    // 转向指针、暗侧背指针（liquid-glass-react 边框渐变角度跟手同款）。
     // 圆：环带几何直接填双向线性渐变（原型 inset 四向 box-shadow 组合）；
     // 胶囊：圆角矩形 2.5px 渐变描边两 pass（环带几何是圆专用）
     if (edgeBright_ && edgeDark_) {
+      const float exX = pill ? hw : r;
+      float bsx = c.x - exX, bsy = c.y - r;
+      float bex = c.x + 0.5f * exX, bey = c.y + 0.5f * r;
+      float dsx = c.x + exX, dsy = c.y + r;
+      float dex = c.x - 0.4f * exX, dey = c.y - 0.4f * r;
+      if (L.k > 0.01f) {
+        bsx = c.x + L.ux * exX;
+        bsy = c.y + L.uy * r;
+        bex = c.x - 0.5f * L.ux * exX;
+        bey = c.y - 0.5f * L.uy * r;
+        dsx = c.x - L.ux * exX;
+        dsy = c.y - L.uy * r;
+        dex = c.x + 0.4f * L.ux * exX;
+        dey = c.y + 0.4f * L.uy * r;
+      }
       if (!pill) {
         if (ComPtr<ID2D1Geometry> band = glassfx::ring(dc, c, r + 0.5f, r - 2.0f)) {
-          edgeBright_->SetStartPoint(D2D1::Point2F(c.x - r, c.y - r));
-          edgeBright_->SetEndPoint(D2D1::Point2F(c.x + 0.5f * r, c.y + 0.5f * r));
+          edgeBright_->SetStartPoint(D2D1::Point2F(bsx, bsy));
+          edgeBright_->SetEndPoint(D2D1::Point2F(bex, bey));
           dc->FillGeometry(band.Get(), edgeBright_.Get());
-          edgeDark_->SetStartPoint(D2D1::Point2F(c.x + r, c.y + r));
-          edgeDark_->SetEndPoint(D2D1::Point2F(c.x - 0.4f * r, c.y - 0.4f * r));
+          edgeDark_->SetStartPoint(D2D1::Point2F(dsx, dsy));
+          edgeDark_->SetEndPoint(D2D1::Point2F(dex, dey));
           dc->FillGeometry(band.Get(), edgeDark_.Get());
         }
       } else {
-        edgeBright_->SetStartPoint(D2D1::Point2F(c.x - hw, c.y - r));
-        edgeBright_->SetEndPoint(D2D1::Point2F(c.x + 0.5f * hw, c.y + 0.5f * r));
+        edgeBright_->SetStartPoint(D2D1::Point2F(bsx, bsy));
+        edgeBright_->SetEndPoint(D2D1::Point2F(bex, bey));
         glassfx::drawShape(dc, c, hw, r, edgeBright_.Get(), 2.5f, -1.25f, ctx.cornerR);
-        edgeDark_->SetStartPoint(D2D1::Point2F(c.x + hw, c.y + r));
-        edgeDark_->SetEndPoint(D2D1::Point2F(c.x - 0.4f * hw, c.y - 0.4f * r));
+        edgeDark_->SetStartPoint(D2D1::Point2F(dsx, dsy));
+        edgeDark_->SetEndPoint(D2D1::Point2F(dex, dey));
         glassfx::drawShape(dc, c, hw, r, edgeDark_.Get(), 2.5f, -1.25f, ctx.cornerR);
       }
     }
@@ -225,23 +245,39 @@ public:
       ctx.brush->SetColor(glassfx::deskDeep(0.60f * dim));
       glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
     }
-    // 跟指针镜面高光：边缘环带（58%~100% r）楔形指向光源，layer 不透明度 =
-    // 距离衰减强度（原型 --si = max(0, 1 - dist/320)）
-    const glassfx::PtrLight L = glassfx::ptrLight(px_, py_, hasPtr_, c);
-    if (fullGlass && L.k > 0.01f && specular_) {
-      if (ComPtr<ID2D1Geometry> band = glassfx::ring(dc, c, r, r * 0.58f)) {
+    // 跟指针镜面高光：圆球=边缘环带（58%~100% r）楔形指向光源；胶囊=形状域
+    // 裁剪径向光斑偏向指针侧边缘（无环带几何）。layer 不透明度 = 距离衰减
+    // 强度（原型 --si = max(0, 1 - dist/320)）
+    if (L.k > 0.01f && specular_) {
+      if (!pill && fullGlass) {
+        if (ComPtr<ID2D1Geometry> band = glassfx::ring(dc, c, r, r * 0.58f)) {
+          specular_->SetCenter(
+              D2D1::Point2F(c.x + L.ux * r * 0.79f, c.y + L.uy * r * 0.79f));
+          specular_->SetRadiusX(r * 0.9f);
+          specular_->SetRadiusY(r * 0.9f);
+          const D2D1_RECT_F bounds =
+              D2D1::RectF(c.x - r - 1.0f, c.y - r - 1.0f, c.x + r + 1.0f, c.y + r + 1.0f);
+          dc->PushLayer(D2D1::LayerParameters1(bounds, band.Get(),
+                                               D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                                               D2D1::Matrix3x2F::Identity(),
+                                               L.k * dim),
+                        nullptr);
+          dc->FillEllipse(&ball, specular_.Get());
+          dc->PopLayer();
+        }
+      } else if (pill) {
         specular_->SetCenter(
-            D2D1::Point2F(c.x + L.ux * r * 0.79f, c.y + L.uy * r * 0.79f));
-        specular_->SetRadiusX(r * 0.9f);
-        specular_->SetRadiusY(r * 0.9f);
-        const D2D1_RECT_F bounds =
-            D2D1::RectF(c.x - r - 1.0f, c.y - r - 1.0f, c.x + r + 1.0f, c.y + r + 1.0f);
-        dc->PushLayer(D2D1::LayerParameters1(bounds, band.Get(),
+            D2D1::Point2F(c.x + L.ux * hw * 0.72f, c.y + L.uy * r * 0.72f));
+        specular_->SetRadiusX(hw * 1.1f);
+        specular_->SetRadiusY(r * 1.6f);
+        const D2D1_RECT_F bounds = D2D1::RectF(c.x - hw - 1.0f, c.y - r - 1.0f,
+                                               c.x + hw + 1.0f, c.y + r + 1.0f);
+        dc->PushLayer(D2D1::LayerParameters1(bounds, nullptr,
                                              D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
                                              D2D1::Matrix3x2F::Identity(),
-                                             L.k * dim),
+                                             L.k * 0.55f * dim),
                       nullptr);
-        dc->FillEllipse(&ball, specular_.Get());
+        glassfx::fillShape(dc, c, hw, r, specular_.Get(), ctx.cornerR);
         dc->PopLayer();
       }
     }

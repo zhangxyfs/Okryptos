@@ -63,16 +63,19 @@ public:
         const float l = c.x - hw, t = c.y - hh;
         const float rgt = c.x + hw;
         // 顶行：左名 右值，padding 左右 13、上 8（原型 .cap .top）×比例
+        const bool halo = ctx.material && ctx.material->id() == "liquid";
         if (!di.label.empty()) {
           ctx.brush->SetColor(inkLight( 0.66f * dim));
           const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f * u, t + 8.0f * u,
                                              rgt - 80.0f * u, t + 24.0f * u);
-          drawTextTrimmed(*ctx.d3d, dc, ctx.brush, di.label, ctx.capNameFmt, tr);
+          drawTextTrimmed(*ctx.d3d, dc, ctx.brush, di.label, ctx.capNameFmt, tr,
+                          halo ? (float)dim : 0.0f);
         }
         if (!di.value.empty()) {
-          ctx.brush->SetColor(inkLight( 0.93f * dim));
           const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f * u, t + 8.0f * u,
                                              rgt - 13.0f * u, t + 24.0f * u);
+          if (halo) liquidHalo(dc, ctx.brush, di.value, ctx.capValFmt, tr, (float)dim);
+          ctx.brush->SetColor(inkLight( 0.93f * dim));
           dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.capValFmt,
                        &tr, ctx.brush);
         }

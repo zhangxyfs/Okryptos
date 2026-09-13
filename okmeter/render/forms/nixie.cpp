@@ -152,16 +152,20 @@ public:
         x += dw + 3.0f * u;
       }
       if (!unit.empty()) {
+        const D2D1_RECT_F tr = D2D1::RectF(x + 1.0f * u, y + 12.0f * u, x + 12.0f * u, y + 26.0f * u);
+        if (ctx.material && ctx.material->id() == "liquid" && !osc.isCenter)
+          liquidHalo(dc, ctx.brush, unit, ctx.labelFmt, tr, (float)dim);
         ctx.brush->SetColor(osc.isCenter ? D2D1::ColorF(kAccent, dim)
                                          : inkLight( 0.66f * dim));
-        const D2D1_RECT_F tr = D2D1::RectF(x + 1.0f * u, y + 12.0f * u, x + 12.0f * u, y + 26.0f * u);
         dc->DrawText(unit.c_str(), (UINT32)unit.size(), ctx.labelFmt, &tr, ctx.brush,
                      D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
       }
       // 模型名（8.5px dim，原型 .nx .k 居中省略）
       if (!di.label.empty()) {
-        ctx.brush->SetColor(inkLight( 0.5f * dim));
         const D2D1_RECT_F tr = D2D1::RectF(c.x - 48.0f * u, c.y + 11.0f * u, c.x + 48.0f * u, c.y + 23.0f * u);
+        if (ctx.material && ctx.material->id() == "liquid")
+          liquidHalo(dc, ctx.brush, di.label, ctx.labelFmt, tr, (float)dim);
+        ctx.brush->SetColor(inkLight( 0.5f * dim));
         dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.labelFmt,
                      &tr, ctx.brush);
       }

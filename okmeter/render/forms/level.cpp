@@ -81,16 +81,19 @@ public:
         const float u = (float)g.scale;  // uiScale：内部尺寸 = 原型值 × 比例
         const float l = c.x - (float)(it.hw * it.scale), rgt = c.x + (float)(it.hw * it.scale);
         // 顶行：左名（10px）右值（11px mono），padding 13（原型 .lvl .top）×比例
+        const bool halo = ctx.material && ctx.material->id() == "liquid";
         if (!di.label.empty()) {
           ctx.brush->SetColor(inkLight( 0.66f * dim));
           const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f * u, c.y - 17.0f * u,
                                              rgt - 80.0f * u, c.y - 2.0f * u);
-          drawTextTrimmed(*ctx.d3d, dc, ctx.brush, di.label, ctx.capNameFmt, tr);
+          drawTextTrimmed(*ctx.d3d, dc, ctx.brush, di.label, ctx.capNameFmt, tr,
+                          halo ? (float)dim : 0.0f);
         }
         if (!di.value.empty()) {
-          ctx.brush->SetColor(inkLight( 0.93f * dim));
           const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f * u, c.y - 17.0f * u,
                                              rgt - 13.0f * u, c.y - 2.0f * u);
+          if (halo) liquidHalo(dc, ctx.brush, di.value, ctx.capValFmt, tr, (float)dim);
+          ctx.brush->SetColor(inkLight( 0.93f * dim));
           dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.capValFmt,
                        &tr, ctx.brush);
         }

@@ -14,9 +14,13 @@ class IMaterial;
 class BackdropCapture;
 
 // 省略号裁剪文本（原型 text-overflow:ellipsis；长模型名不换行、截断加省略号）
+// haloDim>0 时先铺文字光晕软阴影（学 liquid-glass-react text-shadow 0 2px 12px
+// rgba(0,0,0,.4)：折射透出杂乱背景时白字仍分离可读，与背景色无关），仅液态
+// 材质传入（毛玻璃奶白底/深色不透明底无此需求）；画刷颜色用后还原。
 inline void drawTextTrimmed(D3DContext& d3d, ID2D1DeviceContext* dc,
                             ID2D1Brush* brush, const std::wstring& s,
-                            IDWriteTextFormat* fmt, const D2D1_RECT_F& rc) {
+                            IDWriteTextFormat* fmt, const D2D1_RECT_F& rc,
+                            float haloDim = 0.0f) {
   if (!dc || !brush || !fmt || s.empty()) return;
   Microsoft::WRL::ComPtr<IDWriteTextLayout> tl;
   if (FAILED(d3d.dwrite()->CreateTextLayout(s.c_str(), (UINT32)s.size(), fmt,
@@ -26,7 +30,43 @@ inline void drawTextTrimmed(D3DContext& d3d, ID2D1DeviceContext* dc,
   const DWRITE_TRIMMING trim{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
   (void)tl->SetTrimming(&trim, nullptr);
   (void)tl->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+  if (haloDim > 0.0f) {
+    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> sb;
+    if (SUCCEEDED(brush->QueryInterface(IID_PPV_ARGS(&sb))) && sb) {
+      const D2D1_COLOR_F saved = sb->GetColor();
+      static const float kOff[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1},
+                                       {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
+      sb->SetColor(D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.36f * haloDim));
+      for (const auto& o : kOff)
+        dc->DrawTextLayout(D2D1::Point2F(rc.left + o[0], rc.top + o[1]), tl.Get(),
+                           sb.Get());
+      sb->SetColor(D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.20f * haloDim));
+      dc->DrawTextLayout(D2D1::Point2F(rc.left, rc.top + 2.0f), tl.Get(), sb.Get());
+      sb->SetColor(saved);
+    }
+  }
   dc->DrawTextLayout(D2D1::Point2F(rc.left, rc.top), tl.Get(), brush);
+}
+
+// 裸 DrawText 版文字光晕（语义同 drawTextTrimmed 的 haloDim；调用后画刷颜色
+// 被改动，正文绘制前需重设浅色）
+inline void liquidHalo(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* brush,
+                       const std::wstring& s, IDWriteTextFormat* fmt,
+                       const D2D1_RECT_F& rc, float dim,
+                       D2D1_DRAW_TEXT_OPTIONS opt = D2D1_DRAW_TEXT_OPTIONS_NONE) {
+  if (!dc || !brush || !fmt || s.empty() || dim <= 0.0f) return;
+  static const float kOff[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1},
+                                   {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
+  brush->SetColor(D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.36f * dim));
+  for (const auto& o : kOff) {
+    const D2D1_RECT_F hr = D2D1::RectF(rc.left + o[0], rc.top + o[1],
+                                       rc.right + o[0], rc.bottom + o[1]);
+    dc->DrawText(s.c_str(), (UINT32)s.size(), fmt, &hr, brush, opt);
+  }
+  brush->SetColor(D2D1::ColorF(0.02f, 0.03f, 0.05f, 0.20f * dim));
+  const D2D1_RECT_F hr2 =
+      D2D1::RectF(rc.left, rc.top + 2.0f, rc.right, rc.bottom + 2.0f);
+  dc->DrawText(s.c_str(), (UINT32)s.size(), fmt, &hr2, brush, opt);
 }
 
 struct DockItem {
