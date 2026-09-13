@@ -50,17 +50,22 @@ func Filter(ctx context.Context, cfg config.Config, prompt string, hits []index.
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	// 日志可见性：调用身份进 note（调用方统一落日志），覆盖调用/截断/解析/裁决各路径
+	mid := p.Name
+	if p.Model != "" {
+		mid += "/" + p.Model
+	}
 	// temperature 不传（llmx.applyTemperature 空值收口，服务端默认兼容性最好）
 	rep, err := llmx.New(*p, timeout).Chat(ctx, systemPrompt, userPrompt(prompt, hits), maxTokens)
 	if err != nil {
-		return hits, fmt.Sprintf("LLM 调用失败，保留全部 %d 条: %v", len(hits), err)
+		return hits, fmt.Sprintf("意图模型(%s) 调用失败，保留全部 %d 条: %v", mid, len(hits), err)
 	}
 	if rep.Truncated {
-		return hits, fmt.Sprintf("LLM 输出截断，保留全部 %d 条", len(hits))
+		return hits, fmt.Sprintf("意图模型(%s) 输出截断，保留全部 %d 条", mid, len(hits))
 	}
 	keepIdx, err := parseKeep(rep.Text, len(hits))
 	if err != nil {
-		return hits, fmt.Sprintf("LLM 输出解析失败（%v），保留全部 %d 条", err, len(hits))
+		return hits, fmt.Sprintf("意图模型(%s) 输出解析失败（%v），保留全部 %d 条", mid, err, len(hits))
 	}
 	inKeep := make(map[int]bool, len(keepIdx))
 	for _, i := range keepIdx {
@@ -76,9 +81,9 @@ func Filter(ctx context.Context, cfg config.Config, prompt string, hits []index.
 		}
 	}
 	if len(dropped) == 0 {
-		return out, fmt.Sprintf("LLM 裁决：%d 条全部保留", len(hits))
+		return out, fmt.Sprintf("意图模型(%s) 裁决：%d 条全部保留", mid, len(hits))
 	}
-	return out, fmt.Sprintf("LLM 裁决：%d→%d 条，丢弃（%s）", len(hits), len(out), strings.Join(dropped, "、"))
+	return out, fmt.Sprintf("意图模型(%s) 裁决：%d→%d 条，丢弃（%s）", mid, len(hits), len(out), strings.Join(dropped, "、"))
 }
 
 // userPrompt 组装用户侧载荷：用户输入（截断）+ 编号候选（标题+摘要，消毒截断）。
