@@ -101,12 +101,16 @@ public:
       if (di.hist.size() >= 2) {
         const float sw = 170.0f * u, sh = 24.0f * u;
         const float sx = c.x - sw * 0.5f, sy = c.y - 3.0f * u;
+        // 最新点恒定落在屏幕内侧：dock 左缘 → 最右（右→左流），
+        // dock 右缘 → 最左（左→右流，x 镜像）
+        const bool flip = ctx.edge == "right";
         double maxV = 1.0;
         for (double v : di.hist) if (v > maxV) maxV = v;
         const size_t cnt = di.hist.size();
         auto ptAt = [&](size_t k) {
           const double v = di.hist[k];
-          const float fx = sx + (float)((double)k / (double)(cnt - 1) * sw);
+          const double t = (double)k / (double)(cnt - 1);
+          const float fx = sx + (float)((flip ? 1.0 - t : t) * sw);
           const float fy = sy + sh - 1.5f - (float)(v / maxV * (sh - 4.0f));
           return D2D1::Point2F(fx, fy);
         };
