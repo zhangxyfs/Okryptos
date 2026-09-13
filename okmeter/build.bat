@@ -17,7 +17,7 @@ set "FLAGS=/nologo /std:c++20 /EHsc /W4 /utf-8 /O2 /MT /I."
 
 rem -- source groups: tests must not include render/ or ui/app.cpp ui/watch.cpp --
 set "CORE=core\*.cpp"
-set "ADAPT=adapters\kimi\*.cpp adapters\claude\*.cpp adapters\codex\*.cpp adapters\qwen\*.cpp adapters\zcode\*.cpp"
+set "ADAPT=adapters\kimi\*.cpp adapters\claude\*.cpp adapters\codex\*.cpp adapters\qwen\*.cpp adapters\zcode\*.cpp adapters\workbuddy\*.cpp"
 set "UI_CORE=ui\geometry.cpp"
 set "UI_WIN=ui\app.cpp ui\menu.cpp ui\settings.cpp ui\watch.cpp"
 set "RENDER=render\*.cpp render\forms\*.cpp render\materials\*.cpp"
