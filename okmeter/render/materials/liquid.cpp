@@ -236,13 +236,13 @@ public:
     }
 
 
-    // 亮底兜底：白底下玻璃过浅 → 形状内铺 60% 深底（用户裁决：内容恒浅色靠深底可读）
-    // lastLuma_ 在此兜底刷新：fullGlass 仅圆球路径，胶囊/毛玻璃退化路径够不到
-    // 上面的赋值点，不在这里补采则 pill 项 lastLuma_ 恒 0、深底永不触发
+    // 亮底兜底：白底下玻璃过浅 → 形状内铺 35% 深底。A/B 实测：60% 黑得不透
+    // 气（折射白做）、0% 白字撞白底不可读（光晕救不回来）、35% 是玻璃感与
+    // 可读的折中（文字光晕承担分离，深底只压对比度）
     if (ctx.backdrop && ctx.backdrop->ok() && !ctx.backdrop->degraded())
       lastLuma_ = ctx.backdrop->luma();
     if (backdropLuma() > 0.5f) {
-      ctx.brush->SetColor(glassfx::deskDeep(0.60f * dim));
+      ctx.brush->SetColor(glassfx::deskDeep(0.35f * dim));
       glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
     }
     // 跟指针镜面高光：圆球=边缘环带（58%~100% r）楔形指向光源；胶囊=形状域
