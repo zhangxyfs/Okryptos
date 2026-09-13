@@ -94,6 +94,12 @@ public:
       glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
     }
 
+
+    // 亮底兜底：白底下玻璃过浅 → 形状内铺 60% 深底（用户裁决：内容恒浅色靠深底可读）
+    if (backdropLuma() > 0.5f) {
+      ctx.brush->SetColor(glassfx::deskDeep(0.60f * dim));
+      glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
+    }
     // 顶部内高光（原型 radial-gradient at 32% 26% ink 14% → transparent 62%；
     // 跟手光：渐变中心向指针方向微移，±5px 封顶）
     if (hl_) {

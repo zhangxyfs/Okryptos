@@ -88,29 +88,28 @@ public:
         const DockItem& di = (*ctx.items)[i];
         const float r = (float)it.r;
         const float u = (float)g.scale;  // uiScale：内部偏移 ×比例
-        const float luma = ctx.material ? ctx.material->backdropLuma() : 0.0f;
         if (isHub) {
           if (!di.value.empty()) {
-            ctx.brush->SetColor(inkOn(luma, 0.93f * dim));
+            ctx.brush->SetColor(inkLight( 0.93f * dim));
             const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y - 18.0f * u, c.x + r, c.y + 2.0f * u);
             dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.hubFmt,
                          &tr, ctx.brush);
           }
           if (!di.label.empty()) {
-            ctx.brush->SetColor(inkOn(luma, 0.66f * dim));
+            ctx.brush->SetColor(inkLight( 0.66f * dim));
             const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y + 3.0f * u, c.x + r, c.y + 16.0f * u);
             dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.labelFmt,
                          &tr, ctx.brush);
           }
         } else {
           if (!di.value.empty()) {
-            ctx.brush->SetColor(inkOn(luma, 0.93f * dim));
+            ctx.brush->SetColor(inkLight( 0.93f * dim));
             const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y - 12.0f * u, c.x + r, c.y + 1.0f * u);
             dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.satFmt,
                          &tr, ctx.brush);
           }
           if (!di.label.empty()) {
-            ctx.brush->SetColor(inkOn(luma, 0.66f * dim));
+            ctx.brush->SetColor(inkLight( 0.66f * dim));
             const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y + 1.0f * u, c.x + r, c.y + 12.0f * u);
             dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.labelFmt,
                          &tr, ctx.brush);

@@ -164,6 +164,12 @@ public:
       }
     }
 
+
+    // 亮底兜底：白底下玻璃过浅 → 形状内铺 60% 深底（用户裁决：内容恒浅色靠深底可读）
+    if (backdropLuma() > 0.5f) {
+      ctx.brush->SetColor(glassfx::deskDeep(0.60f * dim));
+      glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
+    }
     // 跟指针镜面高光：边缘环带（58%~100% r）楔形指向光源，layer 不透明度 =
     // 距离衰减强度（原型 --si = max(0, 1 - dist/320)）
     const glassfx::PtrLight L = glassfx::ptrLight(px_, py_, hasPtr_, c);
@@ -199,7 +205,7 @@ public:
     else if (ctx.isCenter)
       ctx.brush->SetColor(glassfx::accentC(0.60f * dim));
     else
-      ctx.brush->SetColor(inkOn(backdropLuma(), 0.30f * dim));  // 亮底深描边（加深）
+      ctx.brush->SetColor(glassfx::ink(0.16f * dim));
     glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f, 0.0f, ctx.cornerR);
   }
 

@@ -12,7 +12,11 @@ namespace okmeter::render {
 class D3DContext;
 class BackdropCapture;
 
-// 亮背景自适应墨色：背景亮（luma>0.55）用深墨，暗背景用浅墨（修"白底白字不可见"）
+// 恒浅墨色（项内内容一律浅——亮底时由材质在形状内铺半透明深底保证可读，用户裁决）
+inline D2D1_COLOR_F inkLight(float a) { return D2D1::ColorF(0.93f, 0.94f, 0.96f, a); }
+
+// 亮背景自适应墨色：背景亮（luma>0.55）用深墨，暗背景用浅墨（仅项外元素用——
+// 弧线连线/罗盘轨道等无深底覆盖处）
 inline D2D1_COLOR_F inkOn(float luma, float a) {
   return luma > 0.55f ? D2D1::ColorF(0.09f, 0.11f, 0.14f, a)
                       : D2D1::ColorF(0.93f, 0.94f, 0.96f, a);

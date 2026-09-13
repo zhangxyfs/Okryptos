@@ -75,6 +75,12 @@ public:
       glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
     }
 
+
+    // 亮底兜底：白底下玻璃过浅 → 形状内铺 60% 深底（用户裁决：内容恒浅色靠深底可读）
+    if (backdropLuma() > 0.5f) {
+      ctx.brush->SetColor(glassfx::deskDeep(0.60f * dim));
+      glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
+    }
     // 顶部内高光（原型 inset 0 1px 0 ink 16%；跟手光中心向指针微移 ±5px）
     if (hl_) {
       float sx = 0, sy = 0;
@@ -94,7 +100,7 @@ public:
     else if (ctx.isCenter)
       ctx.brush->SetColor(glassfx::accentC(0.60f * dim));
     else
-      ctx.brush->SetColor(inkOn(backdropLuma(), 0.34f * dim));  // 亮底深描边（加深）
+      ctx.brush->SetColor(glassfx::ink(0.26f * dim));
     glassfx::drawShape(dc, c, hw, r, ctx.brush, 1.0f, 0.0f, ctx.cornerR);
   }
 

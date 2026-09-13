@@ -62,16 +62,15 @@ public:
         const float hw = (float)(it.hw * it.scale), hh = (float)(it.r * it.scale);
         const float l = c.x - hw, t = c.y - hh;
         const float rgt = c.x + hw;
-        const float luma = ctx.material ? ctx.material->backdropLuma() : 0.0f;
         // 顶行：左名 右值，padding 左右 13、上 8（原型 .cap .top）×比例
         if (!di.label.empty()) {
-          ctx.brush->SetColor(inkOn(luma, 0.66f * dim));
+          ctx.brush->SetColor(inkLight( 0.66f * dim));
           const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f * u, t + 8.0f * u,
                                              rgt - 80.0f * u, t + 24.0f * u);
           drawTextTrimmed(*ctx.d3d, dc, ctx.brush, di.label, ctx.capNameFmt, tr);
         }
         if (!di.value.empty()) {
-          ctx.brush->SetColor(inkOn(luma, 0.93f * dim));
+          ctx.brush->SetColor(inkLight( 0.93f * dim));
           const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f * u, t + 8.0f * u,
                                              rgt - 13.0f * u, t + 24.0f * u);
           dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.capValFmt,
@@ -81,7 +80,7 @@ public:
         // 宽 max(4%, ratio)（原型 .cap .bar 同款）×比例
         const float bl = l + 13.0f * u, br = rgt - 13.0f * u;
         const float by = t + 2.0f * hh - 12.0f * u;  // 底 padding 9 + 条高 3
-        ctx.brush->SetColor(inkOn(luma, 0.10f * dim));  // 轨道：亮底深色
+        ctx.brush->SetColor(inkLight( 0.10f * dim));  // 轨道：亮底深色
         dc->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(bl, by, br, by + 3.0f * u),
                                                    1.5f * u, 1.5f * u),
                                  ctx.brush);
@@ -92,7 +91,7 @@ public:
         if ((int)i == ctx.mid)
           ctx.brush->SetColor(D2D1::ColorF(0x5FE0A8, dim));  // 原型 accent 绿
         else
-          ctx.brush->SetColor(inkOn(luma, 0.52f * dim));  // 填充：亮底深色
+          ctx.brush->SetColor(inkLight( 0.52f * dim));  // 填充：亮底深色
         dc->FillRoundedRectangle(
             D2D1::RoundedRect(D2D1::RectF(bl, by, bl + fw, by + 3.0f * u),
                               1.5f * u, 1.5f * u),

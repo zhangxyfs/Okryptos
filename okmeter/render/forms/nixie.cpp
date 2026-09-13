@@ -93,7 +93,6 @@ public:
     const float dimBase = (float)(0.55 + 0.45 * e);  // 收缩态 55%（原型同款）
     bool anyHot = false;  // 有悬停项时非悬停项降暗（原型 .dim）
     for (const ItemGeom& it : g.items) anyHot = anyHot || it.scale > 1.001;
-    const float luma = ctx.material->backdropLuma();
 
     for (size_t i = 0; i < n; ++i) {
       const ItemGeom& it = g.items[i];
@@ -145,8 +144,8 @@ public:
       float x = c.x - totalW * 0.5f;
       const float y = c.y - 19.0f * u;
       const D2D1_COLOR_F lit = osc.isCenter
-          ? D2D1::ColorF(kAccent, dim) : inkOn(luma, 0.5f * dim);
-      const D2D1_COLOR_F unlit = inkOn(luma, 0.5f * 0.13f * dim);
+          ? D2D1::ColorF(kAccent, dim) : inkLight( 0.5f * dim);
+      const D2D1_COLOR_F unlit = inkLight( 0.5f * 0.13f * dim);
       for (char ch : digits) {
         const float dw = (ch == '.' ? 4.0f : 15.0f) * u;
         drawDigit(dc, ctx.brush, ch, x, y, u, lit, unlit);
@@ -154,14 +153,14 @@ public:
       }
       if (!unit.empty()) {
         ctx.brush->SetColor(osc.isCenter ? D2D1::ColorF(kAccent, dim)
-                                         : inkOn(luma, 0.66f * dim));
+                                         : inkLight( 0.66f * dim));
         const D2D1_RECT_F tr = D2D1::RectF(x + 1.0f * u, y + 12.0f * u, x + 12.0f * u, y + 26.0f * u);
         dc->DrawText(unit.c_str(), (UINT32)unit.size(), ctx.labelFmt, &tr, ctx.brush,
                      D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
       }
       // 模型名（8.5px dim，原型 .nx .k 居中省略）
       if (!di.label.empty()) {
-        ctx.brush->SetColor(inkOn(luma, 0.5f * dim));
+        ctx.brush->SetColor(inkLight( 0.5f * dim));
         const D2D1_RECT_F tr = D2D1::RectF(c.x - 48.0f * u, c.y + 11.0f * u, c.x + 48.0f * u, c.y + 23.0f * u);
         dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.labelFmt,
                      &tr, ctx.brush);

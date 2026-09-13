@@ -51,7 +51,6 @@ public:
     const float dimBase = (float)(0.55 + 0.45 * e);  // 收缩态 55%（原型同款）
     bool anyHot = false;  // 有悬停项时非悬停项降暗（原型 .dim）
     for (const ItemGeom& it : g.items) anyHot = anyHot || it.scale > 1.001;
-    const float luma = ctx.material->backdropLuma();
 
     for (size_t i = 0; i < n; ++i) {
       const ItemGeom& it = g.items[i];
@@ -83,13 +82,13 @@ public:
         const float l = c.x - (float)(it.hw * it.scale), rgt = c.x + (float)(it.hw * it.scale);
         // 顶行：左名（10px）右值（11px mono），padding 13（原型 .lvl .top）×比例
         if (!di.label.empty()) {
-          ctx.brush->SetColor(inkOn(luma, 0.66f * dim));
+          ctx.brush->SetColor(inkLight( 0.66f * dim));
           const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f * u, c.y - 17.0f * u,
                                              rgt - 80.0f * u, c.y - 2.0f * u);
           drawTextTrimmed(*ctx.d3d, dc, ctx.brush, di.label, ctx.capNameFmt, tr);
         }
         if (!di.value.empty()) {
-          ctx.brush->SetColor(inkOn(luma, 0.93f * dim));
+          ctx.brush->SetColor(inkLight( 0.93f * dim));
           const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f * u, c.y - 17.0f * u,
                                              rgt - 13.0f * u, c.y - 2.0f * u);
           dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.capValFmt,
@@ -108,9 +107,9 @@ public:
             const D2D1_RECT_F sr = D2D1::RectF(x0, y0, x0 + segW, y0 + segH);
             if (s < lit)
               ctx.brush->SetColor(osc.isCenter
-                  ? D2D1::ColorF(kAccent, dim) : inkOn(luma, 0.55f * dim));
+                  ? D2D1::ColorF(kAccent, dim) : inkLight( 0.55f * dim));
             else
-              ctx.brush->SetColor(inkOn(luma, 0.10f * dim));
+              ctx.brush->SetColor(inkLight( 0.10f * dim));
             dc->FillRoundedRectangle(D2D1::RoundedRect(sr, 1.0f, 1.0f), ctx.brush);
           }
         }

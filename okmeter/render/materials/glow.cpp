@@ -302,6 +302,12 @@ public:
       }
     }
 
+
+    // 亮底兜底：白底下玻璃过浅 → 形状内铺 60% 深底（用户裁决：内容恒浅色靠深底可读）
+    if (backdropLuma() > 0.5f) {
+      ctx.brush->SetColor(glassfx::deskDeep(0.60f * dim));
+      glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);
+    }
     // 顶部内高光 ink 28% + 底部回落 black 20%（原型 inset 组合）
     if (hlTop_) {
       hlTop_->SetCenter(D2D1::Point2F(c.x - 0.30f * r, c.y - 0.55f * r));
@@ -337,7 +343,7 @@ public:
     dc->FillRoundedRectangle(&rr, brush.Get());
     brush->SetColor(glassfx::ink(0.08f));
     dc->FillRoundedRectangle(&rr, brush.Get());
-    brush->SetColor(inkOn(backdropLuma(), 0.30f));  // 亮底深描边（加深+走迟滞）
+    brush->SetColor(glassfx::ink(0.16f));
     dc->DrawRoundedRectangle(&rr, brush.Get(), 1.0f);
   }
 
