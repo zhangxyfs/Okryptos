@@ -38,9 +38,9 @@ struct PressRing { float x = 0, y = 0; double t0 = 0; };
 class GlowMaterial final : public IMaterial {
 public:
   std::string id() const override { return "glow"; }
-  float backdropLuma() const override {  // 迟滞防闪烁（>0.62 深墨 / <0.48 浅墨）
-    if (lastLuma_ > 0.62f) darkInk_ = true;
-    else if (lastLuma_ < 0.48f) darkInk_ = false;
+  float backdropLuma() const override {  // 迟滞防闪烁（>0.45 深墨 / <0.35 浅墨）
+    if (lastLuma_ > 0.45f) darkInk_ = true;
+    else if (lastLuma_ < 0.35f) darkInk_ = false;
     return darkInk_ ? 1.0f : 0.0f;
   }
 

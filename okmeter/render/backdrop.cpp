@@ -368,18 +368,27 @@ bool BackdropCapture::acquire(ID3D11Texture2D** out) {
       (void)dev->CreateTexture2D(&sd, nullptr, &lumaStage_);
     }
     if (imm && lumaStage_) {
-      // 采样区（纹理坐标）：lumaX_<0 或非法/过小时回退全屏
+      // 采样区（纹理坐标）：lumaW_<=0 未设置=全屏；窗口部分出屏时裁剪有效部分，
+      // 区过小才回退全屏（勿用 lumaX_<0 当未设置哨兵——左缘收缩态窗口 x 恒为负，
+      // 会误触发全屏回退导致亮底误判为暗，实测 luma 0.12 vs 实际 0.75）
       int rx = lumaX_ - capX_, ry = lumaY_ - capY_, rw = lumaW_, rh = lumaH_;
-      if (lumaX_ < 0 || rw < 16 || rh < 16 || rx >= capW_ || ry >= capH_) {
+      if (lumaW_ <= 0) {
         rx = 0;
         ry = 0;
         rw = capW_;
         rh = capH_;
+      } else {
+        if (rx < 0) { rw += rx; rx = 0; }
+        if (ry < 0) { rh += ry; ry = 0; }
+        if (rx + rw > capW_) rw = capW_ - rx;
+        if (ry + rh > capH_) rh = capH_ - ry;
+        if (rw < 16 || rh < 16) {
+          rx = 0;
+          ry = 0;
+          rw = capW_;
+          rh = capH_;
+        }
       }
-      if (rx < 0) rx = 0;
-      if (ry < 0) ry = 0;
-      if (rx + rw > capW_) rw = capW_ - rx;
-      if (ry + rh > capH_) rh = capH_ - ry;
       D3D11_BOX box{};
       box.front = 0;
       box.back = 1;

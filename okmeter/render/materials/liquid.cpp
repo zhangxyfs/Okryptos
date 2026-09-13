@@ -57,9 +57,9 @@ ComPtr<ID2D1Bitmap> bakeNormalMap(ID2D1DeviceContext* dc) {
 class LiquidMaterial final : public IMaterial {
 public:
   std::string id() const override { return "liquid"; }
-  float backdropLuma() const override {  // 迟滞防闪烁（>0.62 深墨 / <0.48 浅墨）
-    if (lastLuma_ > 0.62f) darkInk_ = true;
-    else if (lastLuma_ < 0.48f) darkInk_ = false;
+  float backdropLuma() const override {  // 迟滞防闪烁（>0.45 深墨 / <0.35 浅墨）
+    if (lastLuma_ > 0.45f) darkInk_ = true;
+    else if (lastLuma_ < 0.35f) darkInk_ = false;
     return darkInk_ ? 1.0f : 0.0f;
   }
 
@@ -166,6 +166,10 @@ public:
 
 
     // 亮底兜底：白底下玻璃过浅 → 形状内铺 60% 深底（用户裁决：内容恒浅色靠深底可读）
+    // lastLuma_ 在此兜底刷新：fullGlass 仅圆球路径，胶囊/毛玻璃退化路径够不到
+    // 上面的赋值点，不在这里补采则 pill 项 lastLuma_ 恒 0、深底永不触发
+    if (ctx.backdrop && ctx.backdrop->ok() && !ctx.backdrop->degraded())
+      lastLuma_ = ctx.backdrop->luma();
     if (backdropLuma() > 0.5f) {
       ctx.brush->SetColor(glassfx::deskDeep(0.60f * dim));
       glassfx::fillShape(dc, c, hw, r, ctx.brush, ctx.cornerR);

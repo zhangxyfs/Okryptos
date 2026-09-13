@@ -13,11 +13,10 @@ namespace {
 class FrostMaterial final : public IMaterial {
 public:
   std::string id() const override { return "frost"; }
-  // 有效玻璃亮度：白 12% 提亮叠模糊背景；迟滞防闪烁（>0.62 深墨 / <0.48 浅墨）
+  // 亮底判定用原始背景亮度；迟滞防闪烁（>0.45 深墨 / <0.35 浅墨）
   float backdropLuma() const override {
-    const float l = 0.12f + 0.88f * lastLuma_;
-    if (l > 0.62f) darkInk_ = true;
-    else if (l < 0.48f) darkInk_ = false;
+    if (lastLuma_ > 0.45f) darkInk_ = true;
+    else if (lastLuma_ < 0.35f) darkInk_ = false;
     return darkInk_ ? 1.0f : 0.0f;
   }
 

@@ -356,6 +356,9 @@ void DockApp::applyWindowPos() {
     x = work.left + (int)std::lround(base - dockW_);  // 卡区在球区右侧，x 不变
   else
     x = work.right - (int)std::lround(base) - (wide_ ? kCardZoneW : 0);
+  // 亮度采样区 = dock 基础矩形对应背景（自适应墨色用；勿用菜单/面板并集矩形——
+  // 采样对象是条目背后的亮度）
+  backdrop_.setLumaRegion(x, y, w, h);
   zoneDX_ = (wide_ && cfg_.edge == "right") ? kCardZoneW : 0;
   zoneDY_ = 0;
   if (menu_.open) {
@@ -383,7 +386,6 @@ void DockApp::applyWindowPos() {
   }
   SetWindowPos(hwnd_, nullptr, x, y, w, h,
                SWP_NOZORDER | SWP_NOACTIVATE);  // 尺寸变化 → WM_SIZE → d3d.resize + render
-  backdrop_.setLumaRegion(x, y, w, h);  // 亮度采样区 = dock 窗口对应背景（自适应墨色用）
   if (menu_.open && (menu_.parent1 >= 0 || menu_.parent2 >= 0))
     placeSubColumns();  // 扩窗后按新窗口原点重布子列（屏幕坐标不变）
 }
@@ -1469,11 +1471,11 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     GetWindowRect(hwnd_, &wr2);
     backdrop_.note(
         L"DUMP ok=%d win=(%ld,%ld,%ld,%ld) zone=(%d,%d) wide=%d hover=%d emerge=%.2f "
-        L"menu=%d settings=%d card=%d frames=%llu rebuilds=%u",
+        L"menu=%d settings=%d card=%d frames=%llu rebuilds=%u luma=%.2f",
         okDump ? 1 : 0, (long)wr2.left, (long)wr2.top, (long)wr2.right,
         (long)wr2.bottom, zoneDX_, zoneDY_, wide_ ? 1 : 0, hoverIdx_, emerge_.value,
         menu_.open ? 1 : 0, settings_.open ? 1 : 0, card_.valid ? 1 : 0,
-        backdrop_.frameCount(), d3d_.rebuilds());
+        backdrop_.frameCount(), d3d_.rebuilds(), (double)backdrop_.luma());
     return 0;
   }
   case WM_DPICHANGED:
@@ -1570,6 +1572,8 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   pollData();
 
   ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+  applyWindowPos();  // 落窗 + 设亮度采样区（init 直建窗口不经 applyWindowPos，缺这步
+                     // 采样区恒为空 → 退化为全屏采样，亮底自适应永不触发）
   render();
 
   // 动画时钟：高分辨率可等待定时器（~0.5ms 粒度；实测 timeBeginPeriod(1) 对本

@@ -25,12 +25,11 @@ D2D1_COLOR_F kHairline(float a) { return D2D1::ColorF(1.0f, 1.0f, 1.0f, a); }
 class DarkMaterial final : public IMaterial {
 public:
   std::string id() const override { return "dark"; }
-  // 有效玻璃亮度：74% desk-deep 叠背景——亮背景下球体仍偏深，墨色恒浅；
-  // 迟滞防闪烁：跨阈值震荡时墨色不来回跳（>0.62 深墨 / <0.48 浅墨 / 中间保持）
+  // 亮底判定用原始背景亮度（勿用玻璃混合亮度——本材质玻璃恒深，混合值上限 0.32
+  // 永远够不到阈值，深底兜底成死代码）；迟滞防闪烁（>0.45 深墨 / <0.35 浅墨）
   float backdropLuma() const override {
-    const float l = 0.74f * 0.08f + 0.26f * lastLuma_;
-    if (l > 0.62f) darkInk_ = true;
-    else if (l < 0.48f) darkInk_ = false;
+    if (lastLuma_ > 0.45f) darkInk_ = true;
+    else if (lastLuma_ < 0.35f) darkInk_ = false;
     return darkInk_ ? 1.0f : 0.0f;
   }
 
