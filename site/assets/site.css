@@ -136,29 +136,71 @@ nav .actions { display: flex; align-items: center; gap: 10px; margin-left: 18px;
 [data-theme="dark"] .logo-light { display: none; }
 [data-theme="dark"] .logo-dark { display: inline-block; }
 
-/* ── 深色主题 ─────────────────────────── */
+/* ── 深色主题（默认：科技感主视觉——深空底 + 电蓝/青光晕） ───────────── */
 [data-theme="dark"] {
-  --text: #e2e8f0;
-  --text-2: #94a3b8;
-  --text-3: #64748b;
-  --bg: #0b1120;
-  --card: #0f172a;
-  --border: #1e293b;
+  --text: #dbe7ff;
+  --text-2: #8ea3c8;
+  --text-3: #5b6f95;
+  --bg: #060b18;
+  --card: #0b1426;
+  --border: #1a2742;
   --primary: #3b82f6;
   --primary-dark: #60a5fa;
+  --accent: #22d3ee;
 }
-[data-theme="dark"] nav { background: rgba(11,17,32,.85); }
+[data-theme="dark"] body {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(1100px 560px at 82% -12%, rgba(59,130,246,.14), transparent 62%),
+    radial-gradient(880px 480px at 6% -6%, rgba(34,211,238,.09), transparent 58%);
+  background-attachment: fixed;
+}
+[data-theme="dark"] nav { background: rgba(6,11,24,.78); }
 [data-theme="dark"] .btn-ghost { background: var(--card); }
-[data-theme="dark"] .btn-primary { box-shadow: 0 4px 14px rgba(59,130,246,.25); }
+[data-theme="dark"] .btn-ghost:hover { box-shadow: 0 0 18px rgba(59,130,246,.18); }
+[data-theme="dark"] .btn-primary {
+  background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%);
+  box-shadow: 0 4px 18px rgba(37,99,235,.45), 0 0 34px rgba(14,165,233,.22);
+}
+[data-theme="dark"] .btn-primary:hover { background: linear-gradient(135deg, #1d4ed8 0%, #0284c7 100%); }
 [data-theme="dark"] p code,
 [data-theme="dark"] li code,
-[data-theme="dark"] td code { background: #1e293b; color: #93c5fd; }
-[data-theme="dark"] table.doc th { background: #0b1120; }
-[data-theme="dark"] table.doc tr:hover td { background: #111c33; }
-[data-theme="dark"] header.hero { background: linear-gradient(180deg, #0d1b3a 0%, var(--bg) 100%); }
+[data-theme="dark"] td code { background: #16223c; color: #7dd3fc; }
+[data-theme="dark"] table.doc th { background: #0a1120; }
+[data-theme="dark"] table.doc tr:hover td { background: #101a30; }
+/* hero：顶部电蓝光晕 + 网格线（径向掩码收边），呼应"隐秘密藏"的深空感 */
+[data-theme="dark"] header.hero {
+  position: relative; overflow: clip;
+  background:
+    radial-gradient(760px 360px at 50% -80px, rgba(59,130,246,.26), transparent 66%),
+    linear-gradient(180deg, #081026 0%, var(--bg) 100%);
+}
+[data-theme="dark"] header.hero::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(96,165,250,.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(96,165,250,.08) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(640px 320px at 50% 0%, #000 0%, transparent 76%);
+  -webkit-mask-image: radial-gradient(640px 320px at 50% 0%, #000 0%, transparent 76%);
+}
+[data-theme="dark"] header.hero img.logo { filter: drop-shadow(0 0 30px rgba(59,130,246,.5)); }
+[data-theme="dark"] header.hero .brand-line { color: #7d93bd; }
+[data-theme="dark"] .card { box-shadow: inset 0 1px 0 rgba(148,183,255,.05); }
 [data-theme="dark"] .card:hover,
-[data-theme="dark"] .entry-card:hover { box-shadow: 0 10px 30px rgba(0,0,0,.45); }
-[data-theme="dark"] .shot img { box-shadow: 0 12px 40px rgba(0,0,0,.55); }
+[data-theme="dark"] .entry-card:hover {
+  border-color: rgba(96,165,250,.55);
+  box-shadow: 0 10px 30px rgba(0,0,0,.5), 0 0 26px rgba(59,130,246,.14);
+}
+[data-theme="dark"] .shot img {
+  border-color: #223457;
+  box-shadow: 0 12px 40px rgba(0,0,0,.6), 0 0 44px rgba(59,130,246,.12);
+}
+[data-theme="dark"] .car-btn { background: #0b1426; }
+[data-theme="dark"] .car-btn:hover { box-shadow: 0 0 16px rgba(59,130,246,.35); }
+@media (max-width: 1120px) {
+  [data-theme="dark"] .car-btn { background: rgba(11,20,38,.88); }
+}
 [data-theme="dark"] .side a:hover,
 [data-theme="dark"] .side a.active { background: rgba(59,130,246,.13); }
 [data-theme="dark"] .note { background: rgba(59,130,246,.12); border-color: #1e3a8a; color: #93c5fd; }
@@ -166,6 +208,11 @@ nav .actions { display: flex; align-items: center; gap: 10px; margin-left: 18px;
 [data-theme="dark"] .tag-new     { background: rgba(22,163,74,.18); color: #4ade80; }
 [data-theme="dark"] .tag-fix     { background: rgba(220,38,38,.18); color: #f87171; }
 [data-theme="dark"] .tag-improve { background: rgba(59,130,246,.18); color: #93c5fd; }
-[data-theme="dark"] .tag-note    { background: #1e293b; color: #94a3b8; }
+[data-theme="dark"] .tag-note    { background: #1a2742; color: #8ea3c8; }
 [data-theme="dark"] #verNav > summary { background: var(--card); }
 [data-theme="dark"] .screenshots-band { background: var(--card); border-color: var(--border); }
+/* 深色滚动条（侧栏档案/代码块等白滚动条在暗底下刺眼） */
+[data-theme="dark"] * { scrollbar-color: #223457 transparent; }
+[data-theme="dark"] *::-webkit-scrollbar { width: 10px; height: 10px; }
+[data-theme="dark"] *::-webkit-scrollbar-thumb { background: #223457; border-radius: 6px; }
+[data-theme="dark"] *::-webkit-scrollbar-track { background: transparent; }

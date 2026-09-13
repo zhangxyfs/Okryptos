@@ -268,19 +268,16 @@
   if (lang !== 'en') lang = 'zh';
 
   /* URL 参数 ?theme=dark|light 同理（首屏防闪烁由 head 内联脚本负责同参数）。
-     主题默认跟随系统；未手动选择时，系统深浅色切换实时跟随。 */
+     主题默认深色（科技感主视觉）；用户手动切换后以其选择为准，不再跟随系统。 */
   var themeParam = q.get('theme');
   if (themeParam === 'dark' || themeParam === 'light') {
     root.dataset.theme = themeParam;
     try { localStorage.setItem('ok-theme', themeParam); } catch (e) {}
+  } else {
+    var savedTheme = null;
+    try { savedTheme = localStorage.getItem('ok-theme'); } catch (err0) {}
+    if (!savedTheme) root.dataset.theme = 'dark';
   }
-  try {
-    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
-      var saved = null;
-      try { saved = localStorage.getItem('ok-theme'); } catch (err) {}
-      if (!saved) root.dataset.theme = e.matches ? 'dark' : 'light';
-    });
-  } catch (e) {}
 
   function applyLang(l) {
     lang = l;
