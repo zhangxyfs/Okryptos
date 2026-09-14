@@ -53,7 +53,7 @@
 
 ## 实现注记（2026-09-14）
 
-C++ 已落地（`okmeter/`，提交范围 894da3b..b635a1f）：
+C++ 已落地（`okmeter/`，提交范围 894da3b..54a5826，含终审修复 glow 竖向半径残留与 pinned 中继回弹）：
 
 - 吸附边配置域扩为 left/right/top/bottom（设置面板四枚 chips）；横向逻辑全挂
   `isHorizEdge()` 分支，左/右竖条既有行为逐像素不变（Task 9 全量回归矩阵验证）。
