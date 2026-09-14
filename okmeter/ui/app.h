@@ -166,6 +166,8 @@ private:
   bool menuForSettings_ = false;  // 当前菜单是设置面板的指标级联下拉（叶项改 draft）
   int settingsMenuOwner_ = -1;    // 设置下拉的 owner gsel 控件下标（收拢后吞 owner 点击防重开）
   SettingsPanel settings_;    // 背板设置面板（open 时窗口并集扩出面板区）
+  bool pendingApply_ = false;  // mini 中继：展开态保存先缩回 chip 排，落定后应用草稿
+  Config pendingDraft_{};      // 中继期暂存的配置草稿（落定应用时才落盘）
   RECT panelScreen_{};        // 面板屏幕矩形（dock 对侧屏缘，打开时定位）
   LARGE_INTEGER panelOpenQpc_{}; // 面板打开时刻（180ms 滑入动画计时）
   LARGE_INTEGER cardShownQpc_{}; // 详情卡出现时刻（cardin 140ms 出现动画计时）

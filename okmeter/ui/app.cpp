@@ -1016,13 +1016,20 @@ void DockApp::closeSettings(bool apply) {
   if (!settings_.open) return;
   closeMenu();  // 指标级联下拉随面板一并收起
   if (apply) {
-    cfg_ = settings_.draft;
-    cfg_.normalize();
-    saveConfig(okmeterDir(), cfg_);
-    createModules();        // 形态/材质模块重建（材质换肤/形态切换同源）
-    hoverIdx_ = -1;         // 球数可能变少，悬停下标作废
-    pressIdx_ = -1;
-    rebuildItems();         // bindings/文本/详情卡同源更新
+    const bool edgeChanged = settings_.draft.edge != cfg_.edge;
+    if (!edgeChanged && isHorizEdge(cfg_.edge) && emergeTarget_ > 0.5) {
+      // mini 中继（设计定论）：先 morph 缩回 chip 排，落定后静默重建
+      pendingDraft_ = settings_.draft;
+      pendingApply_ = true;
+    } else {
+      cfg_ = settings_.draft;
+      cfg_.normalize();
+      saveConfig(okmeterDir(), cfg_);
+      createModules();        // 形态/材质模块重建（材质换肤/形态切换同源）
+      hoverIdx_ = -1;         // 球数可能变少，悬停下标作废
+      pressIdx_ = -1;
+      rebuildItems();         // bindings/文本/详情卡同源更新
+    }
   }
   settings_.open = false;
   if (clickThru_) syncClickThru();  // 恢复窗口可命中（关面板后不再需要穿透）
@@ -1031,7 +1038,9 @@ void DockApp::closeSettings(bool apply) {
   GetCursorPos(&pt);
   RECT wr{};
   GetWindowRect(hwnd_, &wr);
-  if (cfg_.pinned) {
+  if (pendingApply_) {
+    setEmergeTarget(0);   // 缩回 chip 排（落定应用由 animTick 完成）
+  } else if (cfg_.pinned) {
     setEmergeTarget(1);  // 保持显示：关面板后仍常显展开
   } else if (!PtInRect(&wr, pt)) {  // 指针已在窗外：恢复 600ms 迟滞收回
     KillTimer(hwnd_, kTimerRetract);
@@ -1277,6 +1286,18 @@ void DockApp::animTick() {
   if (emerge_.settled(emergeTarget_)) {
     emerge_.snap(emergeTarget_);
     emerged_ = true;
+    if (pendingApply_ && emerged_) {
+      pendingApply_ = false;
+      cfg_ = pendingDraft_;
+      cfg_.normalize();
+      saveConfig(okmeterDir(), cfg_);
+      createModules();      // 静默重建：同位置同内容（mini chip 与形态无关），禁止任何透明度动画
+      hoverIdx_ = -1;
+      pressIdx_ = -1;
+      rebuildItems();
+      rebuildLayout();
+      render();
+    }
     // 横向形变落定补弹：形变期禁卡（原型 morphing 期 hideCard），落定后按指针
     // 实际落点重算悬停（等价原型 cardAfterMorph 的 elementFromPoint 命中）
     if (isHorizEdge(cfg_.edge) && emergeTarget_ > 0.5 && !menu_.open &&
