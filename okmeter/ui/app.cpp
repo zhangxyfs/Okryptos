@@ -344,7 +344,8 @@ int DockApp::hitItem(const DockGeom& g, int mx, int my, float dx) const {
 void DockApp::rebuildLayout() {
   const RECT work = workArea();
   const int screenH = (int)(work.bottom - work.top);
-  const DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
+  const int screenW = (int)(work.right - work.left);
+  const DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
   int h = (int)g.h;
   if (h < 120) h = 120;
   dockW_ = (int)g.w;
@@ -967,7 +968,8 @@ void DockApp::renderOnce() {
   d3d_.dc()->Clear(D2D1::ColorF(0, 0.0f));  // 全透明底
   const RECT work = workArea();
   const int screenH = (int)(work.bottom - work.top);
-  DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
+  const int screenW = (int)(work.right - work.left);
+  DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
   applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
                form_->hoverDimShrink());
   // 菜单向上扩窗时球区整体下移 zoneDY_（卡绘制共用同一 g，锚定随动）
@@ -1263,7 +1265,8 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       {
         const RECT work = workArea();
         const int screenH = (int)(work.bottom - work.top);
-        const DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
+        const int screenW = (int)(work.right - work.left);
+        const DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
         if (hoverIdx_ >= 0 && hoverIdx_ < (int)g.items.size()) {
           const ItemGeom& it = g.items[(size_t)hoverIdx_];
           const float dx = (float)zoneDX_;  // setWide(true) 已在 applyWindowPos 里置位
@@ -1290,7 +1293,8 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
         if (shotMenuSlot_ >= 0) {
           const RECT work = workArea();
           const int screenH = (int)(work.bottom - work.top);
-          const DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
+          const int screenW = (int)(work.right - work.left);
+          const DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
           if (shotMenuSlot_ < (int)g.items.size()) {
             cx = (int)g.items[(size_t)shotMenuSlot_].x + zoneDX_;
             cy = (int)g.items[(size_t)shotMenuSlot_].y;
@@ -1351,7 +1355,8 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     const int mx = (int)(short)LOWORD(lp), my = (int)(short)HIWORD(lp);
     const RECT work = workArea();
     const int screenH = (int)(work.bottom - work.top);
-    DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
+  const int screenW = (int)(work.right - work.left);
+    DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
     applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
                form_->hoverDimShrink());  // dy 参与命中
     const int idx = hitItem(g, mx, my - zoneDY_, (float)zoneDX_);
@@ -1442,7 +1447,8 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     // 阈值内视为按压/点击（按压光晕照常），越阈值进入拖拽（规格 §3.2）
     const RECT work = workArea();
     const int screenH = (int)(work.bottom - work.top);
-    DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
+  const int screenW = (int)(work.right - work.left);
+    DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
     applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
                form_->hoverDimShrink());
     const int idx = hitItem(g, (int)(short)LOWORD(lp),
@@ -1514,7 +1520,8 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     const int mx = (int)(short)LOWORD(lp), my = (int)(short)HIWORD(lp);
     const RECT work = workArea();
     const int screenH = (int)(work.bottom - work.top);
-    DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
+  const int screenW = (int)(work.right - work.left);
+    DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
     applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
                form_->hoverDimShrink());
     openMenu(mx, my, hitItem(g, mx, my - zoneDY_, (float)zoneDX_));
@@ -1678,7 +1685,8 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   // workArea() 回退 SPI_GETWORKAREA），多屏位置由后续拖拽/重建接管
   const RECT work = workArea();
   const int screenH = (int)(work.bottom - work.top);
-  const DockGeom g = form_->layout(cfg_.count, screenH, cfg_.edge);
+  const int screenW = (int)(work.right - work.left);
+  const DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
   int h = (int)g.h;
   if (h < 120) h = 120;
   dockW_ = (int)g.w;

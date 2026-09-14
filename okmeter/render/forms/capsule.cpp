@@ -14,9 +14,9 @@ class CapsuleForm final : public IForm {
 public:
   std::string id() const override { return "capsule"; }
 
-  DockGeom layout(int n, int screenH, const std::string& edge) const override {
+  DockGeom layout(int n, int screenW, int screenH, const std::string& edge) const override {
     // 尺寸全部由 layoutCapsule 按 uiScale(screenH) 缩放（比例法）
-    return layoutCapsule(n, screenH, edge);
+    return layoutCapsule(n, screenW, screenH, edge);
   }
 
   double hoverPush() const override { return 0; }      // 胶囊间距已大，推挤邻项只会抖

@@ -13,8 +13,8 @@ public:
   double hoverDimOpacity() const override { return 0.6; }  // 原型 .orb.dim opacity .6
 
   // 球体弧线：半径 30、中心项最靠屏内（布局细节见 ui/geometry.cpp）
-  DockGeom layout(int n, int screenH, const std::string& edge) const override {
-    return layoutArc(n, 30, 14, screenH, edge);
+  DockGeom layout(int n, int screenW, int screenH, const std::string& edge) const override {
+    return layoutArc(n, 30, 14, screenW, screenH, edge);
   }
 
   void drawItems(ID2D1DeviceContext* dc, const DrawContext& ctx) const override {

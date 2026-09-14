@@ -12,9 +12,10 @@ class CompassForm final : public IForm {
 public:
   std::string id() const override { return "compass"; }
 
-  DockGeom layout(int n, int screenH, const std::string& edge) const override {
+  DockGeom layout(int n, int screenW, int screenH, const std::string& edge) const override {
+    (void)screenW;
     (void)screenH;
-    (void)edge;  // 环形布局左右缘对称，edge 只影响 tuck 烘焙方向
+    (void)edge;  // 环形布局各边对称（横向同样径向），edge 只影响 tuck 烘焙方向
     // 展开态（e≈1）不旋转，位置回到基准角（悬停命中/卡锚定与绘制一致）
     return layoutCompass(n, rot_ * (1.0 - lastE_), screenH);
   }

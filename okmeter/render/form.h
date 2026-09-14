@@ -105,7 +105,7 @@ class IForm {
 public:
   virtual ~IForm() = default;
   virtual std::string id() const = 0;                    // "arc"
-  virtual DockGeom layout(int n, int screenH, const std::string& edge) const = 0;
+  virtual DockGeom layout(int n, int screenW, int screenH, const std::string& edge) const = 0;
   virtual void drawItems(ID2D1DeviceContext* dc, const DrawContext& ctx) const = 0;
   // 动画帧推进（罗盘收缩态旋转用；e=弹簧滑出进度）。默认无持续动画
   virtual void tick(double dt, double e) { (void)dt; (void)e; }

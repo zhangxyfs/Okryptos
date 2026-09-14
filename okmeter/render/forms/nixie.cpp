@@ -61,22 +61,36 @@ class NixieForm final : public IForm {
 public:
   std::string id() const override { return "nixie"; }
 
-  DockGeom layout(int n, int screenH, const std::string& edge) const override {
+  DockGeom layout(int n, int screenW, int screenH, const std::string& edge) const override {
     DockGeom g;
     if (n < 1) return g;
     const int mid = (n - 1) / 2;
     const double s = uiScale(screenH);  // 比例法：原型值 × 屏高/1080
     g.scale = s;
-    g.w = kW * s;
-    g.h = 2 * (mid * kStep * s + 68 * s);
     g.connector = false;  // 原型 nixie 隐藏 arcSvg
     g.items.resize((size_t)n);
+    if (isHorizEdge(edge)) {
+      // 原型横向 nixie：step 118、盒高 128
+      const double step = 118 * s;
+      g.w = 2 * (mid * step + 64 * s);
+      g.h = 128 * s;
+      for (int i = 0; i < n; ++i) {
+        g.items[(size_t)i].x = g.w / 2 + (i - mid) * step;
+        g.items[(size_t)i].y = g.h / 2;
+        g.items[(size_t)i].r = 32 * s;
+        g.items[(size_t)i].hw = 53 * s;
+      }
+      return g;
+    }
+    g.w = kW * s;
+    g.h = 2 * (mid * kStep * s + 68 * s);
     for (int i = 0; i < n; ++i) {
       g.items[(size_t)i].x = g.w / 2;
       g.items[(size_t)i].y = g.h / 2 + (i - mid) * kStep * s;
       g.items[(size_t)i].r = (float)(kItemHalfH * s);
       g.items[(size_t)i].hw = (float)(kItemHalfW * s);
     }
+    (void)screenW;  // 横向步长恒定 118，不吃屏宽
     (void)edge;
     return g;
   }
