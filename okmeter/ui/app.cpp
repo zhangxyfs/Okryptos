@@ -715,15 +715,21 @@ void DockApp::openMenu(int clientX, int clientY, int slot) {
   menuForSettings_ = false;
   settingsMenuOwner_ = -1;
   settings_.menuSlot = -1;
-  menuDir_ = cfg_.edge == "right" ? -1 : 1;  // 朝屏内侧级联（右缘向左，左缘向右）
+  POINT pt0{ clientX, clientY };
+  ClientToScreen(hwnd_, &pt0);
+  if (isHorizEdge(cfg_.edge)) {
+    const RECT w0 = workArea();
+    menuDir_ = pt0.x < (w0.left + w0.right) / 2 ? 1 : -1;  // 朝屏心侧级联
+  } else {
+    menuDir_ = cfg_.edge == "right" ? -1 : 1;
+  }
   menu_.subDir = menuDir_;                   // 箭头随展开方向（左 ◂ 右 ▸）
-  POINT pt{ clientX, clientY };
-  ClientToScreen(hwnd_, &pt);
+  const POINT pt = pt0;
   const RECT work = workArea();
   const int mw = menu_.width, mh = menu_.height;
   // 朝屏内侧展开（屏缘侧不出屏）：右缘向左开，点击点与菜单间留 4px 搭边
   int sx;
-  if (cfg_.edge == "right") {
+  if (menuDir_ < 0) {
     sx = pt.x - mw + 4;
     if (sx < work.left + 8) sx = work.left + 8;
     if (sx + mw > work.right - 8) sx = work.right - 8 - mw;  // 屏缘侧不出屏
@@ -826,7 +832,16 @@ void DockApp::openSettingsMenu(int gselCtrl) {
   menu_.entries.push_back(std::move(models));
   menu_.layout(d3d_);
   // 朝屏内级联：面板在左（dock 右缘）→ 向右展开；面板在右 → 向左（箭头随向）
-  menuDir_ = cfg_.edge == "right" ? 1 : -1;
+  {
+    const RECT w0 = workArea();
+    const D2D1_RECT_F gr = settings_.gselRect(gselCtrl);
+    RECT wr0{};
+    GetWindowRect(hwnd_, &wr0);
+    const int gx = (int)wr0.left + (int)((gr.left + gr.right) / 2);
+    menuDir_ = isHorizEdge(cfg_.edge)
+        ? (gx < (w0.left + w0.right) / 2 ? 1 : -1)
+        : (cfg_.edge == "right" ? 1 : -1);
+  }
   menu_.subDir = menuDir_;
   menu_.slot = slot;
   menu_.open = true;
@@ -973,10 +988,18 @@ void DockApp::openSettings() {
   settings_.begin(cfg_);
   settings_.layout(d3d_);
   const RECT work = workArea();
-  const int h = (int)(work.bottom - work.top) - 14 - 58;
-  const int x = cfg_.edge == "right" ? work.left + 14
-                                     : work.right - 14 - kSettingsPanelW;
-  panelScreen_ = RECT{ x, work.top + 14, x + kSettingsPanelW, work.top + 14 + h };
+  int x, yTop, yBot;
+  if (isHorizEdge(cfg_.edge)) {
+    x = work.left + ((int)(work.right - work.left) - kSettingsPanelW) / 2;
+    yTop = cfg_.edge == "top" ? work.top + winH_ + 14 : work.top + 14;
+    yBot = cfg_.edge == "top" ? work.bottom - 58 : work.bottom - winH_ - 14;
+  } else {
+    x = cfg_.edge == "right" ? work.left + 14 : work.right - 14 - kSettingsPanelW;
+    yTop = work.top + 14;
+    yBot = work.bottom - 58;
+  }
+  const int h = yBot - yTop;
+  panelScreen_ = RECT{ x, yTop, x + kSettingsPanelW, yTop + h };
   panelOpenQpc_ = qpcNow();
   prevEsc_ = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;  // 沿检测基准（同菜单）
   KillTimer(hwnd_, kTimerRetract);
