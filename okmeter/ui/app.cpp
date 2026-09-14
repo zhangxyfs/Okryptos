@@ -985,6 +985,7 @@ void DockApp::openSettings() {
   if (settings_.open) return;
   backdrop_.note(L"openSettings 入口（诊断消息触发或菜单）");
   closeMenu();
+  pendingApply_ = false;  // 重开面板即放弃挂起中继（草稿基准已变）
   settings_.begin(cfg_);
   settings_.layout(d3d_);
   const RECT work = workArea();
@@ -1022,6 +1023,7 @@ void DockApp::closeSettings(bool apply) {
       pendingDraft_ = settings_.draft;
       pendingApply_ = true;
     } else {
+      pendingApply_ = false;  // 同步保存消费掉挂起的中继，防旧草稿回退覆盖
       cfg_ = settings_.draft;
       cfg_.normalize();
       saveConfig(okmeterDir(), cfg_);
