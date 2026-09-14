@@ -156,7 +156,7 @@ void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
 
 void DockScene::drawCard(D3DContext& d3d, IMaterial& material,
                          const DetailCard& card, const std::string& edge,
-                         const DockGeom& g, float dx, double winH,
+                         const DockGeom& g, float dx, double winW, double winH,
                          int hoverIdx, double cardRadius) {
   if (!card.valid || !ensure(d3d, (float)g.scale) || hoverIdx < 0 ||
       hoverIdx >= (int)g.items.size())
@@ -184,7 +184,13 @@ void DockScene::drawCard(D3DContext& d3d, IMaterial& material,
     if (o.x + dx + half > colMax) colMax = o.x + dx + half;
   }
   float x;
-  if (edge == "right") {
+  if (isHorizEdge(edge)) {
+    const double anchorX = it.x + dx;
+    x = (float)(anchorX - (double)kCardW / 2);
+    const float maxX = (float)winW - kCardW - 8.0f;
+    if (x > maxX) x = maxX;
+    if (x < 8.0f) x = 8.0f;
+  } else if (edge == "right") {
     const double desired = it.x + dx - cardRadius - 12.0 - kCardW;
     const double limit = colMin - 12.0 - kCardW;
     x = (float)(desired < limit ? desired : limit);  // windows.h min/max 宏冲突，手写比较
@@ -197,14 +203,26 @@ void DockScene::drawCard(D3DContext& d3d, IMaterial& material,
     if (x > maxX) x = maxX;
   }
   const double anchorY = it.y + it.dy;
-  // 垂直夹取负 maxY 兜底：窗口装不下整卡（winH-24 < cardH → maxY<12）时截底保头——
-  // 卡高收到 winH-24（超出的尾部行整行弃画，标题/大数必可见），maxY 恒 ≥12
-  const float availH = (float)winH - 24.0f;
-  const float drawH = cardH > availH ? availH : cardH;
-  float y = (float)anchorY - drawH * 0.5f;
-  const float maxY = (float)winH - drawH - 12.0f;
-  if (y > maxY) y = maxY;
-  if (y < 12.0f) y = 12.0f;
+  // drawH/y 提升复用：横向与竖向分支各自赋值（勿在分支内重复定义）
+  float drawH, y;
+  if (isHorizEdge(edge)) {
+    // 横向卡区 300px = kCardZoneH（app.cpp 常量同款值）：edge=top 卡区在条之下
+    //（y = 条底+12，截底保头同竖向，availH = kCardZoneH-24）；edge=bottom 卡区在
+    // 条之上，y 在 [12, kCardZoneH-12-drawH] 内尽量贴条
+    const float barH = (float)winH - 300.0f;  // kCardZoneH（app.cpp 常量同款值）
+    const float availH = 300.0f - 24.0f;
+    drawH = cardH > availH ? availH : cardH;
+    y = edge == "top" ? barH + 12.0f : 300.0f - 12.0f - drawH;
+  } else {
+    // 垂直夹取负 maxY 兜底：窗口装不下整卡（winH-24 < cardH → maxY<12）时截底保头——
+    // 卡高收到 winH-24（超出的尾部行整行弃画，标题/大数必可见），maxY 恒 ≥12
+    const float availH = (float)winH - 24.0f;
+    drawH = cardH > availH ? availH : cardH;
+    y = (float)anchorY - drawH * 0.5f;
+    const float maxY = (float)winH - drawH - 12.0f;
+    if (y > maxY) y = maxY;
+    if (y < 12.0f) y = 12.0f;
+  }
 
   material.drawCardBack(dc, D2D1::RectF(x, y, x + kCardW, y + drawH), 12.0f);
 

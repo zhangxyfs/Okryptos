@@ -41,13 +41,16 @@ public:
   std::vector<double> measureChipWidths(D3DContext& d3d,
                                         const std::vector<DockItem>& items);
 
-  // 悬停详情卡：宽 252、圆角 12、卡底委托 material.drawCardBack；水平位置按原型
+  // 悬停详情卡：宽 252、圆角 12、卡底委托 material.drawCardBack；竖向水平位置按原型
   // RADII 规则（卡内缘 = 悬停项内缘 ∓ (cardRadius+12)），并夹取到不遮挡任何项
   //（项列最内缘再让 12px）；垂直居中 anchorY 并夹进 [12, winH-12]。
+  // 横向：水平居中于悬停项并夹进 [8, winW-cardW-8]；垂直 edge=top 在条区之下
+  //（y = winH-kCardZoneH+12，截底保头 availH = kCardZoneH-24），edge=bottom 在条区
+  // 之上贴条（y = kCardZoneH-12-drawH）。
   // g 为经 applyHover 的布局几何（未烘焙 tuck），dx 为球区整体水平偏移。
   void drawCard(D3DContext& d3d, IMaterial& material, const DetailCard& card,
-                const std::string& edge, const DockGeom& g, float dx, double winH,
-                int hoverIdx, double cardRadius);
+                const std::string& edge, const DockGeom& g, float dx, double winW,
+                double winH, int hoverIdx, double cardRadius);
 
 private:
   bool ensure(D3DContext& d3d, float scale = 1.0f);  // dc 指针/代际/比例变化时重建全部资源

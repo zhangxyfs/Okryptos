@@ -1082,30 +1082,41 @@ void DockApp::renderOnce() {
               material_->id() == "glow" ? pressIdx_ : -1,  // 按压下沉仅沉浸光感
               isHorizEdge(cfg_.edge) && !miniG_.items.empty() ? &miniG_ : nullptr);
   // 菜单打开期间不画详情卡：右键时悬停卡与菜单级联列叠加层级太乱
+  // 显示条件：竖向保持弹簧过半即弹；横向改 emerged_ && target>0.5——形变（morph）
+  // 进行中禁卡，落定后由 animTick 按指针实际落点补弹
+  const bool cardUp = isHorizEdge(cfg_.edge)
+      ? (emerged_ && emergeTarget_ > 0.5)      // 形变中禁卡（落定补弹见 animTick）
+      : (emerge_.value > 0.5);
   if (card_.valid && !menu_.open && hoverIdx_ >= 0 && hoverIdx_ < (int)g.items.size() &&
-      emerge_.value > 0.5) {
+      cardUp) {
     // 垂直夹取基准用当前真实客户区高度（联合窗口下 winH_ 只是球区高度，
     // 菜单/设置面板扩窗后窗口更高——错用 winH_ 会把卡 clamp 到顶部）
     RECT cr{};
     GetClientRect(hwnd_, &cr);
     const double clientH = (double)(cr.bottom - cr.top);
-    // cardin 出现动画 140ms（透明度 + 向屏缘 6px 滑入，原型 .detail cardin 同款）
+    // cardin 出现动画 140ms（透明度 + 向屏缘 6px 滑入，原型 .detail cardin 同款）；
+    // 横向为垂直滑入（top 自上而下 / bottom 自下而上），竖向为水平滑入
     const double ct = cardAnimT();
     if (ct < 1.0) {
-      const float off =
-          (float)((1.0 - ct) * 6.0) * (cfg_.edge == "right" ? 1.0f : -1.0f);
+      const bool hz = isHorizEdge(cfg_.edge);
+      const float offX = hz ? 0.0f
+          : (float)((1.0 - ct) * 6.0) * (cfg_.edge == "right" ? 1.0f : -1.0f);
+      const float offY = !hz ? 0.0f
+          : (float)((1.0 - ct) * 6.0) * (cfg_.edge == "top" ? -1.0f : 1.0f);
       ID2D1DeviceContext* dc = d3d_.dc();
-      dc->SetTransform(D2D1::Matrix3x2F::Translation(off, 0.0f));
+      dc->SetTransform(D2D1::Matrix3x2F::Translation(offX, offY));
       const D2D1_LAYER_PARAMETERS lp = D2D1::LayerParameters(
           D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
           D2D1::IdentityMatrix(), (float)ct);
       dc->PushLayer(&lp, nullptr);
-      scene_.drawCard(d3d_, *material_, card_, cfg_.edge, g, dx, clientH,
+      scene_.drawCard(d3d_, *material_, card_, cfg_.edge, g, dx,
+                      (double)(cr.right - cr.left), clientH,
                       hoverIdx_, form_->cardRadius(hoverIdx_, (cfg_.count - 1) / 2));
       dc->PopLayer();
       dc->SetTransform(D2D1::IdentityMatrix());
     } else {
-      scene_.drawCard(d3d_, *material_, card_, cfg_.edge, g, dx, clientH,
+      scene_.drawCard(d3d_, *material_, card_, cfg_.edge, g, dx,
+                      (double)(cr.right - cr.left), clientH,
                       hoverIdx_, form_->cardRadius(hoverIdx_, (cfg_.count - 1) / 2));
     }
   }
@@ -1243,6 +1254,23 @@ void DockApp::animTick() {
   if (emerge_.settled(emergeTarget_)) {
     emerge_.snap(emergeTarget_);
     emerged_ = true;
+    // 横向形变落定补弹：形变期禁卡（原型 morphing 期 hideCard），落定后按指针
+    // 实际落点重算悬停（等价原型 cardAfterMorph 的 elementFromPoint 命中）
+    if (isHorizEdge(cfg_.edge) && emergeTarget_ > 0.5 && !menu_.open &&
+        !settings_.open) {
+      POINT pt{};
+      GetCursorPos(&pt);
+      RECT wr{};
+      GetWindowRect(hwnd_, &wr);
+      const int mx = pt.x - (int)wr.left, my = pt.y - (int)wr.top;
+      DockGeom g = barGeom(1.0);
+      const int idx = (mx >= 0 && my >= 0)
+          ? hitItem(g, mx, my - zoneDY_, (float)zoneDX_) : -1;
+      if (idx != hoverIdx_) {
+        hoverIdx_ = idx;
+        rebuildCard();
+      }
+    }
   }
   updatePosition();
 #if defined(OKM_ANIM_DIAG)
