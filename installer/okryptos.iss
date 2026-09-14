@@ -59,6 +59,12 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 ; 升级收尾：静默覆盖安装后也拉起新 okd（不带 skipifsilent）；okd 启动时自愈删除 .upgrading 熔断
 Filename: "{app}\okd.exe"; Flags: nowait runhidden
+; 原样恢复安装前在跑的常驻进程（PrepareToInstall 快照）：GUI 一键静默升级后配置中心
+; 与 Token 监视器自己回来，不用用户手动重开。不带 postinstall/skipifsilent——静默也执行。
+; 交互式快速升级下若管理器原先在跑，此处恢复后 wpFinished 的 ShellExec 会跳过（见
+; CurPageChanged 的 WasOkManagerRunning 判断），不会双开
+Filename: "{app}\OkManager.exe"; Flags: nowait; Check: WasOkManagerRunning
+Filename: "{app}\OkMeter.exe"; Flags: nowait; Check: WasOkMeterRunning
 Filename: "{app}\OkManager.exe"; Description: "打开 Okryptos 配置中心（引导页可一键完成 hooks / 技能 / embedding 配置）"; Flags: postinstall skipifsilent; Check: not IsFastUpgrade
 
 [Code]
@@ -68,6 +74,22 @@ const
 
 var
   FinishAutoDone: Boolean;
+  { 安装前在跑的常驻进程快照（PrepareToInstall 可能因文件占用重试而多次进入，
+    只记首次——重试时进程已被上次 taskkill 杀掉，再记会把"在跑"误记成"没在跑"） }
+  ProcessesRecorded: Boolean;
+  OkManagerWasRunning: Boolean;
+  OkMeterWasRunning: Boolean;
+
+{ [Run] Check 只认无参函数，不认全局变量——包一层 }
+function WasOkManagerRunning: Boolean;
+begin
+  Result := OkManagerWasRunning;
+end;
+
+function WasOkMeterRunning: Boolean;
+begin
+  Result := OkMeterWasRunning;
+end;
 
 { 点分版本号取第 Idx 段（缺段当 0） }
 function VersionPart(const S: string; Idx: Integer): Integer;
@@ -181,9 +203,20 @@ begin
   RegWriteStringValue(HKCU, EnvKey, 'Path', Path);
 end;
 
+{ 进程是否在跑：tasklist 过滤后 findstr 找镜像名（不依赖 tasklist 的本地化提示文案） }
+function IsProcessRunning(const ImageName: string): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(ExpandConstant('{cmd}'),
+    '/C tasklist /FI "IMAGENAME eq ' + ImageName + '" | findstr /I /C:"' + ImageName + '" >NUL',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
 { 安装前停常驻进程：必须在 wpPreparing 的文件占用检查之前跑，否则 Inno 弹
   "应用程序正在使用文件"页（v2.26.2 实测卡点）。先优雅停 okd，再 taskkill 强杀
-  四个进程兜底（OkMeter/OkManager/ok.exe 无 stop 命令）——不问用户 }
+  四个进程兜底（OkMeter/OkManager/ok.exe 无 stop 命令）——不问用户。
+  强杀前快照哪些在跑，装完由 [Run] 段按快照原样恢复（静默升级同样恢复） }
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
@@ -191,6 +224,12 @@ begin
   Result := '';
   if not HasPrevInstall then
     exit;
+  if not ProcessesRecorded then
+  begin
+    OkManagerWasRunning := IsProcessRunning('OkManager.exe');
+    OkMeterWasRunning := IsProcessRunning('OkMeter.exe');
+    ProcessesRecorded := True;
+  end;
   if FileExists(ExpandConstant('{app}\okd.exe')) then
     Exec(ExpandConstant('{app}\okd.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
   else if FileExists(ExpandConstant('{app}\ok.exe')) then
@@ -231,11 +270,13 @@ begin
     exit;
   end;
   { 快速升级收尾：完成页一出现即自动打开配置中心并自动收向导——安装全程零点击。
-    安装段的 postinstall OkManager 项已被 Check: not IsFastUpgrade 排除，不会双开 }
+    安装段的 postinstall OkManager 项已被 Check: not IsFastUpgrade 排除，不会双开；
+    管理器若安装前就在跑，[Run] 恢复项已拉起，这里同样跳过不再开第二个 }
   if (PageID = wpFinished) and IsFastUpgrade and (not FinishAutoDone) then
   begin
     FinishAutoDone := True;
-    ShellExec('', ExpandConstant('{app}\OkManager.exe'), '', '', SW_SHOW, ewNoWait, ResultCode);
+    if not OkManagerWasRunning then
+      ShellExec('', ExpandConstant('{app}\OkManager.exe'), '', '', SW_SHOW, ewNoWait, ResultCode);
     PostMessageW(WizardForm.NextButton.Handle, BM_CLICK, 0, 0);
   end;
 end;

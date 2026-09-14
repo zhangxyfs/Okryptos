@@ -218,17 +218,10 @@ func Stop(stdout, _ io.Writer) int {
 
 // OpenGUI 确保 daemon 在线（含版本切换）后打开 GUI 首选路径（内嵌窗口优先、浏览器回退）并立即返回。
 func OpenGUI(_, stderr io.Writer) int {
-	if info, ok := EnsureCurrent(); ok {
+	// 30s 预算：daemon 冷启动（升级后新二进制、sidecar 初始化）远超原 3s 轮询窗
+	if info, ok := WaitReady(30 * time.Second); ok {
 		OpenBrowserFunc(info.URL() + "/#token=" + info.Token)
 		return 0
-	}
-	// daemon 正在后台拉起：轮询就绪（最长 3s）
-	for i := 0; i < 30; i++ {
-		time.Sleep(100 * time.Millisecond)
-		if info, err := daemonx.Load(); err == nil && info.Healthy(quickClient()) {
-			OpenBrowserFunc(info.URL() + "/#token=" + info.Token)
-			return 0
-		}
 	}
 	fmt.Fprintln(stderr, "daemon 启动超时，请重试")
 	return 1

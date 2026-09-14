@@ -93,6 +93,24 @@ func EnsureCurrent() (*daemonx.Info, bool) {
 	return info, true
 }
 
+// WaitReady 等待 daemon 就绪并返回健康凭证。升级/冷启动后 okd 要数秒到十几秒
+// 才能就绪（新二进制 AV 扫描、sidecar 冷启），3s 轮询窗实测会误判"未就绪"退出
+// （v2.26.3 安装器恢复 OkManager 时踩中）。每轮重新 EnsureCurrent（内部重新
+// Load 凭证——新 daemon 会重写 daemon.json 轮换 token；拉起动作有 .spawning
+// 15s 防抖，轮询不会刷 spawn 风暴）。budget 耗尽返回 false。
+func WaitReady(budget time.Duration) (*daemonx.Info, bool) {
+	deadline := time.Now().Add(budget)
+	for {
+		if info, ok := EnsureCurrent(); ok {
+			return info, true
+		}
+		if !time.Now().Before(deadline) {
+			return nil, false
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 // ForwardHook 把 agent hook 事件转发给 daemon。返回 handled=false 的情形仅限
 // "daemon 未收到请求"（不在/不健康/连接失败），调用方据此走本地兜底；超时视作
 // handled=true：请求已被 daemon 接收且处理不可取消，本地兜底会导致同一次事件

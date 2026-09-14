@@ -312,16 +312,11 @@ func registerHostClass(className *uint16) {
 }
 
 func runHost(stdout, stderr io.Writer) int {
-	info, ok := daemon.EnsureCurrent()
-	if !ok { // daemon 正在后台拉起：与 daemon.OpenGUI 同款轮询（最长 3s）
-		for i := 0; i < 30 && !ok; i++ {
-			time.Sleep(100 * time.Millisecond)
-			info, ok = daemon.EnsureCurrent()
-		}
-		if !ok {
-			fmt.Fprintln(stderr, "daemon 未就绪，请稍后重试")
-			return 1
-		}
+	// 30s 预算：升级收尾被安装器拉起时新 okd 可能还在冷启动（v2.26.3 实测 3s 不够用）
+	info, ok := daemon.WaitReady(30 * time.Second)
+	if !ok {
+		fmt.Fprintln(stderr, "daemon 未就绪，请稍后重试")
+		return 1
 	}
 
 	screenW, screenH := primaryScreenSize()
