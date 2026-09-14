@@ -115,7 +115,7 @@ public:
     const float h = (float)g.h;
 
     // 横向：光源换缘——vside（top=-1 光在屏顶之外 / bottom=+1 光在任务栏之外），
-    // 锚点取项群上/下缘（半高 it.r）之外 170×scale；盒沿轴长 = g.w
+    // 锚点取项群上/下缘（半高 it.r）之外 170（与竖向 gasX 同口径，不乘 scale）；盒沿轴长 = g.w
     const float vside = edge == "top" ? -1.0f : 1.0f;
     const float wBox = (float)g.w;
     float gasY = 0.0f;
@@ -129,7 +129,7 @@ public:
         if (ey > extentY) extentY = ey;
       }
       edgeY += vside * extentY;  // 项半高 → 窗口上/下缘
-      gasY = edgeY + vside * 170.0f * (float)g.scale;
+      gasY = edgeY + vside * 170.0f;
     }
 
     ensureBrushes(dc);
