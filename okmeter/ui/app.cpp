@@ -1299,6 +1299,7 @@ void DockApp::animTick() {
       rebuildItems();
       rebuildLayout();
       render();
+      if (cfg_.pinned) setEmergeTarget(1);  // 保持显示：中继重建后弹回展开（pinned 语义）
     }
     // 横向形变落定补弹：形变期禁卡（原型 morphing 期 hideCard），落定后按指针
     // 实际落点重算悬停（等价原型 cardAfterMorph 的 elementFromPoint 命中）

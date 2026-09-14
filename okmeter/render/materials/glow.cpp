@@ -156,6 +156,10 @@ public:
             D2D1::Ellipse(D2D1::Point2F(wBox * 0.62f, gasY + vside * 40.0f), 430.0f, 300.0f),
             gasAccent_.Get());
       } else {
+      gasInk_->SetRadiusX(340.0f);
+      gasInk_->SetRadiusY(480.0f);
+      gasAccent_->SetRadiusX(300.0f);
+      gasAccent_->SetRadiusY(430.0f);
       gasInk_->SetCenter(D2D1::Point2F(gasX + (float)std::sin(w) * 14.0f,
                                        h * 0.42f + (float)std::cos(w * 0.7) * 20.0f));
       dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(gasX, h * 0.42f), 340.0f, 480.0f),
