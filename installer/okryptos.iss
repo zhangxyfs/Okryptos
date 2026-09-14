@@ -20,6 +20,12 @@ OutputBaseFilename=OkryptosSetup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; 升级时语言跟随上次安装（UsePreviousLanguage 默认开，显式声明兜底）；首装才弹语言选择
+ShowLanguageDialog=auto
+UsePreviousLanguage=yes
+; 占用文件的应用程序自动强制关闭不询问（弹"自动关闭?"页实测是升级卡点）；
+; RestartApplications 默认开，安装后由 RM 自动拉起
+CloseApplications=force
 UninstallDisplayName={#AppName} 知识库
 SetupIconFile=assets\logo.ico
 ; 数据目录 ~/.okryptos 由程序运行时创建，卸载默认保留（见 [Code]）
@@ -53,20 +59,62 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 ; 升级收尾：静默覆盖安装后也拉起新 okd（不带 skipifsilent）；okd 启动时自愈删除 .upgrading 熔断
 Filename: "{app}\okd.exe"; Flags: nowait runhidden
-Filename: "{app}\OkManager.exe"; Description: "打开 Okryptos 配置中心（引导页可一键完成 hooks / 技能 / embedding 配置）"; Flags: postinstall skipifsilent
+Filename: "{app}\OkManager.exe"; Description: "打开 Okryptos 配置中心（引导页可一键完成 hooks / 技能 / embedding 配置）"; Flags: postinstall skipifsilent; Check: not IsFastUpgrade
 
 [Code]
 const
   UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{9F4C3A2E-7B1D-4A5F-9E2C-6D8B1A3F5E70}_is1';
   EnvKey = 'Environment';
 
-{ 升级判定：存在旧安装且旧版本号 ≠ 当前版本号 }
-function IsUpgrade: Boolean;
+var
+  FinishAutoDone: Boolean;
+
+{ 点分版本号取第 Idx 段（缺段当 0） }
+function VersionPart(const S: string; Idx: Integer): Integer;
+var
+  I, P: Integer;
+  R: string;
+begin
+  R := S;
+  for I := 1 to Idx - 1 do
+  begin
+    P := Pos('.', R);
+    if P = 0 then begin Result := 0; exit; end;
+    R := Copy(R, P + 1, Length(R));
+  end;
+  P := Pos('.', R);
+  if P > 0 then R := Copy(R, 1, P - 1);
+  Result := StrToIntDef(R, 0);
+end;
+
+{ 版本比较：A >= B（逐段数值比） }
+function VersionGe(const A, B: string): Boolean;
+var
+  I, Va, Vb: Integer;
+begin
+  for I := 1 to 4 do
+  begin
+    Va := VersionPart(A, I);
+    Vb := VersionPart(B, I);
+    if Va <> Vb then begin Result := Va > Vb; exit; end;
+  end;
+  Result := True;
+end;
+
+function HasPrevInstall: Boolean;
+var
+  PrevVer: string;
+begin
+  Result := RegQueryStringValue(HKCU, UninstallKey, 'DisplayVersion', PrevVer);
+end;
+
+{ 快速升级判定：存在旧安装且安装版本 >= 现有版本（含同版重装；降级走完整交互流程） }
+function IsFastUpgrade: Boolean;
 var
   PrevVer: string;
 begin
   Result := RegQueryStringValue(HKCU, UninstallKey, 'DisplayVersion', PrevVer) and
-            (PrevVer <> '{#AppVersion}');
+            VersionGe('{#AppVersion}', PrevVer);
 end;
 
 { 有旧安装时预填旧目录（UsePreviousAppDir=no 下由代码接管默认值） }
@@ -78,10 +126,15 @@ begin
     WizardForm.DirEdit.Text := PrevDir;
 end;
 
-{ 升级时跳过目录选择页（静默装进旧目录）；同版本重装/首次安装仍显示 }
+{ 快速升级：跳过欢迎/目录/程序组/附加任务/就绪页，双击安装包直接进安装，全程零点击。
+  附加任务沿用上次勾选（UsePreviousTasks 默认开）；目录由 InitializeWizard 预填旧目录。
+  首次安装与降级（旧版 > 新版）保持完整交互流程 }
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  Result := (PageID = wpSelectDir) and IsUpgrade;
+  Result := IsFastUpgrade and
+            ((PageID = wpWelcome) or (PageID = wpSelectDir) or
+             (PageID = wpSelectProgramGroup) or (PageID = wpSelectTasks) or
+             (PageID = wpReady));
 end;
 
 function PathContains(const Path, Dir: string): Boolean;
@@ -128,19 +181,26 @@ begin
   RegWriteStringValue(HKCU, EnvKey, 'Path', Path);
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
+{ 安装前停常驻进程：必须在 wpPreparing 的文件占用检查之前跑，否则 Inno 弹
+  "应用程序正在使用文件"页（v2.26.2 实测卡点）。先优雅停 okd，再 taskkill 强杀
+  四个进程兜底（OkMeter/OkManager/ok.exe 无 stop 命令）——不问用户 }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
 begin
-  if CurStep = ssInstall then
-  begin
-    { 文件拷贝前停常驻 daemon：新版目标是 okd.exe stop；从旧版（无 okd.exe 的单 exe 部署）
-      升级时回退旧二进制的 ok.exe daemon stop；两者都不在则跳过无害 }
-    if FileExists(ExpandConstant('{app}\okd.exe')) then
-      Exec(ExpandConstant('{app}\okd.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
-    else if FileExists(ExpandConstant('{app}\ok.exe')) then
-      Exec(ExpandConstant('{app}\ok.exe'), 'daemon stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  end;
+  Result := '';
+  if not HasPrevInstall then
+    exit;
+  if FileExists(ExpandConstant('{app}\okd.exe')) then
+    Exec(ExpandConstant('{app}\okd.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+  else if FileExists(ExpandConstant('{app}\ok.exe')) then
+    Exec(ExpandConstant('{app}\ok.exe'), 'daemon stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /F /IM ok.exe /IM okd.exe /IM OkManager.exe /IM OkMeter.exe >NUL 2>&1',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
   if CurStep = ssPostInstall then
   begin
     { 2.25.0 改名（OpenKnowledge→Okryptos）：新 Run 值名 Okryptos 已由 [Registry]
@@ -149,6 +209,34 @@ begin
     RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'OpenKnowledge');
     if WizardIsTaskSelected('addpath') then
       AddToUserPath(ExpandConstant('{app}'));
+  end;
+end;
+
+{ 脚本层无 TButton.Click 方法，向按钮句柄 PostMessage BM_CLICK 异步触发按钮 }
+const
+  BM_CLICK = $00F5;
+
+function PostMessageW(hWnd, Msg, wParam, lParam: LongInt): Boolean;
+  external 'PostMessageW@user32.dll stdcall';
+
+procedure CurPageChanged(PageID: Integer);
+var
+  ResultCode: Integer;
+begin
+  if IsFastUpgrade and (PageID = wpReady) then
+  begin
+    { Inno 7 的 ShouldSkipPage 对 wpReady 不生效（欢迎/目录/程序组/任务页均已跳过，
+      就绪页仍显示）——改为异步点击"安装"自动开始 }
+    PostMessageW(WizardForm.NextButton.Handle, BM_CLICK, 0, 0);
+    exit;
+  end;
+  { 快速升级收尾：完成页一出现即自动打开配置中心并自动收向导——安装全程零点击。
+    安装段的 postinstall OkManager 项已被 Check: not IsFastUpgrade 排除，不会双开 }
+  if (PageID = wpFinished) and IsFastUpgrade and (not FinishAutoDone) then
+  begin
+    FinishAutoDone := True;
+    ShellExec('', ExpandConstant('{app}\OkManager.exe'), '', '', SW_SHOW, ewNoWait, ResultCode);
+    PostMessageW(WizardForm.NextButton.Handle, BM_CLICK, 0, 0);
   end;
 end;
 
