@@ -1,8 +1,8 @@
 #include <windows.h>
 
 1 VERSIONINFO
-FILEVERSION 2,26,2,0
-PRODUCTVERSION 2,26,2,0
+FILEVERSION 2,26,3,0
+PRODUCTVERSION 2,26,3,0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
@@ -10,8 +10,8 @@ BEGIN
     BEGIN
       VALUE "FileDescription", "OkMeter Token Monitor\0"
       VALUE "ProductName", "Okryptos OkMeter\0"
-      VALUE "FileVersion", "2.26.2.0\0"
-      VALUE "ProductVersion", "2.26.2.0\0"
+      VALUE "FileVersion", "2.26.3.0\0"
+      VALUE "ProductVersion", "2.26.3.0\0"
     END
   END
   BLOCK "VarFileInfo"
