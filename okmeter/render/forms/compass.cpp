@@ -43,17 +43,19 @@ public:
     const size_t n = g.items.size();
     if (ctx.mid < 0 || (size_t)ctx.mid >= n) return;
     const double e = ctx.e < 0 ? 0 : ctx.e > 1 ? 1 : ctx.e;
-    const float dimBase = (float)(0.55 + 0.45 * e);  // 收缩态 55%（原型同款）
+    const bool hz = ctx.mini != nullptr;  // 横向：mini⇄stage morph 绘制
+    const float dimBase = hz ? 1.0f : (float)(0.55 + 0.45 * e);  // 横向全额（无 55% 降暗）
+    const float fe = hz ? (float)e : 1.0f;  // 形态内容渐隐（chip 文字反向渐显）
     bool anyHot = false;  // 有悬停项时非悬停项降暗（原型 .dim）
     for (const ItemGeom& it : g.items) anyHot = anyHot || it.scale > 1.001;
 
     // 虚线圆环轨道（原型 arcSvg circle r=84 stroke hairline dasharray 2 4；
-    // 轨道跟随罗盘中心烘焙位置，收缩态不透明度随 e 衰减 .35+.65e）
+    // 轨道跟随罗盘中心烘焙位置，收缩态不透明度随 e 衰减 .35+.65e，横向再随 fe 渐隐）
     const ItemGeom& hub = g.items[(size_t)ctx.mid];
     if (ensureDash(dc)) {
       ctx.brush->SetColor(
           inkOn(ctx.material ? ctx.material->backdropLuma() : 0.0f,
-                                   0.13f * (float)(0.35 + 0.65 * e)));
+                                   0.13f * (float)(0.35 + 0.65 * e) * fe));
       const float R84 = 84.0f * (float)g.scale;  // 轨道半径 ×比例
       dc->DrawEllipse(D2D1::Ellipse(D2D1::Point2F((float)hub.x, (float)hub.y),
                                     R84, R84),
@@ -66,6 +68,7 @@ public:
       const bool isHub = (int)i == ctx.mid;
       const bool isHot = it.scale > 1.001;
       const float dim = dimBase * ((anyHot && !isHot) ? (float)hoverDimOpacity() : 1.0f);  // 原型 .dim 降暗
+      const float fade = dim * fe;  // 形态内容墨色（横向随 e 渐隐）
 
       // 球底（材质）：r 已并入悬停放大，背景采样与屏幕对齐不被放大
       OrbStyleCtx osc{};
@@ -74,11 +77,15 @@ public:
       osc.brush = ctx.brush;
       osc.center = c;
       osc.r = (float)(it.r * it.scale);
+      osc.halfW = (float)(it.hw * it.scale);  // morph 后 hw 渐增 → 材质胶囊分支自动接管
       osc.isCenter = isHub;  // 中心罗盘：accent 描边 + 光晕环（原型 .hub border/box-shadow）
       osc.isHot = isHot;
       osc.dimmed = dim;
       osc.backdropDX = ctx.backdropDX;
       osc.backdropDY = ctx.backdropDY;
+      if (hz)  // pill→球角插值（圆形项材质忽略 cornerR，直接传插值即可）
+        osc.cornerR = (float)((*ctx.mini).items[i].r +
+                              (it.r - (*ctx.mini).items[i].r) * e);
       ctx.material->drawOrbBack(dc, osc);
 
       // 球内双行文本：悬停项整体放大（与原型 transform: scale 同款）；
@@ -93,36 +100,37 @@ public:
         if (isHub) {
           if (!di.value.empty()) {
             const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y - 18.0f * u, c.x + r, c.y + 2.0f * u);
-            if (halo) liquidHalo(dc, ctx.brush, di.value, ctx.hubFmt, tr, (float)dim);
-            ctx.brush->SetColor(inkLight( 0.93f * dim));
+            if (halo) liquidHalo(dc, ctx.brush, di.value, ctx.hubFmt, tr, (float)fade);
+            ctx.brush->SetColor(inkLight( 0.93f * fade));
             dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.hubFmt,
                          &tr, ctx.brush);
           }
           if (!di.label.empty()) {
             const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y + 3.0f * u, c.x + r, c.y + 16.0f * u);
-            if (halo) liquidHalo(dc, ctx.brush, di.label, ctx.labelFmt, tr, (float)dim);
-            ctx.brush->SetColor(inkLight( 0.66f * dim));
+            if (halo) liquidHalo(dc, ctx.brush, di.label, ctx.labelFmt, tr, (float)fade);
+            ctx.brush->SetColor(inkLight( 0.66f * fade));
             dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.labelFmt,
                          &tr, ctx.brush);
           }
         } else {
           if (!di.value.empty()) {
             const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y - 12.0f * u, c.x + r, c.y + 1.0f * u);
-            if (halo) liquidHalo(dc, ctx.brush, di.value, ctx.satFmt, tr, (float)dim);
-            ctx.brush->SetColor(inkLight( 0.93f * dim));
+            if (halo) liquidHalo(dc, ctx.brush, di.value, ctx.satFmt, tr, (float)fade);
+            ctx.brush->SetColor(inkLight( 0.93f * fade));
             dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.satFmt,
                          &tr, ctx.brush);
           }
           if (!di.label.empty()) {
             const D2D1_RECT_F tr = D2D1::RectF(c.x - r, c.y + 1.0f * u, c.x + r, c.y + 12.0f * u);
-            if (halo) liquidHalo(dc, ctx.brush, di.label, ctx.labelFmt, tr, (float)dim);
-            ctx.brush->SetColor(inkLight( 0.66f * dim));
+            if (halo) liquidHalo(dc, ctx.brush, di.label, ctx.labelFmt, tr, (float)fade);
+            ctx.brush->SetColor(inkLight( 0.66f * fade));
             dc->DrawText(di.label.c_str(), (UINT32)di.label.size(), ctx.labelFmt,
                          &tr, ctx.brush);
           }
         }
       }
       if (isHot) dc->SetTransform(D2D1::Matrix3x2F::Identity());
+      if (hz) drawChipText(ctx, dc, i, c.x, c.y, (float)(1.0 - e));  // 每条目（含卫星）各自 morph 成 chip
     }
   }
 

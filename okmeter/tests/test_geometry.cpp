@@ -105,6 +105,8 @@ TEST(geom_morph_endpoints_and_anchor) {
   auto stage = layoutCapsule(3, 1920, 1080, "top");
   std::vector<double> w{80, 100, 80};
   auto mini = layoutMini(w, 1.0);
+  stage.items[0].dx = 12;   // 悬停让位：展开全额、收缩归零，morph 全程线性
+  CHECK(std::abs(morphGeom(stage, mini, 0.5, false).items[0].dx - 6.0) < 1e-9);
   auto g0 = morphGeom(stage, mini, 0.0, false);
   auto g1 = morphGeom(stage, mini, 1.0, false);
   CHECK(std::abs(g0.w - mini.w) < 1e-9 && std::abs(g0.h - mini.h) < 1e-9);

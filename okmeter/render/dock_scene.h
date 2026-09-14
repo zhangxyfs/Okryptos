@@ -33,7 +33,13 @@ public:
             BackdropCapture* backdrop, const DockGeom& g,
             const std::vector<DockItem>& items, int mid,
             double e, const std::string& edge, float dx = 0,
-            float backdropDX = 0, float backdropDY = 0, int pressIdx = -1);
+            float backdropDX = 0, float backdropDY = 0, int pressIdx = -1,
+            const DockGeom* mini = nullptr);
+
+  // 横向 mini chip 实测宽（名+值文本测量 + 内边距 11×2 + 间距 6，全 ×fmtScale）；
+  // 返回空 = 测量不可用（格式未建/设备未就绪），调用方回退 96×scale 估值
+  std::vector<double> measureChipWidths(D3DContext& d3d,
+                                        const std::vector<DockItem>& items);
 
   // 悬停详情卡：宽 252、圆角 12、卡底委托 material.drawCardBack；水平位置按原型
   // RADII 规则（卡内缘 = 悬停项内缘 ∓ (cardRadius+12)），并夹取到不遮挡任何项
@@ -61,6 +67,8 @@ private:
   Microsoft::WRL::ComPtr<IDWriteTextFormat> cardRowFmt_;    // Segoe UI 11 左对齐
   Microsoft::WRL::ComPtr<IDWriteTextFormat> cardValFmt_;    // Consolas 11 右对齐
   Microsoft::WRL::ComPtr<IDWriteTextFormat> cardFootFmt_;   // Segoe UI 10
+  Microsoft::WRL::ComPtr<IDWriteTextFormat> miniNameFmt_;  // chip 名 Segoe UI 9.5 左
+  Microsoft::WRL::ComPtr<IDWriteTextFormat> miniValFmt_;   // chip 值 Consolas 11 左
 };
 
 } // namespace okmeter::render

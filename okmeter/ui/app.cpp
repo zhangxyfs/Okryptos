@@ -243,6 +243,16 @@ void DockApp::rebuildItems() {
   // 胶囊占比条：该项值/全部项最大值（原型 updateItem capsule 同款；全零 → 4% 地板）
   for (size_t i = 0; i < raw.size(); ++i)
     items_[i].ratio = maxV > 0 ? (double)raw[i] / (double)maxV : 0.04;
+  // 横向：chip 宽实测（格式未建/测量失败 → 空，rebuildLayout 回退 96×scale 估值）；
+  // 宽度变化才重建 mini 几何（文本随数据刷新变长变短，chip 排实时跟随）
+  if (isHorizEdge(cfg_.edge) && hwnd_ && d3d_.ok()) {
+    std::vector<double> w = scene_.measureChipWidths(d3d_, items_);
+    if (w.size() != items_.size()) w.clear();  // 测量失败 → 估值回退
+    if (w != chipW_) {
+      chipW_ = std::move(w);
+      rebuildLayout();  // mini 几何/窗口尺寸按新 chip 宽重建
+    }
+  }
   rebuildCard();  // 数据/口径刷新后卡内容同源更新
 }
 
@@ -917,7 +927,9 @@ double DockApp::cardAnimT() const {
 bool DockApp::needsFrames() const {
   if (!emerged_) return true;                          // 弹簧未稳
   if (material_ && material_->wantsTick()) return true;  // glow 常驻动画
-  if (form_ && form_->wantsTick()) return true;          // 罗盘收缩态旋转
+  if (form_ && form_->wantsTick() &&
+      !(isHorizEdge(cfg_.edge) && emerge_.value < 0.999))
+    return true;  // 罗盘收缩态旋转（横向收缩 = mini chip 排，旋转不可见不驱帧）
   if (menu_.open) return true;                         // 弹出动画 + 沿检测
   if (settings_.open) return true;                     // 滑入动画 + Escape 沿检测
   if (card_.valid && cardAnimT() < 1.0) return true;     // cardin 140ms
@@ -1053,8 +1065,12 @@ void DockApp::renderOnce() {
   // 菜单向上扩窗时球区整体下移 zoneDY_（卡绘制共用同一 g，锚定随动）
   if (zoneDY_ != 0)
     for (ItemGeom& it : g.items) it.y += zoneDY_;
-  // 球区窗口内偏移：右缘宽窗 +268（卡区靠左贴球区）+ 菜单区让位（zoneDX_）
-  const float dx = (float)zoneDX_;
+  // 横向：球区窗口内 x 偏移直接并入坐标（morphGeom 已带走悬停让位 dx，不再叠加）
+  if (isHorizEdge(cfg_.edge) && zoneDX_ != 0)
+    for (ItemGeom& it : g.items) it.x += zoneDX_;
+  // 球区窗口内偏移：竖向右缘宽窗 +268（卡区靠左贴球区）+ 菜单区让位（zoneDX_）；
+  // 横向让位已含在 barGeom 的 morphGeom 里，dx 实参传 0
+  const float dx = isHorizEdge(cfg_.edge) ? 0.0f : (float)zoneDX_;
   // 背景纹理→窗口坐标平移：tex(0,0)=捕获屏左上角；窗口左上角=GetWindowRect
   RECT wr{};
   GetWindowRect(hwnd_, &wr);
@@ -1063,7 +1079,8 @@ void DockApp::renderOnce() {
   scene_.draw(d3d_, *form_, *material_, &backdrop_, g, items_,
               (cfg_.count - 1) / 2, emerge_.value, cfg_.edge, dx,
               (float)(monX - wr.left), (float)(monY - wr.top),
-              material_->id() == "glow" ? pressIdx_ : -1);  // 按压下沉仅沉浸光感
+              material_->id() == "glow" ? pressIdx_ : -1,  // 按压下沉仅沉浸光感
+              isHorizEdge(cfg_.edge) && !miniG_.items.empty() ? &miniG_ : nullptr);
   // 菜单打开期间不画详情卡：右键时悬停卡与菜单级联列叠加层级太乱
   if (card_.valid && !menu_.open && hoverIdx_ >= 0 && hoverIdx_ < (int)g.items.size() &&
       emerge_.value > 0.5) {
@@ -1769,6 +1786,7 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
     DockGeom m = morphGeom(g, miniG_, 0.0, cfg_.edge == "bottom");  // 初始收缩
     w = (int)std::lround(m.w);
     h0 = (int)std::lround(m.h);
+    winH_ = (int)g.h;       // 展开盒高（以 rebuildLayout 为准，无 120 地板）
     winX_ = work.left + (screenW - dockW_) / 2;
     winY_ = cfg_.edge == "top" ? work.top : work.bottom - (int)g.h;
     x = work.left + ((int)(work.right - work.left) - w) / 2;

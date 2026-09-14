@@ -97,9 +97,17 @@ struct DrawContext {
   IDWriteTextFormat* capValFmt = nullptr;    // 胶囊右值：Consolas 11 半粗 右对齐
   IDWriteTextFormat* hubFmt = nullptr;       // 罗盘中心值：Consolas 15 居中
   IDWriteTextFormat* satFmt = nullptr;       // 罗盘卫星值：Consolas 9.5 居中
+  const DockGeom* mini = nullptr;            // 横向 mini chip 几何（非空=横向 morph 绘制）
+  IDWriteTextFormat* miniNameFmt = nullptr;  // chip 名：Segoe UI 9.5 左对齐
+  IDWriteTextFormat* miniValFmt = nullptr;   // chip 值：Consolas 11 左对齐
   BackdropCapture* backdrop = nullptr;       // 背景捕获（传给材质取玻璃底）
   float backdropDX = 0, backdropDY = 0;      // 背景纹理→窗口坐标平移
 };
+
+// 横向 mini chip 文字：名 + 6px + 值整体居中于项中心，中心项值 accent
+//（render/forms/chip.cpp 实现；alpha 由调用方按 1-e 渐显）
+void drawChipText(const DrawContext& ctx, ID2D1DeviceContext* dc, size_t i,
+                  float cx, float cy, float alpha);
 
 class IForm {
 public:

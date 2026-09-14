@@ -62,7 +62,9 @@ public:
     const DockGeom& g = *ctx.geom;
     const size_t n = g.items.size();
     const double e = ctx.e < 0 ? 0 : ctx.e > 1 ? 1 : ctx.e;
-    const float dimBase = (float)(0.55 + 0.45 * e);  // 收缩态 55%（原型同款）
+    const bool hz = ctx.mini != nullptr;  // 横向：mini⇄stage morph 绘制
+    const float dimBase = hz ? 1.0f : (float)(0.55 + 0.45 * e);  // 横向全额（无 55% 降暗）
+    const float fe = hz ? (float)e : 1.0f;  // 形态内容渐隐（chip 文字反向渐显）
     bool anyHot = false;  // 有悬停项时非悬停项降暗（原型 .dim）
     for (const ItemGeom& it : g.items) anyHot = anyHot || it.scale > 1.001;
 
@@ -71,6 +73,7 @@ public:
       const D2D1_POINT_2F c{ (float)it.x, (float)it.y };
       const bool isHot = it.scale > 1.001;
       const float dim = dimBase * ((anyHot && !isHot) ? (float)hoverDimOpacity() : 1.0f);  // 原型 .dim 降暗
+      const float fade = dim * fe;  // 形态内容墨色（横向随 e 渐隐）
 
       OrbStyleCtx osc{};
       osc.d3d = ctx.d3d;
@@ -84,7 +87,9 @@ public:
       osc.dimmed = dim;
       osc.backdropDX = ctx.backdropDX;
       osc.backdropDY = ctx.backdropDY;
-      osc.cornerR = 10.0f * (float)g.scale;  // 块状角半径（原型 border-radius）×比例
+      osc.cornerR = hz ? (float)((*ctx.mini).items[i].r +
+                                 (10.0 * g.scale - (*ctx.mini).items[i].r) * e)
+                       : 10.0f * (float)g.scale;  // pill→10×scale 插值（e=0 纯 pill）
       if (isHot)
         dc->SetTransform(D2D1::Matrix3x2F::Scale((float)it.scale, (float)it.scale, c));
       ctx.material->drawOrbBack(dc, osc);
@@ -97,17 +102,17 @@ public:
         // 顶行：左名（10px）右值（11px mono），padding 13（原型 .lvl .top）×比例
         const bool halo = ctx.material && ctx.material->id() == "liquid";
         if (!di.label.empty()) {
-          ctx.brush->SetColor(inkLight( 0.66f * dim));
+          ctx.brush->SetColor(inkLight( 0.66f * fade));
           const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f * u, c.y - 17.0f * u,
                                              rgt - 80.0f * u, c.y - 2.0f * u);
           drawTextTrimmed(*ctx.d3d, dc, ctx.brush, di.label, ctx.capNameFmt, tr,
-                          halo ? (float)dim : 0.0f);
+                          halo ? (float)fade : 0.0f);
         }
         if (!di.value.empty()) {
           const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f * u, c.y - 17.0f * u,
                                              rgt - 13.0f * u, c.y - 2.0f * u);
-          if (halo) liquidHalo(dc, ctx.brush, di.value, ctx.capValFmt, tr, (float)dim);
-          ctx.brush->SetColor(inkLight( 0.93f * dim));
+          if (halo) liquidHalo(dc, ctx.brush, di.value, ctx.capValFmt, tr, (float)fade);
+          ctx.brush->SetColor(inkLight( 0.93f * fade));
           dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.capValFmt,
                        &tr, ctx.brush);
         }
@@ -124,13 +129,14 @@ public:
             const D2D1_RECT_F sr = D2D1::RectF(x0, y0, x0 + segW, y0 + segH);
             if (s < lit)
               ctx.brush->SetColor(osc.isCenter
-                  ? D2D1::ColorF(kAccent, dim) : inkLight( 0.55f * dim));
+                  ? D2D1::ColorF(kAccent, fade) : inkLight( 0.55f * fade));
             else
-              ctx.brush->SetColor(inkLight( 0.10f * dim));
+              ctx.brush->SetColor(inkLight( 0.10f * fade));
             dc->FillRoundedRectangle(D2D1::RoundedRect(sr, 1.0f, 1.0f), ctx.brush);
           }
         }
       }
+      if (hz) drawChipText(ctx, dc, i, c.x, c.y, (float)(1.0 - e));
     }
   }
 };

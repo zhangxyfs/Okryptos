@@ -25,7 +25,7 @@ bool DockScene::ensure(D3DContext& d3d, float scale) {
   if (dc == seen_ && seenGen_ == d3d.generation() && fmtScale_ == scale && brush_ &&
       valueFmt_ && labelFmt_ && capNameFmt_ && capValFmt_ && hubFmt_ && satFmt_ &&
       cardTitleFmt_ && cardBigFmt_ && cardRowFmt_ && cardValFmt_ &&
-      cardFootFmt_) return true;
+      cardFootFmt_ && miniNameFmt_ && miniValFmt_) return true;
   seen_ = dc;
   seenGen_ = d3d.generation();
   fmtScale_ = scale;
@@ -41,6 +41,8 @@ bool DockScene::ensure(D3DContext& d3d, float scale) {
   cardRowFmt_.Reset();
   cardValFmt_.Reset();
   cardFootFmt_.Reset();
+  miniNameFmt_.Reset();
+  miniValFmt_.Reset();
   if (FAILED(dc->CreateSolidColorBrush(D2D1::ColorF(0, 0), &brush_))) return false;
   IDWriteFactory* dw = d3d.dwrite();
   // 数值字号校准原型：值 13px 600 字重、短名 8.5px；
@@ -66,14 +68,47 @@ bool DockScene::ensure(D3DContext& d3d, float scale) {
          makeFmt(dw, L"Consolas", 11.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_TRAILING, &cardValFmt_) &&
          makeFmt(dw, L"Segoe UI", 10.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
-                 DWRITE_TEXT_ALIGNMENT_LEADING, &cardFootFmt_);
+                 DWRITE_TEXT_ALIGNMENT_LEADING, &cardFootFmt_) &&
+         makeFmt(dw, L"Segoe UI", 9.5f * scale, DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_LEADING, &miniNameFmt_) &&
+         makeFmt(dw, L"Consolas", 11.0f * scale, DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_LEADING, &miniValFmt_);
+}
+
+// 横向 mini chip 宽实测（原型 buildMini：内边距 11×2 + 名 + 6 + 值）；
+// ensure 阶段格式已 ×scale，22/6 原型值乘同一 scale。SetParagraphAlignment 是
+// CENTER 不影响 GetMetrics 测量。空返回 = 格式未建（首帧前）/设备未就绪
+std::vector<double> DockScene::measureChipWidths(
+    D3DContext& d3d, const std::vector<DockItem>& items) {
+  std::vector<double> out;
+  if (fmtScale_ <= 0.0f || !ensure(d3d, fmtScale_) || !miniNameFmt_ ||
+      !miniValFmt_ || !d3d.dwrite())
+    return out;
+  IDWriteFactory* dw = d3d.dwrite();
+  out.assign(items.size(), 0.0);
+  const double s = (double)fmtScale_;
+  for (size_t i = 0; i < items.size(); ++i) {
+    auto meas = [&](IDWriteTextFormat* fmt, const std::wstring& str) -> double {
+      if (str.empty()) return 0.0;
+      ComPtr<IDWriteTextLayout> tl;
+      if (FAILED(dw->CreateTextLayout(str.c_str(), (UINT32)str.size(), fmt,
+                                      4096.0f, 64.0f, &tl)))
+        return 0.0;
+      DWRITE_TEXT_METRICS m{};
+      return SUCCEEDED(tl->GetMetrics(&m)) ? (double)m.width : 0.0;
+    };
+    out[i] = 22.0 * s + meas(miniNameFmt_.Get(), items[i].label) + 6.0 * s +
+             meas(miniValFmt_.Get(), items[i].value);
+  }
+  return out;
 }
 
 void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
                      BackdropCapture* backdrop, const DockGeom& g,
                      const std::vector<DockItem>& items, int mid,
                      double e, const std::string& edge, float dx,
-                     float backdropDX, float backdropDY, int pressIdx) {
+                     float backdropDX, float backdropDY, int pressIdx,
+                     const DockGeom* mini) {
   if (!ensure(d3d, (float)g.scale)) return;
   ID2D1DeviceContext* dc = d3d.dc();
   dc->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
@@ -110,6 +145,9 @@ void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
   ctx.capValFmt = capValFmt_.Get();
   ctx.hubFmt = hubFmt_.Get();
   ctx.satFmt = satFmt_.Get();
+  ctx.mini = mini;
+  ctx.miniNameFmt = miniNameFmt_.Get();
+  ctx.miniValFmt = miniValFmt_.Get();
   ctx.backdrop = backdrop;
   ctx.backdropDX = backdropDX;
   ctx.backdropDY = backdropDY;

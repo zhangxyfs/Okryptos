@@ -28,7 +28,9 @@ public:
     const DockGeom& g = *ctx.geom;
     const size_t n = g.items.size();
     const double e = ctx.e < 0 ? 0 : ctx.e > 1 ? 1 : ctx.e;
-    const float dimBase = (float)(0.55 + 0.45 * e);  // 收缩态 55%（原型同款）
+    const bool hz = ctx.mini != nullptr;  // 横向：mini⇄stage morph 绘制
+    const float dimBase = hz ? 1.0f : (float)(0.55 + 0.45 * e);  // 横向全额（无 55% 降暗）
+    const float fe = hz ? (float)e : 1.0f;  // 形态内容渐隐（chip 文字反向渐显）
     bool anyHot = false;  // 有悬停项时非悬停项降暗（原型 .dim）
     for (const ItemGeom& it : g.items) anyHot = anyHot || it.scale > 1.001;
 
@@ -37,6 +39,7 @@ public:
       const D2D1_POINT_2F c{ (float)it.x, (float)it.y };
       const bool isHot = it.scale > 1.001;
       const float dim = dimBase * ((anyHot && !isHot) ? (float)hoverDimOpacity() : 1.0f);  // 原型 .dim 降暗
+      const float fade = dim * fe;  // 形态内容墨色（横向随 e 渐隐）
 
       // 胶囊底（材质）：hw/r 已并入悬停放大，背景采样与屏幕对齐不被放大
       OrbStyleCtx osc{};
@@ -51,6 +54,9 @@ public:
       osc.dimmed = dim;
       osc.backdropDX = ctx.backdropDX;
       osc.backdropDY = ctx.backdropDY;
+      if (hz)  // 胶囊角 R=半高（pill）：mini pill 半高→项半高插值（0=材质默认=半高）
+        osc.cornerR = (float)((*ctx.mini).items[i].r +
+                              (it.r - (*ctx.mini).items[i].r) * e);
       ctx.material->drawOrbBack(dc, osc);
 
       // 胶囊内容：悬停项整体放大（含文本，与原型 transform: scale 同款）
@@ -65,17 +71,17 @@ public:
         // 顶行：左名 右值，padding 左右 13、上 8（原型 .cap .top）×比例
         const bool halo = ctx.material && ctx.material->id() == "liquid";
         if (!di.label.empty()) {
-          ctx.brush->SetColor(inkLight( 0.66f * dim));
+          ctx.brush->SetColor(inkLight( 0.66f * fade));
           const D2D1_RECT_F tr = D2D1::RectF(l + 13.0f * u, t + 8.0f * u,
                                              rgt - 80.0f * u, t + 24.0f * u);
           drawTextTrimmed(*ctx.d3d, dc, ctx.brush, di.label, ctx.capNameFmt, tr,
-                          halo ? (float)dim : 0.0f);
+                          halo ? (float)fade : 0.0f);
         }
         if (!di.value.empty()) {
           const D2D1_RECT_F tr = D2D1::RectF(l + 80.0f * u, t + 8.0f * u,
                                              rgt - 13.0f * u, t + 24.0f * u);
-          if (halo) liquidHalo(dc, ctx.brush, di.value, ctx.capValFmt, tr, (float)dim);
-          ctx.brush->SetColor(inkLight( 0.93f * dim));
+          if (halo) liquidHalo(dc, ctx.brush, di.value, ctx.capValFmt, tr, (float)fade);
+          ctx.brush->SetColor(inkLight( 0.93f * fade));
           dc->DrawText(di.value.c_str(), (UINT32)di.value.size(), ctx.capValFmt,
                        &tr, ctx.brush);
         }
@@ -83,7 +89,7 @@ public:
         // 宽 max(4%, ratio)（原型 .cap .bar 同款）×比例
         const float bl = l + 13.0f * u, br = rgt - 13.0f * u;
         const float by = t + 2.0f * hh - 12.0f * u;  // 底 padding 9 + 条高 3
-        ctx.brush->SetColor(inkLight( 0.10f * dim));  // 轨道：亮底深色
+        ctx.brush->SetColor(inkLight( 0.10f * fade));  // 轨道：亮底深色
         dc->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(bl, by, br, by + 3.0f * u),
                                                    1.5f * u, 1.5f * u),
                                  ctx.brush);
@@ -92,15 +98,16 @@ public:
         if (ratio > 1.0) ratio = 1.0;
         const float fw = (br - bl) * (float)ratio;
         if ((int)i == ctx.mid)
-          ctx.brush->SetColor(D2D1::ColorF(0x5FE0A8, dim));  // 原型 accent 绿
+          ctx.brush->SetColor(D2D1::ColorF(0x5FE0A8, fade));  // 原型 accent 绿
         else
-          ctx.brush->SetColor(inkLight( 0.52f * dim));  // 填充：亮底深色
+          ctx.brush->SetColor(inkLight( 0.52f * fade));  // 填充：亮底深色
         dc->FillRoundedRectangle(
             D2D1::RoundedRect(D2D1::RectF(bl, by, bl + fw, by + 3.0f * u),
                               1.5f * u, 1.5f * u),
             ctx.brush);
       }
       if (isHot) dc->SetTransform(D2D1::Matrix3x2F::Identity());
+      if (hz) drawChipText(ctx, dc, i, c.x, c.y, (float)(1.0 - e));
     }
   }
 };

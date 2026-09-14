@@ -127,6 +127,8 @@ DockGeom morphGeom(const DockGeom& stage, const DockGeom& mini, double e,
     g.items[i].r = lerpD(a.r, b.r, e);
     g.items[i].hw = lerpD(a.hw, b.hw, e);
     g.items[i].scale = b.scale;
+    g.items[i].dx = b.dx * e;  // 悬停让位随 morph 渐显（展开全额、收缩归零，全程连续）
+    g.items[i].dy = b.dy * e;
   }
   return g;
 }
