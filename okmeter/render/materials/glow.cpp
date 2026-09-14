@@ -100,6 +100,7 @@ public:
 
     // 屏缘方向由 app 显式传入（不猜）；光源锚点取球群实际屏缘侧外 170px——
     // 宽窗态（含卡区）g.w 只是球区宽，直接 g.w+170 会把亮心画进窗口内部
+    const bool horiz = isHorizEdge(edge);
     const float side = edge == "left" ? -1.0f : 1.0f;
     float edgeX = side > 0 ? 0.0f : (float)g.w;
     float extent = 30.0f;
@@ -113,12 +114,48 @@ public:
     const float gasX = edgeX + side * 170.0f;
     const float h = (float)g.h;
 
+    // 横向：光源换缘——vside（top=-1 光在屏顶之外 / bottom=+1 光在任务栏之外），
+    // 锚点取项群上/下缘（半高 it.r）之外 170×scale；盒沿轴长 = g.w
+    const float vside = edge == "top" ? -1.0f : 1.0f;
+    const float wBox = (float)g.w;
+    float gasY = 0.0f;
+    if (horiz) {
+      float edgeY = vside > 0 ? 0.0f : (float)g.h;
+      float extentY = 30.0f;
+      for (const ItemGeom& it : g.items) {  // 同上手写比较（min/max 宏冲突）
+        if (vside > 0 ? (float)it.y > edgeY : (float)it.y < edgeY)
+          edgeY = (float)it.y;
+        const float ey = (float)it.r;
+        if (ey > extentY) extentY = ey;
+      }
+      edgeY += vside * extentY;  // 项半高 → 窗口上/下缘
+      gasY = edgeY + vside * 170.0f * (float)g.scale;
+    }
+
     ensureBrushes(dc);
-    updateMotes(now, dt, g, side);
+    updateMotes(now, dt, g, side, vside, horiz);
 
     // ① 环境气态光（原型 .dock::before：光源在屏缘外，21s 缓慢漂移）
     if (gasInk_ && gasAccent_) {
       const double w = now * 6.28318530718 / 21.0;
+      if (horiz) {
+        // 横向：锚点在项群上/下缘之外，两椭圆 rx/ry 互换（340/480→480/340、
+        // 300/430→430/300，画刷半径同步），21s 漂移 x/y 分量互换
+        gasInk_->SetRadiusX(480.0f);
+        gasInk_->SetRadiusY(340.0f);
+        gasAccent_->SetRadiusX(430.0f);
+        gasAccent_->SetRadiusY(300.0f);
+        gasInk_->SetCenter(D2D1::Point2F(wBox * 0.42f + (float)std::cos(w * 0.7) * 20.0f,
+                                         gasY + (float)std::sin(w) * 14.0f));
+        dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(wBox * 0.42f, gasY), 480.0f, 340.0f),
+                        gasInk_.Get());
+        gasAccent_->SetCenter(
+            D2D1::Point2F(wBox * 0.62f + (float)std::cos(w) * 14.0f,
+                          gasY + vside * 40.0f - (float)std::sin(w * 0.8) * 16.0f));
+        dc->FillEllipse(
+            D2D1::Ellipse(D2D1::Point2F(wBox * 0.62f, gasY + vside * 40.0f), 430.0f, 300.0f),
+            gasAccent_.Get());
+      } else {
       gasInk_->SetCenter(D2D1::Point2F(gasX + (float)std::sin(w) * 14.0f,
                                        h * 0.42f + (float)std::cos(w * 0.7) * 20.0f));
       dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(gasX, h * 0.42f), 340.0f, 480.0f),
@@ -129,6 +166,7 @@ public:
       dc->FillEllipse(
           D2D1::Ellipse(D2D1::Point2F(gasX + side * 40.0f, h * 0.62f), 300.0f, 430.0f),
           gasAccent_.Get());
+      }
     }
 
     // ② 汇聚柔光（白芯 + accent 边双层径向，layer 不透明度 = litA_ 淡入淡出）
@@ -388,7 +426,8 @@ private:
   }
 
   // 粒子推进：环境微粒首帧播种；汇聚按 260ms 节奏喷 3 粒；清理完结粒子
-  void updateMotes(double now, float dt, const DockGeom& g, float side) const {
+  void updateMotes(double now, float dt, const DockGeom& g, float side,
+                   float vside, bool horiz) const {
     (void)dt;
     if (!ambientSeeded_ && !g.items.empty()) {
       ambientSeeded_ = true;
@@ -428,6 +467,8 @@ private:
     if (motes_.size() > 96)  // 汇聚长驻上界
       motes_.erase(motes_.begin(), motes_.begin() + (ptrdiff_t)(motes_.size() - 96));
     side_ = side;
+    vside_ = vside;
+    horiz_ = horiz;
   }
 
   void burstAt(float x, float y) const {
@@ -435,9 +476,16 @@ private:
     std::uniform_real_distribution<float> u(0.0f, 1.0f);
     const double now = nowSeconds();
     for (int k = 0; k < 5; ++k) {
-      // 迸散偏向屏内侧（原型 inward = edge right ? -1 : 1）
-      const float bx = -side_ * (14.0f + 34.0f * u(rng));
-      const float by = u(rng) * 44.0f - 22.0f;
+      // 迸散偏向屏内侧（原型 inward = edge right ? -1 : 1）；
+      // 横向：偏向转垂直分量（by 朝屏内），水平向随机铺开
+      float bx, by;
+      if (horiz_) {
+        bx = u(rng) * 44.0f - 22.0f;
+        by = -vside_ * (14.0f + 34.0f * u(rng));
+      } else {
+        bx = -side_ * (14.0f + 34.0f * u(rng));
+        by = u(rng) * 44.0f - 22.0f;
+      }
       motes_.push_back({x, y, bx, by, now, 0.72, 0.95f, 2});
     }
   }
@@ -518,6 +566,8 @@ private:
   mutable bool lit_ = false, litInit_ = false;
   mutable float litA_ = 0, gx_ = 0, gy_ = 0, gxT_ = 0, gyT_ = 0;
   mutable float side_ = 1.0f;  // 屏缘方向（+1 右缘），迸散偏向用
+  mutable float vside_ = 1.0f;  // 横向屏缘方向（-1 上缘 / +1 下缘），迸散偏向用
+  mutable bool horiz_ = false;  // 横向边（top/bottom）：迸散偏向转垂直分量
   mutable double lastT_ = 0, lastGather_ = 0;
   mutable bool ambientSeeded_ = false;
   mutable std::vector<Mote> motes_;

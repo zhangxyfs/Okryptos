@@ -121,8 +121,9 @@ public:
         const float sw = 170.0f * u, sh = 24.0f * u;
         const float sx = c.x - sw * 0.5f, sy = c.y - 3.0f * u;
         // 最新点恒定落在屏幕内侧：dock 左缘 → 最右（右→左流），
-        // dock 右缘 → 最左（左→右流，x 镜像）
-        const bool flip = ctx.edge == "right";
+        // dock 右缘 → 最左（左→右流，x 镜像）；
+        // 横向（top/bottom）恒左→右流，最新点在右（横条无"屏内侧"水平语义）
+        const bool flip = !isHorizEdge(ctx.edge) && ctx.edge == "right";
         double maxV = 1.0;
         for (double v : di.hist) if (v > maxV) maxV = v;
         const size_t cnt = di.hist.size();
