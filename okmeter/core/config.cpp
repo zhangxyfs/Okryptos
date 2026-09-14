@@ -18,7 +18,8 @@ void Config::normalize() {
       material != "liquid" && material != "glow")
     material = "dark";
   if (!isValidCount(count)) count = 3;
-  if (edge != "right" && edge != "left") edge = "right";
+  if (edge != "right" && edge != "left" && edge != "top" && edge != "bottom")
+    edge = "right";
   mapping.resize(count, "auto");
   for (auto& m : mapping) if (m.empty()) m = "auto";
 }

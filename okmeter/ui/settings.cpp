@@ -288,12 +288,12 @@ void SettingsPanel::layout(render::D3DContext& d3d) {
   }
   secEnd();
 
-  // ── 吸附边 chips 左/右 ──
-  secBegin(L"吸附边");
+  // ── 吸附边 chips 左/右/上/下 ──
+  secBegin(L"吸附边（上/下 = 顶部/状态栏上方）");
   {
     float cx = 0;
-    const wchar_t* names[] = {L"左", L"右"};
-    for (int i = 0; i < 2; ++i) {
+    const wchar_t* names[] = {L"左", L"右", L"上", L"下"};
+    for (int i = 0; i < 4; ++i) {
       const float cw = mwidth(bodyFmt_.Get(), names[i]) + 2.0f * kChipPadX;
       Ctrl c;
       c.kind = Ctrl::EdgeChip;
@@ -379,7 +379,7 @@ int SettingsPanel::click(render::D3DContext& /*d3d*/, int idx) {
     for (auto& m : draft.mapping) if (m.empty()) m = "auto";
     return 2;  // 映射行数变化 → 重排
   case Ctrl::EdgeChip:
-    draft.edge = c.a == 0 ? "left" : "right";
+    draft.edge = c.a == 0 ? "left" : c.a == 1 ? "right" : c.a == 2 ? "top" : "bottom";
     return 1;
   case Ctrl::MergeSwitch:
     draft.mergeCache = !draft.mergeCache;
@@ -700,7 +700,9 @@ void SettingsPanel::draw(render::D3DContext& d3d, render::IMaterial& material) {
       case Ctrl::EdgeChip: {
         const bool on = c.kind == Ctrl::CountChip
             ? draft.count == kCounts[c.a]
-            : (c.a == 0 ? draft.edge == "left" : draft.edge == "right");
+            : (c.a == 0 ? draft.edge == "left"
+               : c.a == 1 ? draft.edge == "right"
+               : c.a == 2 ? draft.edge == "top" : draft.edge == "bottom");
         brush_->SetColor(on ? gfx::accentC(0.16f)
                             : gfx::ink(hov ? 0.09f : 0.05f));
         const D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(c.rc, 8.0f, 8.0f);
@@ -710,7 +712,7 @@ void SettingsPanel::draw(render::D3DContext& d3d, render::IMaterial& material) {
         dc->DrawRoundedRectangle(&rr, brush_.Get(), 1.0f);
         const wchar_t* t = c.kind == Ctrl::CountChip
             ? (c.a == 0 ? L"1" : c.a == 1 ? L"3" : c.a == 2 ? L"5" : L"7")
-            : (c.a == 0 ? L"左" : L"右");
+            : (c.a == 0 ? L"左" : c.a == 1 ? L"右" : c.a == 2 ? L"上" : L"下");
         brush_->SetColor(gfx::ink(on ? 0.92f : hov ? 0.90f : 0.55f));
         bodyFmt_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);  // chips 居中
         dc->DrawText(t, (UINT32)std::wcslen(t), bodyFmt_.Get(), &c.rc, brush_.Get());

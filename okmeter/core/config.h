@@ -10,7 +10,7 @@ struct Config {
   std::string form = "arc";        // arc / capsule / compass
   std::string material = "dark";   // dark / frost / liquid / glow
   int count = 3;                   // 仅奇数 1/3/5/7
-  std::string edge = "right";      // right / left（v1 不做顶底）
+  std::string edge = "right";      // right / left / top / bottom（top=屏幕顶部，bottom=状态栏上方）
   bool mergeCache = true;
   bool pinned = false;             // 保持显示：不自动隐藏（迟滞/离开收回均禁用）
   std::vector<std::string> mapping;  // "auto" | "total:session|today|week|all" | "model:<id>"

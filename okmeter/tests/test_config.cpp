@@ -22,12 +22,18 @@ TEST(config_defaults_and_normalize) {
   CHECK(c.edge == "right");
   CHECK(c.mergeCache);
   c.count = 4;              // 偶数：钳回奇数
-  c.edge = "top";           // v1 不支持：回退
+  c.edge = "diag";          // 非法边：回退 right
   c.form = "unknown";
   c.normalize();
   CHECK(c.count == 3);
   CHECK(c.edge == "right");
   CHECK(c.form == "arc");
+  c.edge = "top";           // 横向边：合法保留
+  c.normalize();
+  CHECK(c.edge == "top");
+  c.edge = "bottom";
+  c.normalize();
+  CHECK(c.edge == "bottom");
   c.count = 7;
   c.mapping = {"auto", "total:today"};
   c.normalize();
@@ -56,6 +62,10 @@ TEST(config_roundtrip) {
   CHECK(back.pinned);
   CHECK_EQ(back.mapping.size(), (size_t)5);
   CHECK(back.mapping[1] == "model:kimi-code/k3");
+  c.edge = "bottom";
+  CHECK(saveConfig(d, c));
+  CHECK(loadConfig(d, back));
+  CHECK(back.edge == "bottom");
   std::error_code ec;
   std::filesystem::remove_all(d, ec);
 }
