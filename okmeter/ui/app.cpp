@@ -10,6 +10,7 @@
 #include "../adapters/zcode/adapter.h"
 #include "../core/fmt.h"
 #include "../core/paths.h"
+#include "../core/provider.h"
 #include "../core/store.h"
 #include "../render/catalog.h"
 #include <chrono>
@@ -75,7 +76,8 @@ std::string shortName(const std::string& modelId) {
   return p == std::string::npos ? modelId : modelId.substr(p + 1);
 }
 
-// 厂商段：modelId 第一段（/ 前；无 / 则全名）
+// 命名空间段：modelId 第一段（/ 前；无 / 则全名）。这是 agent 工具名
+//（kimi-code/codex/zcode…），真实提供商归组用 providerOf（core/provider.h）
 std::string vendorOf(const std::string& modelId) {
   const size_t p = modelId.find('/');
   return p == std::string::npos ? modelId : modelId.substr(0, p);
@@ -608,7 +610,8 @@ std::string DockApp::mappingOf(int slot) const {
   return slot >= 0 && slot < (int)m.size() ? m[(size_t)slot] : "";
 }
 
-// 二级子列：subKind 1=总量四口径；2=模型厂商分组（按 modelId 首段聚合，按最近用排序）
+// 二级子列：subKind 1=总量四口径；2=模型提供商分组（providerOf 按模型名推导真实
+// 提供商，同名模型跨 agent 归到一起；组序沿用 modelsByRecency 首次出现序）
 void DockApp::openSub1(int parentIdx, int subKind) {
   menu_.parent1 = parentIdx;
   menu_.parent2 = -1;
@@ -629,17 +632,17 @@ void DockApp::openSub1(int parentIdx, int subKind) {
     leaf(L"本周用量", "total:week");
     leaf(L"全部累计", "total:all");
   } else {
-    std::vector<std::string> vendors;
+    std::vector<std::string> providers;
     for (const std::string& id : store_->agg().modelsByRecency()) {
-      const std::string v = vendorOf(id);
-      if (std::find(vendors.begin(), vendors.end(), v) == vendors.end())
-        vendors.push_back(v);
+      const std::string p = providerOf(id);
+      if (std::find(providers.begin(), providers.end(), p) == providers.end())
+        providers.push_back(p);
     }
-    for (const std::string& v : vendors) {
+    for (const std::string& p : providers) {
       MenuEntry e;
       e.kind = MenuEntry::Parent;
-      e.label = wide(v);
-      e.value = v;
+      e.label = wide(p);
+      e.value = p;
       e.sub = 3;
       menu_.sub1.entries.push_back(std::move(e));
     }
@@ -650,16 +653,23 @@ void DockApp::openSub1(int parentIdx, int subKind) {
   render();
 }
 
-// 三级子列：某厂商下的具体模型
-void DockApp::openSub2(int parentIdx, const std::string& vendor) {
+// 三级子列：某提供商下的具体模型。同一模型被多个 agent 使用时短名相同，
+// 此时标签加" · 命名空间"后缀区分（如 k3 · kimi-code）；value 仍是完整 modelId
+void DockApp::openSub2(int parentIdx, const std::string& provider) {
   menu_.parent2 = parentIdx;
   menu_.sub2.clear();
   const std::string cur = mappingOf(menu_.slot);
-  for (const std::string& id : store_->agg().modelsByRecency()) {
-    if (vendorOf(id) != vendor) continue;
+  std::vector<std::string> ids;
+  for (const std::string& id : store_->agg().modelsByRecency())
+    if (providerOf(id) == provider) ids.push_back(id);
+  for (const std::string& id : ids) {
+    const std::string sn = shortName(id);
+    bool dup = false;
+    for (const std::string& other : ids)
+      if (other != id && shortName(other) == sn) { dup = true; break; }
     MenuEntry e;
     e.kind = MenuEntry::Item;
-    e.label = wide(shortName(id));
+    e.label = wide(dup ? sn + " · " + vendorOf(id) : sn);
     e.value = "model:" + id;
     e.tick = cur == e.value;
     menu_.sub2.entries.push_back(std::move(e));
@@ -880,7 +890,7 @@ void DockApp::activateMenu(int idx) {
   if (col == 1) {
     if (i < 0 || i >= (int)menu_.sub1.entries.size()) return;
     const MenuEntry& e = menu_.sub1.entries[(size_t)i];
-    if (e.kind == MenuEntry::Parent) { openSub2(i, e.value); return; }  // 厂商▸
+    if (e.kind == MenuEntry::Parent) { openSub2(i, e.value); return; }  // 提供商▸
     applyMenuMapping(e.value);
     return;
   }
