@@ -1528,7 +1528,8 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       TrackMouseEvent(&tme);
       trackingLeave_ = true;
       KillTimer(hwnd_, kTimerRetract);  // 进入取消迟滞收回
-      setEmergeTarget(1);
+      // 悬停模式进入即展开；单击模式收缩态悬停不展开（等 WM_LBUTTONUP 单击触发）
+      if (cfg_.expandTrigger != "click") setEmergeTarget(1);
     }
     material_->onPointer((float)(int)(short)LOWORD(lp),
                          (float)(int)(short)HIWORD(lp));  // 跟手光光源
@@ -1681,6 +1682,13 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
         }
         rebuildLayout();
         render();
+      } else if (cfg_.expandTrigger == "click" && emergeTarget_ < 0.5) {
+        // 单击展开模式：收缩态左键单击条目（未拖拽）展开；展开后详情仍走悬停，
+        // 离开自动回缩不变
+        const DockGeom g = barGeom(emerge_.value);
+        if (hitItem(g, (int)(short)LOWORD(lp), (int)(short)HIWORD(lp) - zoneDY_,
+                    (float)zoneDX_) != -1)
+          setEmergeTarget(1);
       }
     }
     if (pressIdx_ != -1) {

@@ -5,7 +5,7 @@
 // 两段式保存：控件只改 draft（Config 副本），保存并生效由 app 落盘 + 全量 rebuild；
 // 取消/✕/Escape 丢弃。面板底委托 material.drawCardBack（跟随当前生效材质供皮，
 // 草稿态切材质不即时换肤）。指标映射下拉不复用面板内浮层：gsel 点击由 app 打开
-// 右键同款三级级联玻璃菜单（默认 / 总量 ▸ / 模型 ▸ 厂商 ▸，叶项改 draft）。
+// 右键同款三级级联玻璃菜单（默认 / 总量 ▸ / 模型 ▸ 提供商 ▸，叶项改 draft）。
 #pragma once
 
 #include "../core/config.h"
@@ -25,6 +25,7 @@ public:
     enum Kind {
       CloseX, CancelBtn, SaveBtn,                       // 头/尾按钮（面板坐标，前三个固定）
       FormTab, MaterialTab, CountChip, EdgeChip,        // 选项卡/chips（体区内容坐标）
+      ExpandChip,                                       // 展开方式 chips 悬停/单击
       MergeSwitch, PinSwitch,                           // 开关/下拉钮（体区内容坐标）
       Gsel
     } kind = FormTab;

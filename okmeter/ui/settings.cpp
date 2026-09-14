@@ -306,6 +306,24 @@ void SettingsPanel::layout(render::D3DContext& d3d) {
   }
   secEnd();
 
+  // ── 展开方式 chips 悬停/单击（收缩态触发；展开后悬停详情卡不变）──
+  secBegin(L"展开方式（收缩态）");
+  {
+    float cx = 0;
+    const wchar_t* names[] = {L"悬停", L"单击"};
+    for (int i = 0; i < 2; ++i) {
+      const float cw = mwidth(bodyFmt_.Get(), names[i]) + 2.0f * kChipPadX;
+      Ctrl c;
+      c.kind = Ctrl::ExpandChip;
+      c.a = i;
+      c.rc = D2D1::RectF(cx, y, cx + cw, y + kChipH);
+      ctrls_.push_back(c);
+      cx += cw + kChoiceGap;
+    }
+    y += kChipH;
+  }
+  secEnd();
+
   // ── mergeCache 玻璃开关（switch-row，无节标题）──
   secBegin(nullptr);
   swText_ = D2D1::RectF(0.0f, y, kContentW - kSwitchW - 16.0f, y + 18.0f);
@@ -380,6 +398,9 @@ int SettingsPanel::click(render::D3DContext& /*d3d*/, int idx) {
     return 2;  // 映射行数变化 → 重排
   case Ctrl::EdgeChip:
     draft.edge = c.a == 0 ? "left" : c.a == 1 ? "right" : c.a == 2 ? "top" : "bottom";
+    return 1;
+  case Ctrl::ExpandChip:
+    draft.expandTrigger = c.a == 0 ? "hover" : "click";
     return 1;
   case Ctrl::MergeSwitch:
     draft.mergeCache = !draft.mergeCache;
@@ -697,12 +718,16 @@ void SettingsPanel::draw(render::D3DContext& d3d, render::IMaterial& material) {
         break;
       }
       case Ctrl::CountChip:
-      case Ctrl::EdgeChip: {
+      case Ctrl::EdgeChip:
+      case Ctrl::ExpandChip: {
         const bool on = c.kind == Ctrl::CountChip
             ? draft.count == kCounts[c.a]
-            : (c.a == 0 ? draft.edge == "left"
-               : c.a == 1 ? draft.edge == "right"
-               : c.a == 2 ? draft.edge == "top" : draft.edge == "bottom");
+            : c.kind == Ctrl::EdgeChip
+              ? (c.a == 0 ? draft.edge == "left"
+                 : c.a == 1 ? draft.edge == "right"
+                 : c.a == 2 ? draft.edge == "top" : draft.edge == "bottom")
+              : (c.a == 0 ? draft.expandTrigger == "hover"
+                          : draft.expandTrigger == "click");
         brush_->SetColor(on ? gfx::accentC(0.16f)
                             : gfx::ink(hov ? 0.09f : 0.05f));
         const D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(c.rc, 8.0f, 8.0f);
@@ -712,7 +737,9 @@ void SettingsPanel::draw(render::D3DContext& d3d, render::IMaterial& material) {
         dc->DrawRoundedRectangle(&rr, brush_.Get(), 1.0f);
         const wchar_t* t = c.kind == Ctrl::CountChip
             ? (c.a == 0 ? L"1" : c.a == 1 ? L"3" : c.a == 2 ? L"5" : L"7")
-            : (c.a == 0 ? L"左" : c.a == 1 ? L"右" : c.a == 2 ? L"上" : L"下");
+            : c.kind == Ctrl::EdgeChip
+              ? (c.a == 0 ? L"左" : c.a == 1 ? L"右" : c.a == 2 ? L"上" : L"下")
+              : (c.a == 0 ? L"悬停" : L"单击");
         brush_->SetColor(gfx::ink(on ? 0.92f : hov ? 0.90f : 0.55f));
         bodyFmt_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);  // chips 居中
         dc->DrawText(t, (UINT32)std::wcslen(t), bodyFmt_.Get(), &c.rc, brush_.Get());

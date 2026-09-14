@@ -24,10 +24,16 @@ TEST(config_defaults_and_normalize) {
   c.count = 4;              // 偶数：钳回奇数
   c.edge = "diag";          // 非法边：回退 right
   c.form = "unknown";
+  c.expandTrigger = "dbl";  // 非法触发方式：回退 hover
   c.normalize();
   CHECK(c.count == 3);
   CHECK(c.edge == "right");
   CHECK(c.form == "arc");
+  CHECK(c.expandTrigger == "hover");
+  CHECK(Config{}.expandTrigger == "hover");  // 缺省悬停
+  c.expandTrigger = "click";
+  c.normalize();
+  CHECK(c.expandTrigger == "click");         // 合法保留
   c.edge = "top";           // 横向边：合法保留
   c.normalize();
   CHECK(c.edge == "top");
@@ -52,6 +58,7 @@ TEST(config_roundtrip) {
   c.mergeCache = false;
   c.pinned = true;
   c.mapping = {"auto", "model:kimi-code/k3", "total:all", "auto", "auto"};
+  c.expandTrigger = "click";
   CHECK(saveConfig(d, c));
   Config back;
   CHECK(loadConfig(d, back));
@@ -60,6 +67,7 @@ TEST(config_roundtrip) {
   CHECK(back.edge == "left");
   CHECK(!back.mergeCache);
   CHECK(back.pinned);
+  CHECK(back.expandTrigger == "click");
   CHECK_EQ(back.mapping.size(), (size_t)5);
   CHECK(back.mapping[1] == "model:kimi-code/k3");
   c.edge = "bottom";
