@@ -45,7 +45,7 @@ class IAdapter;
 // WM_NCHITTEST 对中部空白区回 HTTRANSPARENT 穿透；滚轮走原始输入（RIDEV_INPUTSINK，
 // NOACTIVATE 窗口收不到 WM_MOUSEWHEEL）。
 // 拖拽换边（规格 §3.2）：WM_LBUTTONDOWN 起拖（SetCapture，阈值内视为按压/点击），
-// 拖动实时跟随；松手按窗口中心所在屏的工作区中线判定左/右缘，换边则 saveConfig。
+// 拖动实时跟随；松手按窗口中心到所在屏工作区四边距离取最近边，换边则 saveConfig。
 // 多显示器：几何/定位一律按"窗口中心所在屏"的 MONITORINFO.rcWork（workArea()），
 // WM_DPICHANGED/WM_DISPLAYCHANGE 重建布局。
 // 两态：emerge 弹簧 e∈[0,1]，右缘窗口 x = 工作区右 - lerp(24, g.w, e) - (wide?268:0)；
@@ -83,6 +83,10 @@ private:
   void rebuildItems();    // resolveBindings + 文本缓存（值/短名/占比）+ 详情卡重组
   void rebuildCard();     // 按 hoverIdx 组装详情卡（hover 变化/数据刷新时调用）
   void rebuildLayout();   // 工作区/边 → dockW_/winH_/winY_ 重算 + applyWindowPos
+  // 当前条几何：竖向 = form layout + 悬停让位；横向 = mini⇄stage 按 e 插值（morph）
+  DockGeom barGeom(double e);
+  // 条盒尺寸（不含卡区）：竖向 = g.w/g.h（高有 120 地板）；横向 = morph 插值尺寸
+  void barBox(double e, int& w, int& h) const;
   // 统一窗口矩形：基础（弹簧 e + 卡区 wide）∪ 菜单屏幕矩形 ∪ 设置面板矩形
   //（先并集后放置：菜单/面板都按最终原点定位）；zoneDX_/zoneDY_ = 球区在窗口内
   // 的偏移（卡区/菜单区/面板区让位），SetWindowPos 落窗
@@ -90,8 +94,8 @@ private:
   void syncClickThru();  // 设置面板期按指针位置动态开关整窗 WS_EX_TRANSPARENT
   void updatePosition() { applyWindowPos(); }
   void setEmergeTarget(double t);
-  void setWide(bool w);   // 展开态窗口宽 g.w+268（卡区）；收缩态回 g.w
-  void flipEdge();        // 换边：edge 互换 → saveConfig → 重建位置几何
+  void setWide(bool w);   // 展开态加卡区（竖向宽 +268 / 横向高 +300，方向随 edge）；收缩态回条盒
+  void flipEdge();        // 换边：换到对侧（left↔right / top↔bottom）→ saveConfig → 重建位置几何
   void exitApp();         // 退出：flush 游标落盘 → DestroyWindow
   void startCapture();    // 背景捕获：取当前 DXGI 设备 → backdrop_.start（可重入）
   void createModules();   // 按 cfg_.form/material 从模块目录创建形态/材质（未知回退 arc/dark）
@@ -178,6 +182,11 @@ private:
   int winY_ = 0;              // 垂直居中 y（rebuildLayout 重算）
   int winH_ = 0;              // 窗口高（卡垂直夹取/宽度切换用）
   int dockW_ = 150;           // layoutArc g.w（位置插值用）
+  int winX_ = 0;              // 窗口 x（横向水平居中基准；rebuildLayout 重算）
+  int baseW_ = 0;             // 球区基础矩形宽（穿透/命中判定用；横竖统一）
+  int baseH_ = 0;             // 球区基础矩形高
+  DockGeom miniG_;            // 横向收缩态 mini 几何（chip 行；rebuildLayout/run 构建）
+  std::vector<double> chipW_; // chip 实测宽（Task 4 填；空=按 96×scale 估值）
   std::wstring shotPath_;     // --shot 自检截图输出路径（空=正常模式）
   int64_t lastWatchMs_ = 0;   // 上次 RDCW 检查时刻（动画帧里每 500ms 一次）
   LARGE_INTEGER lastTickQpc_{};  // 上一动画 tick 的 QPC（真实 dt 采样点，含静止 tick）

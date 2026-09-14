@@ -33,6 +33,7 @@ namespace {
 
 constexpr wchar_t kClassName[] = L"OkMeterDock";
 constexpr int kCardZoneW = 268;     // 展开态卡区宽（卡 252 + 两侧边距）
+constexpr int kCardZoneH = 300;     // 横向展开态卡区高（未缩放——与 kCardZoneW 同款策略）
 constexpr UINT_PTR kTimerAnim = 1;    // 动画帧 16ms
 constexpr UINT_PTR kTimerPoll = 2;    // 数据兜底轮询 2000ms（RDCW 健康时退避 30s）
 constexpr UINT_PTR kTimerRel = 3;     // 相对时间/口径文本刷新 30s
@@ -331,7 +332,7 @@ int DockApp::hitItem(const DockGeom& g, int mx, int my, float dx) const {
   for (size_t i = 0; i < g.items.size(); ++i) {
     const ItemGeom& it = g.items[i];
     const double halfX = it.hw > 0 ? it.hw : it.r;
-    const double bx = it.x + dx;
+    const double bx = it.x + it.dx + dx;
     const double by = it.y + it.dy;
     const double nx = (mx - bx) / (halfX + 8.0);
     const double ny = (my - by) / (it.r + 8.0);
@@ -341,11 +342,54 @@ int DockApp::hitItem(const DockGeom& g, int mx, int my, float dx) const {
   return best <= 1.0 ? idx : -1;
 }
 
+// 当前条几何：竖向 = form layout + 悬停让位；横向 = mini⇄stage 按 e 插值（morph）。
+// 返回坐标系 = 条盒（左上角原点）；调用方自行叠加 zoneDX_/zoneDY_
+DockGeom DockApp::barGeom(double e) {
+  const RECT work = workArea();
+  const int screenW = (int)(work.right - work.left);
+  const int screenH = (int)(work.bottom - work.top);
+  DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
+  applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
+             form_->hoverDimShrink(), isHorizEdge(cfg_.edge));
+  if (!isHorizEdge(cfg_.edge) || miniG_.items.empty()) return g;
+  return morphGeom(g, miniG_, e, cfg_.edge == "bottom");
+}
+
+// 条盒尺寸（不含卡区）：竖向 = g.w/g.h（高有 120 地板）；横向 = morph 插值尺寸
+void DockApp::barBox(double e, int& w, int& h) const {
+  const RECT work = workArea();
+  const int screenW = (int)(work.right - work.left);
+  const int screenH = (int)(work.bottom - work.top);
+  DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
+  if (isHorizEdge(cfg_.edge) && !miniG_.items.empty()) {
+    DockGeom m = morphGeom(g, miniG_, e, cfg_.edge == "bottom");
+    w = (int)std::lround(m.w);
+    h = (int)std::lround(m.h);
+    return;
+  }
+  w = (int)g.w;
+  h = (int)g.h;
+  if (h < 120) h = 120;
+}
+
 void DockApp::rebuildLayout() {
   const RECT work = workArea();
   const int screenH = (int)(work.bottom - work.top);
   const int screenW = (int)(work.right - work.left);
   const DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
+  if (isHorizEdge(cfg_.edge)) {
+    // mini 几何：chip 宽未测量（启动首期）按 96×scale 估值，Task 4 起为实测
+    std::vector<double> w = chipW_;
+    if (w.size() != (size_t)cfg_.count)
+      w.assign((size_t)cfg_.count, 96.0 * g.scale);
+    miniG_ = layoutMini(w, g.scale);
+    dockW_ = (int)g.w;        // 展开盒宽（卡水平夹取基准）
+    winH_ = (int)g.h;         // 展开盒高
+    winX_ = work.left + (screenW - dockW_) / 2;  // 水平居中
+    winY_ = cfg_.edge == "top" ? work.top : work.bottom - winH_;
+    applyWindowPos();
+    return;
+  }
   int h = (int)g.h;
   if (h < 120) h = 120;
   dockW_ = (int)g.w;
@@ -362,11 +406,49 @@ void DockApp::rebuildLayout() {
 void DockApp::applyWindowPos() {
   if (!hwnd_ || dragging_) return;  // 拖拽中窗口位置由指针驱动，弹簧不插手
   const RECT work = workArea();
+  if (isHorizEdge(cfg_.edge)) {
+    // 横向：条盒按 morph 尺寸水平居中贴边；卡区垂直方向（top 向下 / bottom 向上 +300）
+    int w, h;
+    barBox(emerge_.value, w, h);
+    baseW_ = w;
+    baseH_ = h;
+    int hh = h + (wide_ ? kCardZoneH : 0);
+    int x = work.left + ((int)(work.right - work.left) - w) / 2;
+    int y = cfg_.edge == "top" ? work.top : work.bottom - hh;
+    backdrop_.setLumaRegion(x, y, w, h);
+    int ux = x, uy = y, ur = x + w, ub = y + hh;
+    if (menu_.open) {
+      ux = (std::min)(ux, (int)menuScreen_.left);
+      uy = (std::min)(uy, (int)menuScreen_.top);
+      ur = (std::max)(ur, (int)menuScreen_.right);
+      ub = (std::max)(ub, (int)menuScreen_.bottom);
+    }
+    if (settings_.open) {
+      ux = (std::min)(ux, (int)panelScreen_.left);
+      uy = (std::min)(uy, (int)panelScreen_.top);
+      ur = (std::max)(ur, (int)panelScreen_.right);
+      ub = (std::max)(ub, (int)panelScreen_.bottom);
+    }
+    zoneDX_ = x - ux;
+    zoneDY_ = (wide_ && cfg_.edge == "bottom" ? kCardZoneH : 0) + (y - uy);
+    if (menu_.open)
+      menu_.place((float)(menuMainScreen_.left - ux), (float)(menuMainScreen_.top - uy));
+    if (settings_.open)
+      settings_.place((float)(panelScreen_.left - ux), (float)(panelScreen_.top - uy),
+                      (float)(panelScreen_.bottom - panelScreen_.top));
+    SetWindowPos(hwnd_, nullptr, ux, uy, ur - ux, ub - uy,
+                 SWP_NOZORDER | SWP_NOACTIVATE);  // 尺寸变化 → WM_SIZE → d3d.resize + render
+    if (menu_.open && (menu_.parent1 >= 0 || menu_.parent2 >= 0))
+      placeSubColumns();  // 扩窗后按新窗口原点重布子列（屏幕坐标不变）
+    return;
+  }
   // 收缩态露出左半 50%（原型 .dock.ready translate(50%) 同款；项另以 55% 透明度
   // 呈现——dim 已在各形态 drawItems 内 0.55+0.45e 处理）
   const double base = dockW_ * (0.5 + 0.5 * emerge_.value);
   int x, w = dockW_ + (wide_ ? kCardZoneW : 0);
   int y = winY_, h = winH_;
+  baseW_ = dockW_;   // 球区基础矩形（穿透/命中判定用）
+  baseH_ = winH_;
   if (cfg_.edge == "left")
     x = work.left + (int)std::lround(base - dockW_);  // 卡区在球区右侧，x 不变
   else
@@ -419,11 +501,10 @@ void DockApp::syncClickThru() {
     GetWindowRect(hwnd_, &wr);
     bool inPanel = settings_.contains(pt.x - (int)wr.left, pt.y - (int)wr.top);
     if (menu_.open && PtInRect(&menuScreen_, pt)) inPanel = true;
-    const RECT work = workArea();
-    const RECT ballZone{ cfg_.edge == "right" ? work.right - dockW_ : work.left,
-                         winY_,
-                         cfg_.edge == "right" ? work.right : work.left + dockW_,
-                         winY_ + winH_ };
+    RECT wr2{};
+    GetWindowRect(hwnd_, &wr2);
+    const RECT ballZone{ wr2.left + zoneDX_, wr2.top + zoneDY_,
+                         wr2.left + zoneDX_ + baseW_, wr2.top + zoneDY_ + baseH_ };
     want = !inPanel && !PtInRect(&ballZone, pt);
   }
   if (want == clickThru_) return;
@@ -437,7 +518,7 @@ void DockApp::syncClickThru() {
                    SWP_FRAMECHANGED);  // 强制重命中测试
 }
 
-// 展开/收缩切换窗口宽度（球区位置不动，卡区在屏内侧增减）
+// 展开/收缩切换卡区（球区位置不动，卡区朝屏内侧增减：竖向宽 +268，横向高 +300，方向随 edge）
 void DockApp::setWide(bool w) {
   if (wide_ == w || !hwnd_) return;
   wide_ = w;
@@ -451,9 +532,11 @@ void DockApp::setEmergeTarget(double t) {
   setWide(t > 0.5);
 }
 
-// 换边：edge 互换 → 持久化 config.json → 重建位置与几何（layoutArc edge 同步）
+// 换边：换到对侧（left↔right / top↔bottom）→ 持久化 config.json → 重建位置与几何
 void DockApp::flipEdge() {
-  cfg_.edge = cfg_.edge == "right" ? "left" : "right";
+  cfg_.edge = cfg_.edge == "right" ? "left"
+            : cfg_.edge == "left"  ? "right"
+            : cfg_.edge == "top"   ? "bottom" : "top";
   saveConfig(okmeterDir(), cfg_);
   rebuildLayout();
   render();
@@ -966,12 +1049,7 @@ void DockApp::renderOnce() {
   if (g_diag.active) g_diag.drawBegin = qpcNow();
 #endif
   d3d_.dc()->Clear(D2D1::ColorF(0, 0.0f));  // 全透明底
-  const RECT work = workArea();
-  const int screenH = (int)(work.bottom - work.top);
-  const int screenW = (int)(work.right - work.left);
-  DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
-  applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
-               form_->hoverDimShrink());
+  DockGeom g = barGeom(emerge_.value);  // 竖向 layout+让位；横向 mini⇄stage morph
   // 菜单向上扩窗时球区整体下移 zoneDY_（卡绘制共用同一 g，锚定随动）
   if (zoneDY_ != 0)
     for (ItemGeom& it : g.items) it.y += zoneDY_;
@@ -1353,12 +1431,7 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     material_->onPointer((float)(int)(short)LOWORD(lp),
                          (float)(int)(short)HIWORD(lp));  // 跟手光光源
     const int mx = (int)(short)LOWORD(lp), my = (int)(short)HIWORD(lp);
-    const RECT work = workArea();
-    const int screenH = (int)(work.bottom - work.top);
-  const int screenW = (int)(work.right - work.left);
-    DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
-    applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
-               form_->hoverDimShrink());  // dy 参与命中
+    const DockGeom g = barGeom(emerge_.value);  // dy/dx 让位参与命中
     const int idx = hitItem(g, mx, my - zoneDY_, (float)zoneDX_);
     if (idx != hoverIdx_) {
       hoverIdx_ = idx;
@@ -1445,12 +1518,7 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     }
     // 按压反馈（沉浸光感：scale .9 + 扩散环）与拖拽预备共存：
     // 阈值内视为按压/点击（按压光晕照常），越阈值进入拖拽（规格 §3.2）
-    const RECT work = workArea();
-    const int screenH = (int)(work.bottom - work.top);
-  const int screenW = (int)(work.right - work.left);
-    DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
-    applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
-               form_->hoverDimShrink());
+    const DockGeom g = barGeom(emerge_.value);
     const int idx = hitItem(g, (int)(short)LOWORD(lp),
                             (int)(short)HIWORD(lp) - zoneDY_, (float)zoneDX_);
     if (idx != -1) {
@@ -1487,8 +1555,8 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       dragging_ = false;
       ReleaseCapture();
       if (wasDragging) {
-        // 松手落点判定（规格 §3.2）：窗口中心过半屏（所在屏工作区中线）即换边
-        // + saveConfig；未过半屏/同侧松手则 rebuildLayout 吸附回原位
+        // 松手落点判定（规格 §3.2）：窗口中心到所在屏工作区四边距离取最近边换边
+        // + saveConfig；同边松手则 rebuildLayout 吸附回原位
         RECT wr{};
         GetWindowRect(hwnd_, &wr);
         const POINT c{ (wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2 };
@@ -1496,8 +1564,14 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
         const BOOL miOk =
             GetMonitorInfoW(MonitorFromPoint(c, MONITOR_DEFAULTTONEAREST), &mi);
         if (miOk) {
-          const std::string newEdge =
-              c.x < (mi.rcWork.left + mi.rcWork.right) / 2 ? "left" : "right";
+          const LONG cx = c.x, cy = c.y;
+          struct { const char* e; LONG d; } cands[4] = {
+              {"left", cx - mi.rcWork.left}, {"right", mi.rcWork.right - cx},
+              {"top", cy - mi.rcWork.top}, {"bottom", mi.rcWork.bottom - cy}};
+          const char* newEdge = cands[0].e;
+          LONG best = cands[0].d;
+          for (int k = 1; k < 4; ++k)
+            if (cands[k].d < best) { best = cands[k].d; newEdge = cands[k].e; }
           if (newEdge != cfg_.edge) {
             cfg_.edge = newEdge;
             saveConfig(okmeterDir(), cfg_);
@@ -1518,12 +1592,7 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     // 自绘玻璃菜单（原生 TrackPopupMenu 已废除）：球上 = 映射组菜单，弧线/空白 =
     // 三项菜单；右键重复点击 = 原地重开（原生菜单同款行为）
     const int mx = (int)(short)LOWORD(lp), my = (int)(short)HIWORD(lp);
-    const RECT work = workArea();
-    const int screenH = (int)(work.bottom - work.top);
-  const int screenW = (int)(work.right - work.left);
-    DockGeom g = form_->layout(cfg_.count, screenW, screenH, cfg_.edge);
-    applyHover(g, hoverIdx_, form_->hoverScale(), form_->hoverPush(),
-               form_->hoverDimShrink());
+    const DockGeom g = barGeom(emerge_.value);
     openMenu(mx, my, hitItem(g, mx, my - zoneDY_, (float)zoneDX_));
     return 0;
   }
@@ -1545,7 +1614,7 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       if (menu_.open && PtInRect(&menuScreen_, pt))
         return DefWindowProcW(hwnd_, msg, wp, lp);  // 级联菜单区可命中
       ScreenToClient(hwnd_, &pt);
-      const RECT dz{ zoneDX_, zoneDY_, zoneDX_ + dockW_, zoneDY_ + winH_ };
+      const RECT dz{ zoneDX_, zoneDY_, zoneDX_ + baseW_, zoneDY_ + baseH_ };
       if (!settings_.contains(pt.x, pt.y) && !PtInRect(&dz, pt))
         return HTTRANSPARENT;
     }
@@ -1681,8 +1750,9 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   }
   watchActive_ = !watchers_.empty();
 
-  // 初始窗口：收缩态（e=0，右缘露出 24px）；起始落主屏工作区（hwnd 未创建，
-  // workArea() 回退 SPI_GETWORKAREA），多屏位置由后续拖拽/重建接管
+  // 初始窗口：收缩态（竖向 e=0 右缘露出半条；横向 e=0 = mini 盒，水平居中贴边）；
+  // 起始落主屏工作区（hwnd 未创建，workArea() 回退 SPI_GETWORKAREA），
+  // 多屏位置由后续拖拽/重建接管
   const RECT work = workArea();
   const int screenH = (int)(work.bottom - work.top);
   const int screenW = (int)(work.right - work.left);
@@ -1692,16 +1762,30 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
   dockW_ = (int)g.w;
   winH_ = h;
   winY_ = work.top + ((work.bottom - work.top) - h) / 2;
-  const int x = cfg_.edge == "left" ? work.left + dockW_ / 2 - dockW_
-                                    : work.right - dockW_ / 2;  // 收缩态露出左半
+  int x, w = dockW_, h0 = h;
+  if (isHorizEdge(cfg_.edge)) {
+    std::vector<double> cw((size_t)cfg_.count, 96.0 * g.scale);
+    miniG_ = layoutMini(cw, g.scale);
+    DockGeom m = morphGeom(g, miniG_, 0.0, cfg_.edge == "bottom");  // 初始收缩
+    w = (int)std::lround(m.w);
+    h0 = (int)std::lround(m.h);
+    winX_ = work.left + (screenW - dockW_) / 2;
+    winY_ = cfg_.edge == "top" ? work.top : work.bottom - (int)g.h;
+    x = work.left + ((int)(work.right - work.left) - w) / 2;
+  } else {
+    x = cfg_.edge == "left" ? work.left + dockW_ / 2 - dockW_
+                            : work.right - dockW_ / 2;  // 收缩态露出左半
+  }
+  const int y0 = isHorizEdge(cfg_.edge)
+      ? (cfg_.edge == "top" ? work.top : work.bottom - h0) : winY_;
 
   hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE |
                               WS_EX_LAYERED,
                           kClassName, L"OkMeter", WS_POPUP,
-                          x, winY_, dockW_, h, nullptr, nullptr, inst, this);
+                          x, y0, w, h0, nullptr, nullptr, inst, this);
   if (!hwnd_) return 1;
   if (cfg_.pinned) setEmergeTarget(1);  // 保持显示：启动即常显展开（弹簧滑出）
-  if (!d3d_.init(hwnd_, dockW_, h)) {
+  if (!d3d_.init(hwnd_, w, h0)) {
     DestroyWindow(hwnd_);
     return 2;
   }
@@ -1762,8 +1846,8 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
     HANDLE waitHandles[12];
     DWORD nWait = 0;
     waitHandles[nWait++] = animTimer_;
-    for (auto& w : watchers_)
-      if (w->eventHandle() && nWait < 12) waitHandles[nWait++] = w->eventHandle();
+    for (auto& wt : watchers_)
+      if (wt->eventHandle() && nWait < 12) waitHandles[nWait++] = wt->eventHandle();
     for (;;) {
       MsgWaitForMultipleObjectsEx(nWait, waitHandles, INFINITE, QS_ALLINPUT,
                                   MWMO_INPUTAVAILABLE);
@@ -1777,7 +1861,7 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
         }
       }
       bool watchHit = false;  // 每个 watcher 都要调 signaled（内含复位+重投）
-      for (auto& w : watchers_) watchHit = w->signaled() || watchHit;
+      for (auto& wt : watchers_) watchHit = wt->signaled() || watchHit;
       if (watchHit) pollData();  // RDCW 触发提前 poll
       bool quit = false;
       while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {

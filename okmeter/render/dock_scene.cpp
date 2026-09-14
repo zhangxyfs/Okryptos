@@ -88,7 +88,7 @@ void DockScene::draw(D3DContext& d3d, IForm& form, IMaterial& material,
   DockGeom baked = g;
   for (size_t i = 0; i < n; ++i) {
     const ItemGeom& it = g.items[i];
-    baked.items[i].x = it.x + dx;
+    baked.items[i].x = it.x + it.dx + dx;
     baked.items[i].y = it.y + it.dy;
     if ((int)i == pressIdx) baked.items[i].scale *= 0.9;  // 按压下沉（球与文本同步）
   }
