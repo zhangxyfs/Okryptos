@@ -32,7 +32,9 @@ LLAMA_TAG=b10405
 LLAMA_BASE=${LLAMA_CPP_BASE_URL:-https://github.com/ggml-org/llama.cpp/releases/download}
 mkdir -p "$STAGE/runtime"
 if [ ! -f "$STAGE/runtime/llama-server" ]; then
-  curl -fSL -o dist/llama-linux.tar.gz "$LLAMA_BASE/$LLAMA_TAG/llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz"
+  # --retry-all-errors + -C -：镜像/网络抖动中途断流时自动断点续传重试
+  #（ghproxy 类镜像常见 43% 处 curl(18) 断流，整包重下必再踩）
+  curl -fSL --retry 8 --retry-all-errors -C - -o dist/llama-linux.tar.gz "$LLAMA_BASE/$LLAMA_TAG/llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz"
   # 资产内含 llama-b10405/ 顶层目录（--strip-components=1 剥掉）；且含 .so 符号链接，
   # Windows Git Bash 无建链权限时 tar 回退为实体拷贝、目标未解出时报错——解两遍兜底
   #（Linux 宿主第一遍即成功，第二遍幂等覆盖无害；资产损坏时第二遍仍会失败被 set -e 拦住）
