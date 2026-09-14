@@ -116,7 +116,8 @@
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
       <div class="group-title">2.26.x</div>
-      <a href="#v2-26-3"><span><span class="latest-dot"></span>v2.26.3</span><span class="d">09-14</span></a>
+      <a href="#v2-26-4"><span><span class="latest-dot"></span>v2.26.4</span><span class="d">09-14</span></a>
+      <a href="#v2-26-3"><span>v2.26.3</span><span class="d">09-14</span></a>
       <a href="#v2-26-2"><span>v2.26.2</span><span class="d">09-14</span></a>
       <a href="#v2-26-1"><span>v2.26.1</span><span class="d">09-13</span></a>
       <a href="#v2-26-0"><span>v2.26.0</span><span class="d">09-13</span></a>
@@ -218,8 +219,25 @@
       </div>
     </div>
 
+    <section class="ver" id="v2-26-4">
+      <div class="ver-head"><h2>v2.26.4</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-09-14</time></div>
+      <div class="chg">
+        <span class="tag tag-fix" data-i18n="t.fix">修复</span>
+        <ul>
+          <li data-i18n="c.2264.f1">升级后配置中心与悬浮条自动回来：此前一键升级会强制关闭配置中心与 Token 监视器，装完只拉起 daemon——两者就此消失需手动重开；现在安装器关闭进程前记录运行快照，装完原样恢复，交互式与静默升级一致，且交互快速升级不会重复打开配置中心</li>
+          <li data-i18n="c.2264.f2">修复升级后偶发配置中心未自动打开：等待 daemon 就绪的预算从 3 秒放宽到 30 秒——升级后新程序冷启动常超过 3 秒，旧预算会误判未就绪直接退出</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2264.n1">升级体验修复小版本，无数据与配置格式变化；从低版本升到本版时执行安装的仍是旧版安装器，恢复行为从本版往更高版本升级时开始生效</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-26-3">
-      <div class="ver-head"><h2>v2.26.3</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-09-14</time></div>
+      <div class="ver-head"><h2>v2.26.3</h2><time>2026-09-14</time></div>
       <div class="chg">
         <span class="tag tag-improve" data-i18n="t.improve">改进</span>
         <ul>
