@@ -30,12 +30,26 @@ var SpawnDetached = spawnDetached
 
 func quickClient() *http.Client { return &http.Client{Timeout: healthTimeout} }
 
-// upgradeInProgress 报告升级安装进行中（GUI /api/update/apply 写的熔断标记存在）：
-// 此时旧 daemon 已被停掉、安装器正在覆盖 exe，拉起只会启动即将被替换的旧二进制
-// 并与安装器抢文件锁。
+// upgradeMarkTTL 熔断标记最长有效 10 分钟：安装正常数分钟内完成、新 okd 启动即
+// 自愈删除；安装中止/崩溃时标记残留会把 daemon 拉起永久锁死（v2.26.4 实踩：
+// 安装中途失败 → 熔断残留 → Ensure 永不拉起 → GUI/悬浮条全部"运行不起来"）。
+// 超时按失效处理并顺手删除，无需任何进程存活也能自愈。
+const upgradeMarkTTL = 10 * time.Minute
+
+// upgradeInProgress 报告升级安装进行中（GUI /api/update/apply 写的熔断标记存在
+// 且未过期）：此时旧 daemon 已被停掉、安装器正在覆盖 exe，拉起只会启动即将被
+// 替换的旧二进制并与安装器抢文件锁。
 func upgradeInProgress() bool {
-	_, err := os.Stat(filepath.Join(registry.Home(), "update", ".upgrading"))
-	return err == nil
+	mark := filepath.Join(registry.Home(), "update", ".upgrading")
+	fi, err := os.Stat(mark)
+	if err != nil {
+		return false
+	}
+	if time.Since(fi.ModTime()) > upgradeMarkTTL {
+		_ = os.Remove(mark)
+		return false
+	}
+	return true
 }
 
 // Ensure 在 daemon 不在时后台拉起（15s 防抖，防止多会话同时 spawn 风暴）。

@@ -215,7 +215,8 @@ end;
 
 { 安装前停常驻进程：必须在 wpPreparing 的文件占用检查之前跑，否则 Inno 弹
   "应用程序正在使用文件"页（v2.26.2 实测卡点）。先优雅停 okd，再 taskkill 强杀
-  四个进程兜底（OkMeter/OkManager/ok.exe 无 stop 命令）——不问用户。
+  四个进程兜底（OkMeter/OkManager/ok.exe 无 stop 命令）——不问用户；
+  最后按路径清安装目录下的孤儿 llama-server sidecar（apply 自退会留孤儿）。
   强杀前快照哪些在跑，装完由 [Run] 段按快照原样恢复（静默升级同样恢复） }
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
@@ -235,6 +236,13 @@ begin
   else if FileExists(ExpandConstant('{app}\ok.exe')) then
     Exec(ExpandConstant('{app}\ok.exe'), 'daemon stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{cmd}'), '/C taskkill /F /IM ok.exe /IM okd.exe /IM OkManager.exe /IM OkMeter.exe >NUL 2>&1',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  { 内置 sidecar llama-server 正常随 okd 优雅停止回收；但 apply 自退（os.Exit 跳过
+    defer）/崩溃会留孤儿锁 runtime/ 文件——RM 优雅关它对控制台进程要等满超时
+    （实测 ~56s，静默档下甚至可能中止安装）。按路径过滤只杀安装目录下的实例，
+    不误伤用户自己运行的 llama.cpp }
+  Exec(ExpandConstant('{cmd}'), '/C powershell -NoProfile -Command "Get-Process llama-server -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "' +
+       RemoveBackslashUnlessRoot(ExpandConstant('{app}')) + '\*" } | Stop-Process -Force" >NUL 2>&1',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 

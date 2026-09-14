@@ -459,5 +459,9 @@ func applyUpdate(path string) {
 		return
 	}
 	stopDaemon()
+	// 给进程内优雅关停留窗口：/api/shutdown → srv.Shutdown → Run 的 defer 回收
+	// sidecar（llama-server 等）。os.Exit 跳过一切 defer——立即退出会把 sidecar
+	// 留成孤儿锁住 runtime/ 文件，安装器 copy 到那里时静默中止（v2.26.4 实踩）。
+	time.Sleep(2 * time.Second)
 	exitProcess(0)
 }

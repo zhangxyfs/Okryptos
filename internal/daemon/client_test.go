@@ -186,6 +186,32 @@ func TestEnsureUpgradeCircuitBreaker(t *testing.T) {
 	}
 }
 
+// 熔断自愈 TTL：安装中止/崩溃留下过期 .upgrading（mtime 超过 upgradeMarkTTL）时
+// upgradeInProgress 视为失效并删除——否则 Ensure 永久拒拉 daemon（v2.26.4 实踩死锁）。
+func TestUpgradeCircuitBreakerExpiry(t *testing.T) {
+	t.Setenv("OK_HOME", t.TempDir())
+	calls := stubSpawn(t)
+	mark := filepath.Join(os.Getenv("OK_HOME"), "update", ".upgrading")
+	if err := os.MkdirAll(filepath.Dir(mark), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mark, []byte("1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-upgradeMarkTTL - time.Minute)
+	if err := os.Chtimes(mark, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	Ensure() // 过期熔断应失效并自删，走正常拉起（stub 不真起进程）
+	if *calls != 1 {
+		t.Fatalf("过期熔断不应挡住拉起, spawn calls = %d", *calls)
+	}
+	if _, err := os.Stat(mark); !os.IsNotExist(err) {
+		t.Fatalf("过期熔断应被删除, stat err = %v", err)
+	}
+}
+
 // daemon.Run 启动自愈（clearUpgradeMark）：.upgrading 残留（升级收尾或安装中断）
 // 在启动路径开头删除并记日志——否则 Ensure/EnsureCurrent 会永久拒拉 daemon。
 func TestClearUpgradeMarkSelfHeal(t *testing.T) {
