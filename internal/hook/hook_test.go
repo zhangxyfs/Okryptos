@@ -37,6 +37,12 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("OK_ZCODE_HOME", zcodeDir)
+	orosusDir, err := os.MkdirTemp("", "hook-test-orosus-home")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("OK_OROSUS_HOME", orosusDir)
 	reasonixDir, err := os.MkdirTemp("", "hook-test-reasonix-home")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

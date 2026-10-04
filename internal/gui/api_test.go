@@ -34,6 +34,7 @@ func newEnv(t *testing.T) (*Handler, string, string) {
 	t.Setenv("OK_SKILLS_HOME", t.TempDir())
 	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	t.Setenv("OK_ZCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-zcode"))
+	t.Setenv("OK_OROSUS_HOME", filepath.Join(t.TempDir(), "nonexistent-orosus"))
 	t.Setenv("OK_OPENCODE_HOME", filepath.Join(t.TempDir(), "nonexistent-opencode"))
 	t.Setenv("OK_CLAUDE_HOME", filepath.Join(t.TempDir(), "nonexistent-claude"))
 	t.Setenv("OK_CODEPILOT_HOME", filepath.Join(t.TempDir(), "nonexistent-codepilot"))
@@ -158,8 +159,8 @@ func TestStatusEmptyRegistry(t *testing.T) {
 	if len(res.Projects) != 0 {
 		t.Fatalf("expected empty projects, got %v", res.Projects)
 	}
-	if len(res.Agents) != 10 {
-		t.Fatalf("expected 10 agents, got %d: %s", len(res.Agents), data)
+	if len(res.Agents) != 11 {
+		t.Fatalf("expected 11 agents, got %d: %s", len(res.Agents), data)
 	}
 	if res.SkillsInstalled || res.EmbeddingConfigured || res.Disabled {
 		t.Fatalf("expected flags false, got %+v", res)
