@@ -102,10 +102,12 @@ func orosusTablesOf(t *testing.T, hooks map[string]any, event string) []map[stri
 }
 
 func TestOrosusHooksBlockForShape(t *testing.T) {
-	// 平台双态约定：Linux 上 filepath.ToSlash 是 no-op（不转反斜杠）——期望值
-	// 与函数走同一归一，否则 ubuntu CI 必红（Windows 断言 D:/、Linux 断言 D:\）
-	slashExe := filepath.ToSlash(`D:\x\ok.exe`)
-	block := OrosusHooksBlockFor(`D:\x\ok.exe`, 15)
+	// 平台双态约定：夹具用平台原生真实路径（临时目录）——Windows 带反斜杠、验
+	// ToSlash 转换；Linux 原生正斜杠。不能硬编码 D:\x 形态字面量：Linux 上 ToSlash
+	// 是 no-op，反斜杠原样进 TOML basic 串构成 \x 十六进制转义、解析必炸（CI 实证）。
+	exe := filepath.Join(t.TempDir(), "ok.exe")
+	slashExe := filepath.ToSlash(exe)
+	block := OrosusHooksBlockFor(exe, 15)
 	for _, want := range []string{
 		"[[hooks.UserPromptSubmit]]",
 		"[[hooks.PostToolUse]]",
