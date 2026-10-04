@@ -40,6 +40,19 @@ func (r *Repo) PullRebase() ([]string, error) {
 	return nil, nil
 }
 
+// isMissingUpstream 判定 pull 失败是否"没有可合并的远端跟踪分支"（execGit 固定
+// LC_ALL=C，文案稳定）：远端无跟踪分支（no such ref was fetched，空仓/远端重建）
+// 或本地无跟踪配置（no tracking information，旧版 git 克隆空仓不写 branch.*）。
+// 两类失败重试皆无解，属可自愈场景（见 Sync 内降级直推注释）。
+func isMissingUpstream(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "no such ref was fetched") ||
+		strings.Contains(s, "no tracking information")
+}
+
 // Sync 一次执行 = add -A → 有变更则 commit →（有远端）pull --rebase → push。
 func (r *Repo) Sync(msg string) (o Outcome) {
 	if !r.IsRepo() {
@@ -77,17 +90,30 @@ func (r *Repo) Sync(msg string) (o Outcome) {
 		o.NoRemote = true
 		return o
 	}
+	healed := false
 	conflicts, err := r.PullRebase()
 	if err != nil {
-		o.Err = err
-		return o
-	}
-	if len(conflicts) > 0 {
+		// 远端缺跟踪分支（空仓首推、远端仓重建后分支未推回）：pull 无 ref 可变基，
+		// 且重试永远无解——远端长出 main 前每次 pull 都失败，push 永远轮不到（首推
+		// 死锁，2026-09-17 Orosus 实证：InitCloned 克隆自空仓后本地首提卡死）。
+		// 降级为直接推：本地历史完整，Push 会 push -u 重建远端分支与跟踪，一次同步自愈。
+		if !isMissingUpstream(err) {
+			o.Err = err
+			return o
+		}
+		healed = true
+	} else if len(conflicts) > 0 {
 		o.Conflicts = conflicts // 停止后续 push（设计文档 §7）
 		return o
 	}
 	o.Pulled = behindBefore
 	_, ahead, _ := r.Status()
+	if healed {
+		// 首推自愈路径：上游引用尚不存在，Status 算不出 ahead——推送数取全部本地提交。
+		if n, err := execGit(r.Dir, localTimeout, "rev-list", "--count", "HEAD"); err == nil {
+			fmt.Sscanf(n, "%d", &ahead)
+		}
+	}
 	if err := r.Push(); err != nil {
 		o.Err = err
 		return o

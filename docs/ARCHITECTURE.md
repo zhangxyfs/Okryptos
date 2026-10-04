@@ -328,7 +328,7 @@ v1 仅 `changelog_required`：触碰文件中存在匹配 `code_globs` 的 且 �
 ### 5.10 cli — 管理命令（cli.go 1294 行 + setup.go + toggle.go）
 
 - `cli.go`：`Init`（项目名缺省取目录基名；**同名项目幂等补挂工作目录**——服务器拉取/备份恢复产生的空壳项目（无 paths）`ok init` 同名时经 `registry.AddPath` 补挂，防串库收窄）、`Add`（重复条目拒绝；后接索引库同步）、`Propose`（AI 面向的草稿写入：`draft:true`、只同步 INDEX 不算向量）、`Approve`（草稿转正，同步 INDEX 并补算向量；同一秒内 mtime 不变时手动推进一秒防 diff 漏判）、`CaptureCmd`（打印或设置项目 `[capture]` 模式，整段替换幂等写入）、`Search`（检索预览，走 `index.Query`；克隆/拉取后索引滞后时先按需增量同步再检索）、`Index`（索引库增量同步并打印条目数）、`List`（文件扫描，人用命令开销可忽略）、`Doctor`（注册表/配置/embedding 连通性/hooks 安装状态/开关状态）
-- `Sync`：`ok sync`（一次执行 = commit → pull --rebase → push，编排与守卫全在 syncx；冲突时列文件并指引到 GUI 冲突解决页）与 `ok sync init [remote-url]`（三情形：无远端仅本地历史 / 本地无内容克隆远端 / 本地有内容首推；远端已有内容报 `ErrRemoteNotEmpty` 不自动合并）
+- `Sync`：`ok sync`（一次执行 = commit → pull --rebase → push，编排与守卫全在 syncx；冲突时列文件并指引到 GUI 冲突解决页；pull 报"远端缺跟踪分支/无跟踪信息"（空仓首推、远端仓重建）时降级直推自愈——否则远端长出 main 前 pull 永远失败、push 永远轮不到）与 `ok sync init [remote-url]`（三情形：无远端仅本地历史 / 本地无内容克隆远端 / 本地有内容首推；远端已有内容报 `ErrRemoteNotEmpty` 不自动合并）
 - `setup.go`：见第 6.4 节
 - `toggle.go`：`On`/`Off` 即删除/创建 `~/.okryptos/hooks-disabled` 标志文件
 

@@ -160,6 +160,11 @@ func (r *Repo) CloneToDir(url string) error {
 	_, _ = execGit(r.Dir, localTimeout, "config", "core.autocrlf", "false")
 	// 强制 autocrlf=false：库内 blob 是 LF，checkout 不做 CRLF 转换（Windows 全局 autocrlf=true 时也能逐字节还原）。
 	// 注意：此时 .git 已移入，失败留下"是仓但工作区未还原"的中间态，重试/Status 可感知。
-	_, err = execGit(r.Dir, localTimeout, "-c", "core.autocrlf=false", "checkout", "--", ".")
-	return err
+	// 空远端（unborn HEAD）没有可还原的内容且 checkout -- . 必报 pathspec 错——
+	// 跳过 checkout：仓已就位，首笔同步经降级直推把本地历史推上去（sync.go isMissingUpstream）。
+	if _, err := execGit(r.Dir, localTimeout, "rev-parse", "--verify", "--quiet", "HEAD"); err == nil {
+		_, err = execGit(r.Dir, localTimeout, "-c", "core.autocrlf=false", "checkout", "--", ".")
+		return err
+	}
+	return nil
 }

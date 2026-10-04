@@ -233,6 +233,71 @@ func TestSyncDuringMergeConflictRefuses(t *testing.T) {
 	_, _ = execGit(dirB, localTimeout, "merge", "--abort")
 }
 
+// TestSyncEmptyRemoteFirstPushHeals 复现 Orosus 死锁（2026-09-17 实证）：克隆自
+// 空仓（branch.main.merge 在、远端无 main），本地首提后 Sync 必须把历史整体推出
+// 并在远端建 main——不能被 pull 报错卡死（修前 push 永远轮不到，远端永远空）。
+func TestSyncEmptyRemoteFirstPushHeals(t *testing.T) {
+	bare := t.TempDir()
+	if _, err := execGit(bare, localTimeout, "init", "--bare", "-b", "main"); err != nil {
+		t.Fatalf("bare: %v", err)
+	}
+	dir := t.TempDir()
+	if err := Open(dir).CloneToDir(bare); err != nil {
+		t.Fatalf("clone empty: %v", err)
+	}
+	writeFile(t, dir, "k.md", "v1\n")
+	o := Open(dir).Sync("sync: first")
+	if o.Err != nil || o.Pushed < 1 {
+		t.Fatalf("heal outcome: %+v err=%v", o, o.Err)
+	}
+	// 远端长出了 main 且与本地同源
+	out, err := execGit(dir, networkTimeout, "ls-remote", "origin", "refs/heads/main")
+	if err != nil || out == "" {
+		t.Fatalf("remote main missing after heal: %q err=%v", out, err)
+	}
+	// 二次同步恢复常态：无新提交 → 已是最新
+	o = Open(dir).Sync("sync: idle")
+	if o.Err != nil || o.Pushed != 0 || o.Committed {
+		t.Fatalf("idle after heal: %+v", o)
+	}
+}
+
+// TestSyncHealsWipedRemoteBranch：远端 main 被清（仓重建/分支删除）后一次 Sync
+// 应把本地历史重推回去——pull 因远端缺 ref 必然失败，不能就此中止 push。
+func TestSyncHealsWipedRemoteBranch(t *testing.T) {
+	bare, dirA, _ := mkPair(t)
+	if _, err := execGit(bare, localTimeout, "update-ref", "-d", "refs/heads/main"); err != nil {
+		t.Fatalf("wipe remote main: %v", err)
+	}
+	writeFile(t, dirA, "k.md", "v2\n")
+	o := Open(dirA).Sync("sync: after wipe")
+	if o.Err != nil || o.Pushed < 1 {
+		t.Fatalf("heal outcome: %+v err=%v", o, o.Err)
+	}
+	out, err := execGit(dirA, networkTimeout, "ls-remote", "origin", "refs/heads/main")
+	if err != nil || out == "" {
+		t.Fatalf("remote main not restored: %q err=%v", out, err)
+	}
+}
+
+func TestIsMissingUpstream(t *testing.T) {
+	for msg, want := range map[string]bool{
+		"": false,
+		"git 退出码 128: fatal: unable to access 'http://nas/x.git/'":          false,
+		"git 退出码 1: error: failed to push some refs (non-fast-forward)":       false,
+		"git 退出码 1: Your configuration specifies to merge with the ref 'refs/heads/main' from the remote, but no such ref was fetched.": true,
+		"git 退出码 1: There is no tracking information for the current branch.": true,
+	} {
+		var err error
+		if msg != "" {
+			err = &ExitError{Code: 1, Output: msg}
+		}
+		if got := isMissingUpstream(err); got != want {
+			t.Errorf("isMissingUpstream(%q) = %v, want %v", msg, got, want)
+		}
+	}
+}
+
 func TestSyncOnceSingleFlight(t *testing.T) {
 	_, dirA, _ := mkPair(t)
 	writeFile(t, dirA, "k.md", "v3\n")
