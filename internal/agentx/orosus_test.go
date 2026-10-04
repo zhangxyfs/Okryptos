@@ -20,8 +20,9 @@ func setupOrosus(t *testing.T) string {
 }
 
 // orosusHandwritten 首接 Orosus 时的真机手写件形态（2026-10-04）：TOML literal 串
-// command（无转义引号）、name/product 显示元数据、PreToolUse 父表带 matcher。
-// 安装必须能识别并整块替换，不留孤儿父表。
+// command（无转义引号）、name/product 显示元数据、post-tool 挂 PreToolUse（文档
+// 补 PostToolUse tool_input 之前的旧挂载——刻意保留作存量治理夹具，安装须能识别
+// 并替换为 PostToolUse 标记块，不留孤儿父表）。
 const orosusHandwritten = `# Hooks —— Okryptos 知识注入
 [hooks]
 enabled = true
@@ -104,7 +105,7 @@ func TestOrosusHooksBlockForShape(t *testing.T) {
 	block := OrosusHooksBlockFor(`D:\x\ok.exe`, 15)
 	for _, want := range []string{
 		"[[hooks.UserPromptSubmit]]",
-		"[[hooks.PreToolUse]]",
+		"[[hooks.PostToolUse]]",
 		`matcher = "^tool-fs__(write|edit)$"`,
 		`command = "\"D:/x/ok.exe\" hook prompt claude"`,
 		`command = "\"D:/x/ok.exe\" hook post-tool claude"`,
@@ -118,8 +119,19 @@ func TestOrosusHooksBlockForShape(t *testing.T) {
 		}
 	}
 	// 块本身必须是合法 TOML（包一层 [hooks] 头验证表归属）
-	if h := decodeOrosusTOML(t, "[hooks]\n"+block); len(orosusTablesOf(t, h, "PreToolUse")) != 1 {
-		t.Error("PreToolUse 表数应为 1")
+	if h := decodeOrosusTOML(t, "[hooks]\n"+block); len(orosusTablesOf(t, h, "PostToolUse")) != 1 {
+		t.Error("PostToolUse 表数应为 1")
+	}
+	// 换行回归钉（2026-10-04 真机实证）：块必须以 \n 收尾——末行无换行会在拼
+	// 标记时粘连成 `timeout = 15# <<< okryptos hooks <<<`，smol-toml 解析失败、
+	// hooks 模块激活炸降级窗（BurntSushi 容忍该形态，只验解析拦不住）
+	if !strings.HasSuffix(block, "\n") || strings.Contains(block, "15#") || strings.Contains(block, `"15"timeout`) {
+		t.Fatalf("块尾必须换行收尾、任何行不得粘连:\n%q", block)
+	}
+	for _, l := range strings.Split(strings.TrimSuffix(block, "\n"), "\n") {
+		if strings.Contains(l, "#") && !strings.HasPrefix(strings.TrimSpace(l), "#") {
+			t.Fatalf("块内行尾不允许出现注释（换行丢失形态）: %q", l)
+		}
 	}
 }
 
@@ -164,15 +176,22 @@ func TestOrosusInstallIdempotent(t *testing.T) {
 	if got := ups[0]["hooks"].([]map[string]any)[0]["command"]; got != wantCmd("prompt") {
 		t.Errorf("prompt command = %v", got)
 	}
-	pre := orosusTablesOf(t, hooks, "PreToolUse")
-	if len(pre) != 1 || pre[0]["matcher"] != "^tool-fs__(write|edit)$" {
-		t.Fatalf("PreToolUse 表/matcher 不符: %v", pre)
+	post := orosusTablesOf(t, hooks, "PostToolUse")
+	if len(post) != 1 || post[0]["matcher"] != "^tool-fs__(write|edit)$" {
+		t.Fatalf("PostToolUse 表/matcher 不符: %v", post)
 	}
-	if got := pre[0]["hooks"].([]map[string]any)[0]["timeout"].(int64); got != int64(HookTimeoutSec()) {
+	if got := post[0]["hooks"].([]map[string]any)[0]["timeout"].(int64); got != int64(HookTimeoutSec()) {
 		t.Errorf("timeout = %v", got)
 	}
 	if !a.HooksInstalled() {
 		t.Fatal("安装后 HooksInstalled 应为 true")
+	}
+	// 换行回归钉：结束标记必须独立成行、前行恰为 timeout 行
+	lines := strings.Split(readOrosusHooks(t), "\n")
+	for i, l := range lines {
+		if l == MarkerEnd && (i == 0 || lines[i-1] != "timeout = "+strconv.Itoa(HookTimeoutSec())) {
+			t.Fatalf("结束标记须独立成行且前行为 timeout 行，前行=%q", lines[i-1])
+		}
 	}
 }
 
@@ -194,10 +213,14 @@ func TestOrosusInstallReplacesHandwrittenLegacy(t *testing.T) {
 		}
 	}
 	hooks := decodeOrosusTOML(t, content)
-	// 第三方守卫保留：PreToolUse 两表（ok 一表 + 第三方一表）
+	// 旧挂载（PreToolUse）手写件被替换为 PostToolUse 标记块；第三方 PreToolUse 表保留
 	pre := orosusTablesOf(t, hooks, "PreToolUse")
-	if len(pre) != 2 {
-		t.Fatalf("PreToolUse 应剩 2 表（ok+第三方）: %v", pre)
+	if len(pre) != 1 || !strings.Contains(content, "guard.sh") {
+		t.Fatalf("第三方 PreToolUse 表应保留 1 表: %v", pre)
+	}
+	post := orosusTablesOf(t, hooks, "PostToolUse")
+	if len(post) != 1 || post[0]["matcher"] != "^tool-fs__(write|edit)$" {
+		t.Fatalf("标记块应为 PostToolUse 挂载: %v", post)
 	}
 	if strings.Count(content, "guard.sh") != 1 {
 		t.Error("第三方钩子被误删")

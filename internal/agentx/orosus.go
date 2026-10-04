@@ -24,13 +24,15 @@ func OrosusHome() string {
 
 func orosusHooksPath() string { return filepath.Join(OrosusHome(), "modules.d", "hooks.toml") }
 
-// orosusHookEvents ok 接入的 Orosus hook 事件。post-tool 挂 PreToolUse 而非
-// PostToolUse：Orosus 的 PostToolUse 载荷不带 tool_input（docs/hooks.md §3.2），
-// post-tool 取不到 path；PreToolUse 的 tool_input.path 在场（执行失败会多记一笔
-// 触碰，归因语义无损）。
+// orosusHookEvents ok 接入的 Orosus hook 事件。post-tool 挂 PostToolUse：载荷带
+// tool_input（工具实收参数、改参后为最终值，docs/hooks.md §3.2 cc 口径——事后
+// 归因类钩子从这取 path），与 ZCode 的 Write|Edit 同位；事前（PreToolUse）跑会
+// 记「未遂的写」——工具可能被审批拒绝或执行失败（文档 §12 示例四注意项）。
+// 2026-10-04 文档补 PostToolUse tool_input 前曾挂 PreToolUse：存量 PreToolUse 表
+// 由 stripLegacyOKHooksOrosus 治理（判定只看 command 行，与事件名无关）。
 var orosusHookEvents = []hookEvent{
 	{"UserPromptSubmit", "", "prompt"},
-	{"PreToolUse", "^tool-fs__(write|edit)$", "post-tool"},
+	{"PostToolUse", "^tool-fs__(write|edit)$", "post-tool"},
 	{"Stop", "", "stop"},
 }
 
@@ -45,6 +47,10 @@ var orosusHookNames = map[string]string{
 // OrosusHooksBlockFor 生成指向 exe 的 Orosus hooks 标记块内容（不含标记行）。
 // command 引 exe（正斜杠+双引号，bash -c 与 cmd 都接受；路径含空格不断裂），
 // 协议尾参 claude（Orosus 解析 Claude JSON 兼容壳）；三条统一 timeout 秒。
+// 每行（含末行 timeout）必须 \n 收尾：末行无换行会在拼标记时粘连成
+// `timeout = 20# <<< okryptos hooks <<<`——TOML 行尾注释前无空白，Orosus 的
+// smol-toml 解析失败、hooks 模块激活炸降级窗（2026-10-04 真机实证；BurntSushi
+// 容忍该形态，回归钉须直接断言换行而非只验解析）。
 func OrosusHooksBlockFor(exe string, timeoutSec int) string {
 	exe = filepath.ToSlash(exe)
 	blocks := make([]string, 0, len(orosusHookEvents))
@@ -58,10 +64,10 @@ func OrosusHooksBlockFor(exe string, timeoutSec int) string {
 		b.WriteString("command = \"\\\"" + exe + "\\\" hook " + e.okHook + " claude\"\n")
 		b.WriteString("name = \"" + orosusHookNames[e.okHook] + "\"\n")
 		b.WriteString("product = \"Okryptos\"\n")
-		b.WriteString("timeout = " + strconv.Itoa(timeoutSec))
+		b.WriteString("timeout = " + strconv.Itoa(timeoutSec) + "\n")
 		blocks = append(blocks, b.String())
 	}
-	return strings.Join(blocks, "\n\n")
+	return strings.Join(blocks, "\n") // 各块已 \n 收尾，join 补一个 = 块间恰一空行
 }
 
 // orosusGlobalDisabled 匹配 [hooks] 节的 enabled = false（允许行尾注释）。
