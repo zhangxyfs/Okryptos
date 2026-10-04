@@ -11,6 +11,7 @@
 #include "../render/backdrop.h"
 #include "geometry.h"
 #include "menu.h"
+#include "overview.h"
 #include "settings.h"
 #include "watch.h"
 #include <cstdint>
@@ -44,6 +45,9 @@ class IAdapter;
 // 全量 rebuild；取消/✕/Escape 丢弃。面板打开期间 dock 保持展开；联合窗口横贯全屏，
 // WM_NCHITTEST 对中部空白区回 HTTRANSPARENT 穿透；滚轮走原始输入（RIDEV_INPUTSINK，
 // NOACTIVATE 窗口收不到 WM_MOUSEWHEEL）。
+// 用量总览面板：只读统计弹窗（ui/overview.*）——工作区中央 80%×80% 玻璃面板
+//（最小 640×480 夹取可视区），与设置面板互斥；复用同一套并集扩窗/holdOpen/
+// ESC 沿检测/点击穿透机制；点面板外不关闭（穿透落到下层窗口），ESC 或 ✕ 关闭。
 // 拖拽换边（规格 §3.2）：WM_LBUTTONDOWN 起拖（SetCapture，阈值内视为按压/点击），
 // 拖动实时跟随；松手按窗口中心到所在屏工作区四边距离取最近边，换边则 saveConfig。
 // 多显示器：几何/定位一律按"窗口中心所在屏"的 MONITORINFO.rcWork（workArea()），
@@ -92,6 +96,8 @@ private:
   // 的偏移（卡区/菜单区/面板区让位），SetWindowPos 落窗
   void applyWindowPos();
   void syncClickThru();  // 设置面板期按指针位置动态开关整窗 WS_EX_TRANSPARENT
+  void applyTopmost();       // cfg_.topmost → HWND_TOPMOST / NOTOPMOST（总览置顶钮切换）
+  void updateEdgeRaiseTimer();  // 非置顶兜底：贴边唤起轮询定时器启/停
   void updatePosition() { applyWindowPos(); }
   void setEmergeTarget(double t);
   void setWide(bool w);   // 展开态加卡区（竖向宽 +268 / 横向高 +300，方向随 edge）；收缩态回条盒
@@ -123,6 +129,13 @@ private:
   void closeSettings(bool apply);
   void activateSettings(int idx);  // 面板控件命中分发（按钮/选项卡/chips/下拉/开关）
   double panelAnimT() const;       // 面板滑入动画进度（180ms，原型 panelin）
+  // 用量总览面板（ui/overview.*）：工作区中央 80%×80% 玻璃面板，与设置面板互斥
+  //（开一个先关另一个），同一套并集扩窗/holdOpen/ESC 沿检测/点击穿透机制
+  void openOverview();
+  void closeOverview();
+  void activateOverview(int idx);  // 面板控件命中分发（关闭/主题/分享/图表交互）
+  void shareOverview();            // 分享：面板 2× 离屏渲染存 PNG + toast 反馈
+  double overviewAnimT() const;    // 面板出现动画进度（180ms 淡入+上浮）
   double cardAnimT() const;        // 详情卡 cardin 出现动画进度（140ms，原型 .detail）
   // 悬停/按压命中：烘焙坐标（tuck+dy+卡区偏移）下的 2D 归一化距离 ≤1 最近项
   int hitItem(const DockGeom& g, int mx, int my, float dx) const;
@@ -170,6 +183,14 @@ private:
   Config pendingDraft_{};      // 中继期暂存的配置草稿（落定应用时才落盘）
   RECT panelScreen_{};        // 面板屏幕矩形（dock 对侧屏缘，打开时定位）
   LARGE_INTEGER panelOpenQpc_{}; // 面板打开时刻（180ms 滑入动画计时）
+  OverviewPanel overview_;    // 用量总览面板（open 时窗口并集扩出面板区；与设置互斥）
+  RECT overviewScreen_{};     // 总览面板屏幕矩形（工作区中央 80%×80%，打开时定位；
+                              // 标题栏拖拽移动时整体平移并夹取工作区）
+  bool overviewDrag_ = false; // 标题栏拖拽移动面板进行中（SetCapture 跟手）
+  POINT overviewDragStart_{}; // 起拖指针屏幕坐标
+  RECT overviewDragBase_{};   // 起拖时面板屏幕矩形（拖拽位移基准）
+  bool edgeRaised_ = false;   // 非置顶兜底：指针贴边已把窗口浮到普通窗口之上
+  LARGE_INTEGER overviewOpenQpc_{}; // 总览面板打开时刻（180ms 出现动画计时）
   LARGE_INTEGER cardShownQpc_{}; // 详情卡出现时刻（cardin 140ms 出现动画计时）
   int zoneDX_ = 0;            // 球区在窗口内的 x 偏移（卡区 268/菜单区让位）
   int zoneDY_ = 0;            // 球区 y 偏移（菜单向上扩窗时 >0）

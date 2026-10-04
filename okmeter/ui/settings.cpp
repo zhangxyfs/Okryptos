@@ -215,19 +215,24 @@ void SettingsPanel::layout(render::D3DContext& d3d) {
   };
 
   // ── 视觉形态：目录项 2 列选项卡（原型 choice-grid）──
+  // 仅列 listed 项：listed=false（罗盘/电平柱）入口关闭、功能保留——存量
+  // config 用罗盘/电平柱照常渲染，面板不再提供切换入口（此处无选中态）
   secBegin(L"视觉形态");
   {
     const float iw = (kContentW - kChoiceGap) * 0.5f;
-    const int rows = (render::kFormCount + 1) / 2;
+    int vis = 0;  // 可见序（网格定位）；c.a 仍记目录原索引
     for (int i = 0; i < render::kFormCount; ++i) {
-      const float cx = (float)(i % 2) * (iw + kChoiceGap);
-      const float cy = y + (float)(i / 2) * (kFormTabH + kChoiceGap);
+      if (!render::kFormCatalog[i].listed) continue;
+      const float cx = (float)(vis % 2) * (iw + kChoiceGap);
+      const float cy = y + (float)(vis / 2) * (kFormTabH + kChoiceGap);
       Ctrl c;
       c.kind = Ctrl::FormTab;
       c.a = i;
       c.rc = D2D1::RectF(cx, cy, cx + iw, cy + kFormTabH);
       ctrls_.push_back(c);
+      ++vis;
     }
+    const int rows = (vis + 1) / 2;
     y += (float)rows * kFormTabH + (float)(rows - 1) * kChoiceGap;
   }
   secEnd();

@@ -14,6 +14,8 @@ struct Config {
   bool mergeCache = true;
   bool pinned = false;             // 保持显示：不自动隐藏（迟滞/离开收回均禁用）
   std::string expandTrigger = "hover";  // hover / click：收缩态展开触发方式（展开后悬停详情不变）
+  bool topmost = true;             // 窗口置顶：关掉后可被其他窗口盖住（贴边悬停自动浮起兜底）
+  std::string overviewTheme = "light";  // light / dark：用量总览面板主题（与 dock 材质解耦）
   std::vector<std::string> mapping;  // "auto" | "total:session|today|week|all" | "model:<id>"
 
   void normalize();  // 非法值回退默认；count 钳奇数集；mapping 长度对齐 count

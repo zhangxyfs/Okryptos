@@ -1,4 +1,5 @@
 #include "d3d.h"
+#include <functional>
 #include <wincodec.h>
 
 using Microsoft::WRL::ComPtr;
@@ -130,18 +131,24 @@ bool D3DContext::saveFrame(const std::wstring& path) const {
   imm->CopyResource(staging_.Get(), rt_.Get());
   D3D11_TEXTURE2D_DESC desc{};
   rt_->GetDesc(&desc);
+  return encodeWic(path, imm.Get(), staging_.Get(), desc.Width, desc.Height);
+}
+
+// staging 纹理 → WIC PNG（saveFrame/renderOffscreen 共用编码段）
+bool D3DContext::encodeWic(const std::wstring& path, ID3D11DeviceContext* imm,
+                           ID3D11Texture2D* staging, unsigned w, unsigned h) const {
   (void)CoInitializeEx(nullptr, COINIT_MULTITHREADED);  // 已初始化则 S_FALSE
   ComPtr<IWICImagingFactory> wic;
   if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
                               CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))))
     return false;
   D3D11_MAPPED_SUBRESOURCE m{};
-  if (FAILED(imm->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &m))) return false;
+  if (FAILED(imm->Map(staging, 0, D3D11_MAP_READ, 0, &m))) return false;
   bool ok = false;
   ComPtr<IWICBitmap> bmp;
   if (SUCCEEDED(wic->CreateBitmapFromMemory(
-          desc.Width, desc.Height, GUID_WICPixelFormat32bppPBGRA, m.RowPitch,
-          m.RowPitch * desc.Height, static_cast<BYTE*>(m.pData), &bmp))) {
+          w, h, GUID_WICPixelFormat32bppPBGRA, m.RowPitch,
+          m.RowPitch * h, static_cast<BYTE*>(m.pData), &bmp))) {
     ComPtr<IWICFormatConverter> conv;
     if (SUCCEEDED(wic->CreateFormatConverter(&conv)) &&
         SUCCEEDED(conv->Initialize(bmp.Get(), GUID_WICPixelFormat32bppBGRA,
@@ -156,7 +163,7 @@ bool D3DContext::saveFrame(const std::wstring& path) const {
           SUCCEEDED(enc->Initialize(stream.Get(), WICBitmapEncoderNoCache)) &&
           SUCCEEDED(enc->CreateNewFrame(&frame, nullptr)) &&
           SUCCEEDED(frame->Initialize(nullptr)) &&
-          SUCCEEDED(frame->SetSize(desc.Width, desc.Height)) &&
+          SUCCEEDED(frame->SetSize(w, h)) &&
           SUCCEEDED(frame->SetResolution(96.0, 96.0))) {
         WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppBGRA;
         if (SUCCEEDED(frame->SetPixelFormat(&fmt)) &&
@@ -166,7 +173,67 @@ bool D3DContext::saveFrame(const std::wstring& path) const {
       }
     }
   }
-  imm->Unmap(staging_.Get(), 0);
+  imm->Unmap(staging, 0);
+  return ok;
+}
+
+// 离屏渲染存 PNG：临时 TARGET 位图挂到本 dc，drawFn 重绘，GetSurface 取回
+// 底纹 → staging → encodeWic
+bool D3DContext::renderOffscreen(
+    const std::wstring& path, int w, int h,
+    const std::function<void(ID2D1DeviceContext*)>& drawFn) {
+  auto diag = [](const char* stage, HRESULT hr) {  // 临时排障日志（定位后移除）
+    if (FILE* f = fopen("C:\\Users\\Administrator\\AppData\\Local\\Temp\\offscreen-diag.log", "a")) {
+      fprintf(f, "%s hr=0x%08lX\n", stage, (unsigned long)hr);
+      fclose(f);
+    }
+  };
+  if (!d3d_ || !dc_ || w <= 0 || h <= 0) { diag("precondition", E_INVALIDARG); return false; }
+  ComPtr<ID2D1Bitmap1> bmp;
+  const D2D1_SIZE_U size{(unsigned)w, (unsigned)h};
+  HRESULT hr = dc_->CreateBitmap(
+      size, nullptr, 0,
+      D2D1::BitmapProperties1(
+          D2D1_BITMAP_OPTIONS_TARGET,
+          D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                            D2D1_ALPHA_MODE_PREMULTIPLIED)),
+      &bmp);
+  if (FAILED(hr)) { diag("create-bitmap", hr); return false; }
+  ComPtr<ID2D1Image> oldTarget;
+  dc_->GetTarget(&oldTarget);
+  dc_->SetTarget(bmp.Get());
+  dc_->BeginDraw();
+  dc_->Clear(D2D1::ColorF(0, 0.0f));  // 全透明底（内容自供底）
+  drawFn(dc_.Get());
+  hr = dc_->EndDraw();
+  dc_->SetTransform(D2D1::IdentityMatrix());
+  dc_->SetTarget(oldTarget.Get());
+  if (FAILED(hr)) { diag("enddraw", hr); return false; }
+  ComPtr<IDXGISurface> surface;
+  hr = bmp->GetSurface(&surface);
+  if (FAILED(hr)) { diag("get-surface", hr); return false; }
+  ComPtr<ID3D11Resource> res;
+  hr = surface.As(&res);
+  if (FAILED(hr)) { diag("as-resource", hr); return false; }
+  D3D11_TEXTURE2D_DESC td{};
+  td.Width = (unsigned)w;
+  td.Height = (unsigned)h;
+  td.MipLevels = 1;
+  td.ArraySize = 1;
+  td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+  td.SampleDesc.Count = 1;
+  td.Usage = D3D11_USAGE_STAGING;
+  td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+  ComPtr<ID3D11Texture2D> staging;
+  hr = d3d_->CreateTexture2D(&td, nullptr, &staging);
+  if (FAILED(hr)) { diag("create-staging", hr); return false; }
+  ComPtr<ID3D11DeviceContext> imm;
+  d3d_->GetImmediateContext(&imm);
+  if (!imm) { diag("imm", E_FAIL); return false; }
+  imm->CopyResource(staging.Get(), res.Get());
+  const bool ok = encodeWic(path, imm.Get(), staging.Get(), td.Width, td.Height);
+  if (!ok) diag("encode", E_FAIL);
+  else diag("ok", S_OK);
   return ok;
 }
 

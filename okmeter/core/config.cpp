@@ -21,6 +21,7 @@ void Config::normalize() {
   if (edge != "right" && edge != "left" && edge != "top" && edge != "bottom")
     edge = "right";
   if (expandTrigger != "hover" && expandTrigger != "click") expandTrigger = "hover";
+  if (overviewTheme != "light" && overviewTheme != "dark") overviewTheme = "light";
   mapping.resize(count, "auto");
   for (auto& m : mapping) if (m.empty()) m = "auto";
 }
@@ -39,6 +40,8 @@ bool loadConfig(const std::filesystem::path& dir, Config& out) {
   if (const json::Value* x = v.find("mergeCache")) out.mergeCache = x->boolean(true);
   if (const json::Value* x = v.find("pinned")) out.pinned = x->boolean(false);
   if (const json::Value* x = v.find("expandTrigger")) out.expandTrigger = x->str();
+  if (const json::Value* x = v.find("topmost")) out.topmost = x->boolean(true);
+  if (const json::Value* x = v.find("overviewTheme")) out.overviewTheme = x->str();
   if (const json::Value* m = v.find("mapping"); m && m->isArray()) {
     out.mapping.clear();
     for (const auto& val : m->arr()) out.mapping.push_back(val.str());
@@ -58,6 +61,8 @@ bool saveConfig(const std::filesystem::path& dir, const Config& cfg) {
   root["mergeCache"] = json::num(c.mergeCache ? 1 : 0);
   root["pinned"] = json::num(c.pinned ? 1 : 0);
   root["expandTrigger"] = json::str(c.expandTrigger);
+  root["topmost"] = json::num(c.topmost ? 1 : 0);
+  root["overviewTheme"] = json::str(c.overviewTheme);
   json::Array arr;
   for (const auto& m : c.mapping) arr.push_back(json::str(m));
   json::Value av;

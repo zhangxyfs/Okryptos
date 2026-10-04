@@ -101,6 +101,25 @@ TEST(agg_modelmonth_respects_month_boundary) {
   CHECK_EQ(a.modelMonth("m/ghost", now).total(), 0);  // 未观测模型 → 0
 }
 
+TEST(agg_modellastmonth_respects_month_boundary) {
+  Aggregator a;
+  a.add(ev("m/a", "s1", 10, 0, 0, 0, msOf(2026, 7, 31, 23, 59)));  // 上上月
+  a.add(ev("m/a", "s1", 20, 0, 0, 0, msOf(2026, 8, 1, 0, 0)));      // 上月1日
+  a.add(ev("m/a", "s1", 40, 0, 0, 0, msOf(2026, 8, 31, 9, 30)));    // 上月末
+  a.add(ev("m/a", "s1", 80, 0, 0, 0, msOf(2026, 9, 5, 10, 0)));     // 本月
+  const int64_t now = msOf(2026, 9, 13, 12, 0);
+  CHECK_EQ(a.modelLastMonth("m/a", now).total(), 60);  // 上月两笔，本月/上上月不计
+  CHECK_EQ(a.modelLastMonth("m/ghost", now).total(), 0);  // 未观测模型 → 0
+}
+
+TEST(agg_modellastmonth_crosses_year_boundary) {
+  Aggregator a;
+  a.add(ev("m/a", "s1", 30, 0, 0, 0, msOf(2025, 12, 15, 10, 0)));  // 去年12月=上月
+  a.add(ev("m/a", "s1", 70, 0, 0, 0, msOf(2026, 1, 3, 10, 0)));    // 本月
+  const int64_t now = msOf(2026, 1, 10, 12, 0);
+  CHECK_EQ(a.modelLastMonth("m/a", now).total(), 30);
+}
+
 TEST(agg_json_roundtrip) {
   const int64_t now = msOf(2026, 9, 9, 12, 0);
   Aggregator a;

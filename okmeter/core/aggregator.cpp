@@ -13,6 +13,7 @@ json::Value sumsJson(const Sums& s) {
   o["icr"] = json::num(s.inputCacheRead);
   o["icc"] = json::num(s.inputCacheCreation);
   o["o"] = json::num(s.output);
+  o["msgs"] = json::num(s.msgs);
   json::Value v;
   v.v = std::move(o);
   return v;
@@ -24,6 +25,7 @@ void sumsFrom(const json::Value* v, Sums& s) {
   if (const json::Value* f = v->find("icr")) s.inputCacheRead = (int64_t)f->num();
   if (const json::Value* f = v->find("icc")) s.inputCacheCreation = (int64_t)f->num();
   if (const json::Value* f = v->find("o")) s.output = (int64_t)f->num();
+  if (const json::Value* f = v->find("msgs")) s.msgs = (int64_t)f->num();
 }
 
 // 损坏的非数字 dayKey 不让 stoi 抛 std::invalid_argument
@@ -150,6 +152,17 @@ Sums Aggregator::modelMonth(const std::string& id, int64_t nowMs) const {
   Sums out;
   for (const auto& [k, s] : m->byDay)
     if (k / 100 == ym) out.plus(s);
+  return out;
+}
+
+Sums Aggregator::modelLastMonth(const std::string& id, int64_t nowMs) const {
+  const ModelStat* m = model(id);
+  if (!m) return Sums{};
+  const int ym = dayKey(nowMs) / 100;                    // dayKey=yyyymmdd → 月键 yyyymm
+  const int prev = (ym % 100 == 1) ? (ym / 100 - 1) * 100 + 12 : ym - 1;
+  Sums out;
+  for (const auto& [k, s] : m->byDay)
+    if (k / 100 == prev) out.plus(s);
   return out;
 }
 

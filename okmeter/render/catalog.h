@@ -14,20 +14,23 @@ class IForm;
 class IMaterial;
 
 // 模块元数据：id（config 持久化字符串）、显示名、副标题（无 → nullptr）、
-// 缩略图种类（ui/settings drawThumb 的 idx 语义，矢量绘制留在面板侧按此分派）
+// 缩略图种类（ui/settings drawThumb 的 idx 语义，矢量绘制留在面板侧按此分派）、
+// listed（设置面板切换入口可见性；false=入口关闭但功能保留，存量 config 的
+// id 仍由 createForm 正常实例化，面板不再提供切换入口）
 struct ModuleMeta {
   const char* id;
   const wchar_t* name;
   const wchar_t* sub;
   int thumb;
+  bool listed = true;
 };
 
 // 视觉形态（thumb：0=弧线 1=胶囊 2=罗盘）
 inline constexpr ModuleMeta kFormCatalog[] = {
     {"arc", L"球体弧线", nullptr, 0},
     {"capsule", L"胶囊量表", nullptr, 1},
-    {"compass", L"星环罗盘", nullptr, 2},
-    {"level", L"电平柱", nullptr, 3},
+    {"compass", L"星环罗盘", nullptr, 2, false},
+    {"level", L"电平柱", nullptr, 3, false},
     {"wave", L"波形流", nullptr, 4},
     {"nixie", L"辉光数码", nullptr, 5},
 };

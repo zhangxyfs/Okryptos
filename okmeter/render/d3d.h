@@ -8,6 +8,7 @@
 #include <dxgi1_2.h>
 #include <d2d1_1.h>
 #include <dwrite.h>
+#include <functional>
 #include <string>
 
 namespace okmeter::render {
@@ -40,12 +41,18 @@ public:
   // 诊断：把当前帧渲染目标存成 PNG（--shot 自检用；不受
   // SetWindowDisplayAffinity 自排除影响，产出应用真实绘制像素）
   bool saveFrame(const std::wstring& path) const;
+  // 离屏渲染存 PNG：建 w×h 临时 RT 位图挂到本 dc，drawFn 重绘内容（调用方负责
+  // 变换/清晰度），WIC 编码（用量总览分享导出用；绘制期间设备若重建返回 false）
+  bool renderOffscreen(const std::wstring& path, int w, int h,
+                       const std::function<void(ID2D1DeviceContext*)>& drawFn);
 
 private:
   void release();
   bool createFrameTargets();            // RT 纹理 + staging + DIB/memDC（随窗口尺寸）
   bool ensureTarget();                  // 从 RT 纹理建 ID2D1Bitmap1
   bool presentLayered();                // staging → DIB → UpdateLayeredWindow
+  bool encodeWic(const std::wstring& path, ID3D11DeviceContext* imm,
+                 ID3D11Texture2D* staging, unsigned w, unsigned h) const;  // saveFrame/renderOffscreen 共用
 
   HWND hwnd_ = nullptr;
   int w_ = 0, h_ = 0;

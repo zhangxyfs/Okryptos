@@ -9,15 +9,18 @@ namespace okmeter {
 
 struct Sums {
   int64_t inputOther = 0, inputCacheRead = 0, inputCacheCreation = 0, output = 0;
+  int64_t msgs = 0;  // 消息轮数：每条事件 +1；旧 state.json 无此字段读 0
   int64_t total() const { return inputOther + inputCacheRead + inputCacheCreation + output; }
   void plus(const Sums& o) {
     inputOther += o.inputOther; inputCacheRead += o.inputCacheRead;
     inputCacheCreation += o.inputCacheCreation; output += o.output;
+    msgs += o.msgs;
   }
   static Sums of(const UsageEvent& e) {
     Sums s;
     s.inputOther = e.inputOther; s.inputCacheRead = e.inputCacheRead;
     s.inputCacheCreation = e.inputCacheCreation; s.output = e.output;
+    s.msgs = 1;  // 一条事件 = 一轮消息，plus 扩散到全部 6 个写入口
     return s;
   }
 };
@@ -40,6 +43,7 @@ public:
   Sums today(int64_t nowMs) const;
   Sums week(int64_t nowMs) const;
   Sums session() const;  // 最近活跃 session 的累计
+  const std::map<int, Sums>& days() const { return dayAll_; }  // core/bucket 数据层用
 
   // 模型口径
   std::vector<std::string> modelsByRecency() const;
@@ -50,6 +54,7 @@ public:
   Sums modelToday(const std::string& id, int64_t nowMs) const;
   Sums modelWeek(const std::string& id, int64_t nowMs) const;
   Sums modelMonth(const std::string& id, int64_t nowMs) const;
+  Sums modelLastMonth(const std::string& id, int64_t nowMs) const;
   Sums modelSession(const std::string& id) const;
 
   // 序列化（state.json）

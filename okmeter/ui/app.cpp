@@ -15,6 +15,8 @@
 #include "../render/catalog.h"
 #include <chrono>
 #include <cmath>
+#include <set>
+#include <shellapi.h>
 #include <string>
 #include <wtsapi32.h>
 
@@ -40,6 +42,7 @@ constexpr UINT_PTR kTimerPoll = 2;    // 数据兜底轮询 2000ms（RDCW 健康
 constexpr UINT_PTR kTimerRel = 3;     // 相对时间/口径文本刷新 30s
 constexpr UINT_PTR kTimerRetract = 4; // 离开迟滞 600ms（一次性）
 constexpr UINT_PTR kTimerShot = 5;    // --shot 自检：启动 2.5s 后截图退出（一次性）
+constexpr UINT_PTR kTimerEdgeRaise = 6;  // 非置顶兜底：指针贴边浮起窗口 250ms 轮询
 constexpr int kDragThreshold = 6;   // 拖拽阈值 px（阈值内视为按压/点击）
 constexpr double kMenuAnimSec = 0.12;  // 菜单弹出动画 120ms（原型 .ctx cardin）
 constexpr double kPanelAnimSec = 0.18; // 设置面板滑入动画 180ms（原型 panelin）
@@ -81,6 +84,12 @@ std::string shortName(const std::string& modelId) {
 std::string vendorOf(const std::string& modelId) {
   const size_t p = modelId.find('/');
   return p == std::string::npos ? modelId : modelId.substr(0, p);
+}
+
+std::string lowerId(std::string s) {  // 大小写不敏感归并键（GLM-5.3 ≡ glm-5.3）
+  for (auto& c : s)
+    if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+  return s;
 }
 
 const wchar_t* scopeLabel(Scope s) {
@@ -276,6 +285,7 @@ void DockApp::rebuildCard() {
     card_.big = wide(fmtExact(agg.modelToday(b.modelId, now).total()));  // 顶部=今日消耗
     row(L"本周", agg.modelWeek(b.modelId, now).total());
     row(L"本月", agg.modelMonth(b.modelId, now).total());
+    row(L"上月", agg.modelLastMonth(b.modelId, now).total());
     row(L"累计", m->all.total());
     card_.foot = L"最近调用 " + wide(relTime(m->lastCallMs, now)) + L" · 模型模式";
   } else {
@@ -316,6 +326,10 @@ void DockApp::pollData() {
     material_->onPulse();       // 数据到达 → 沉浸光感粒子迸散
   }
   rebuildItems();
+  if (overview_.open) {  // 总览面板数据随 poll 周期重算帧（与详情卡同源节奏）
+    overview_.refresh(agg, nowMs());
+    overview_.layout(d3d_);
+  }
   render();
 }
 
@@ -441,6 +455,12 @@ void DockApp::applyWindowPos() {
       ur = (std::max)(ur, (int)panelScreen_.right);
       ub = (std::max)(ub, (int)panelScreen_.bottom);
     }
+    if (overview_.open) {
+      ux = (std::min)(ux, (int)overviewScreen_.left);
+      uy = (std::min)(uy, (int)overviewScreen_.top);
+      ur = (std::max)(ur, (int)overviewScreen_.right);
+      ub = (std::max)(ub, (int)overviewScreen_.bottom);
+    }
     zoneDX_ = x - ux;
     zoneDY_ = (wide_ && cfg_.edge == "bottom" ? kCardZoneH : 0) + (y - uy);
     if (menu_.open)
@@ -448,6 +468,10 @@ void DockApp::applyWindowPos() {
     if (settings_.open)
       settings_.place((float)(panelScreen_.left - ux), (float)(panelScreen_.top - uy),
                       (float)(panelScreen_.bottom - panelScreen_.top));
+    if (overview_.open)
+      overview_.place((float)(overviewScreen_.left - ux), (float)(overviewScreen_.top - uy),
+                      (float)(overviewScreen_.right - overviewScreen_.left),
+                      (float)(overviewScreen_.bottom - overviewScreen_.top));
     SetWindowPos(hwnd_, nullptr, ux, uy, ur - ux, ub - uy,
                  SWP_NOZORDER | SWP_NOACTIVATE);  // 尺寸变化 → WM_SIZE → d3d.resize + render
     if (menu_.open && (menu_.parent1 >= 0 || menu_.parent2 >= 0))
@@ -484,6 +508,14 @@ void DockApp::applyWindowPos() {
     ur = (std::max)(ur, (int)panelScreen_.right);
     ub = (std::max)(ub, (int)panelScreen_.bottom);
   }
+  // 用量总览面板打开：并集扩出面板区（工作区中央，联合窗口横贯全屏；中部
+  // 空白区点击穿透由 WM_NCHITTEST 兜底，与设置面板同款）
+  if (overview_.open) {
+    ux = (std::min)(ux, (int)overviewScreen_.left);
+    uy = (std::min)(uy, (int)overviewScreen_.top);
+    ur = (std::max)(ur, (int)overviewScreen_.right);
+    ub = (std::max)(ub, (int)overviewScreen_.bottom);
+  }
   zoneDX_ = (wide_ && cfg_.edge == "right" ? kCardZoneW : 0) + (x - ux);
   zoneDY_ = y - uy;
   if (menu_.open)
@@ -491,6 +523,10 @@ void DockApp::applyWindowPos() {
   if (settings_.open)
     settings_.place((float)(panelScreen_.left - ux), (float)(panelScreen_.top - uy),
                     (float)(panelScreen_.bottom - panelScreen_.top));
+  if (overview_.open)
+    overview_.place((float)(overviewScreen_.left - ux), (float)(overviewScreen_.top - uy),
+                    (float)(overviewScreen_.right - overviewScreen_.left),
+                    (float)(overviewScreen_.bottom - overviewScreen_.top));
   SetWindowPos(hwnd_, nullptr, ux, uy, ur - ux, ub - uy,
                SWP_NOZORDER | SWP_NOACTIVATE);  // 尺寸变化 → WM_SIZE → d3d.resize + render
   if (menu_.open && (menu_.parent1 >= 0 || menu_.parent2 >= 0))
@@ -505,13 +541,18 @@ void DockApp::applyWindowPos() {
 void DockApp::syncClickThru() {
   if (!hwnd_) return;
   bool want = false;
-  if (settings_.open) {
+  if (settings_.open || overview_.open) {
     POINT pt{};
     GetCursorPos(&pt);
-    // 可命中区 = 面板矩形 ∪ 打开的级联映射菜单 ∪ 球区竖条（详情卡区仅展示不吞点击）
+    // 可命中区 = 打开中的面板矩形 ∪ 打开的级联映射菜单 ∪ 球区竖条
+    //（详情卡区仅展示不吞点击）；两面板互斥，同时在开者生效
     RECT wr{};
     GetWindowRect(hwnd_, &wr);
-    bool inPanel = settings_.contains(pt.x - (int)wr.left, pt.y - (int)wr.top);
+    bool inPanel = false;
+    if (settings_.open && settings_.contains(pt.x - (int)wr.left, pt.y - (int)wr.top))
+      inPanel = true;
+    if (overview_.open && overview_.contains(pt.x - (int)wr.left, pt.y - (int)wr.top))
+      inPanel = true;
     if (menu_.open && PtInRect(&menuScreen_, pt)) inPanel = true;
     RECT wr2{};
     GetWindowRect(hwnd_, &wr2);
@@ -528,6 +569,24 @@ void DockApp::syncClickThru() {
   SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
                    SWP_FRAMECHANGED);  // 强制重命中测试
+}
+
+// 窗口置顶开关（总览标题栏图钉钮切换，cfg_.topmost 持久化）：关掉后窗口可被
+// 其他窗口盖住；兜底见 kTimerEdgeRaise（指针贴边自动浮回普通层最上）
+void DockApp::applyTopmost() {
+  if (!hwnd_) return;
+  SetWindowPos(hwnd_, cfg_.topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  edgeRaised_ = false;
+}
+
+void DockApp::updateEdgeRaiseTimer() {
+  if (!hwnd_) return;
+  if (cfg_.topmost) {
+    KillTimer(hwnd_, kTimerEdgeRaise);
+    return;
+  }
+  SetTimer(hwnd_, kTimerEdgeRaise, 250, nullptr);
 }
 
 // 展开/收缩切换卡区（球区位置不动，卡区朝屏内侧增减：竖向宽 +268，横向高 +300，方向随 edge）
@@ -589,6 +648,10 @@ void DockApp::buildMenuEntries(int slot) {
     sep.kind = MenuEntry::Separator;
     menu_.entries.push_back(sep);
   }
+  MenuEntry overview;
+  overview.label = L"用量总览…";
+  overview.action = 4;
+  menu_.entries.push_back(std::move(overview));
   MenuEntry settings;
   settings.label = L"设置…";
   settings.action = 1;
@@ -653,25 +716,30 @@ void DockApp::openSub1(int parentIdx, int subKind) {
   render();
 }
 
-// 三级子列：某提供商下的具体模型。同一模型被多个 agent 使用时短名相同，
-// 此时标签加" · 命名空间"后缀区分（如 k3 · kimi-code）；value 仍是完整 modelId
+// 三级子列：某提供商下的具体模型。大小写不敏感归并（GLM-5.3 ≡ glm-5.3：
+// 归并键=小写全 id，mapping 值写最近使用的那个原始 id 与存量配置兼容）；
+// 归并后仍同短名的，标签加" · 命名空间"后缀区分（如 k3 · kimi-code）
 void DockApp::openSub2(int parentIdx, const std::string& provider) {
   menu_.parent2 = parentIdx;
   menu_.sub2.clear();
   const std::string cur = mappingOf(menu_.slot);
-  std::vector<std::string> ids;
+  std::vector<std::string> ids;      // 归并后的代表 id（最近使用的原始大小写）
+  std::set<std::string> seen;
   for (const std::string& id : store_->agg().modelsByRecency())
-    if (providerOf(id) == provider) ids.push_back(id);
+    if (providerOf(id) == provider) {
+      const std::string lw = lowerId(id);
+      if (seen.insert(lw).second) ids.push_back(id);  // 降序首个 = 最近使用
+    }
   for (const std::string& id : ids) {
     const std::string sn = shortName(id);
     bool dup = false;
     for (const std::string& other : ids)
-      if (other != id && shortName(other) == sn) { dup = true; break; }
+      if (other != id && lowerId(shortName(other)) == lowerId(sn)) { dup = true; break; }
     MenuEntry e;
     e.kind = MenuEntry::Item;
     e.label = wide(dup ? sn + " · " + vendorOf(id) : sn);
     e.value = "model:" + id;
-    e.tick = cur == e.value;
+    e.tick = cur == e.value || cur == "model:" + lowerId(id);
     menu_.sub2.entries.push_back(std::move(e));
   }
   menu_.layout(d3d_);
@@ -884,6 +952,7 @@ void DockApp::activateMenu(int idx) {
     if (action == 1) { closeMenu(); openSettings(); return; }
     if (action == 2) { closeMenu(); flipEdge(); return; }
     if (action == 3) { closeMenu(); exitApp(); return; }
+    if (action == 4) { closeMenu(); openOverview(); return; }
     applyMenuMapping(v);
     return;
   }
@@ -957,6 +1026,7 @@ bool DockApp::needsFrames() const {
     return true;  // 罗盘收缩态旋转（横向收缩 = mini chip 排，旋转不可见不驱帧）
   if (menu_.open) return true;                         // 弹出动画 + 沿检测
   if (settings_.open) return true;                     // 滑入动画 + Escape 沿检测
+  if (overview_.open) return true;                     // 出现动画 + Escape 沿检测 + 穿透轮询
   if (card_.valid && cardAnimT() < 1.0) return true;     // cardin 140ms
   if (backdrop_.ok() && backdrop_.dirty()) return true;  // 新背景帧到达（切窗/壁纸变）→ 唤醒一帧
   return false;
@@ -993,6 +1063,7 @@ void DockApp::syncFrames() {
 // 并集扩窗 + 保持展开（holdOpen）；面板皮肤跟随当前生效材质（草稿不即时换肤）
 void DockApp::openSettings() {
   if (settings_.open) return;
+  closeOverview();  // 与总览面板互斥（开一个先关另一个）
   backdrop_.note(L"openSettings 入口（诊断消息触发或菜单）");
   closeMenu();
   pendingApply_ = false;  // 重开面板即放弃挂起中继（草稿基准已变）
@@ -1081,6 +1152,137 @@ void DockApp::activateSettings(int idx) {
     applyWindowPos();        // layout 重建 ctrls_（头尾按钮矩形清零）→ 重新落窗填充
   }
   if (r >= 1) render();
+}
+
+// 打开用量总览面板：面板矩形 = 工作区 80% 宽 × 80% 高（运行时现算），水平垂直
+// 居中于工作区；最小 640×480 保底，再夹取可视区（极小工作区退化）。打开期间
+// dock 保持展开（holdOpen，同设置面板路径）；并集扩窗 + 点击穿透同步
+void DockApp::openOverview() {
+  if (overview_.open) return;
+  closeSettings(false);  // 与设置面板互斥（丢弃草稿，开一个先关另一个）
+  closeMenu();
+  overview_.setTheme(cfg_.overviewTheme);  // 面板主题（config 注入，与 dock 材质解耦）
+  overview_.setTopmost(cfg_.topmost);      // 置顶钮图标态（点击经 activateOverview 切换）
+  overview_.begin(store_->agg());  // 底注数据起点现算
+  const RECT work = workArea();
+  const int workW = (int)(work.right - work.left);
+  const int workH = (int)(work.bottom - work.top);
+  int w = (int)std::lround(workW * 0.8);
+  int h = (int)std::lround(workH * 0.8);
+  w = (std::min)((std::max)(w, 640), workW);   // 最小 640 保底，再夹取可视区
+  h = (std::min)((std::max)(h, 480), workH);
+  const int x = work.left + (workW - w) / 2;
+  const int y = work.top + (workH - h) / 2;
+  overviewScreen_ = RECT{ x, y, x + w, y + h };
+  overviewOpenQpc_ = qpcNow();
+  prevEsc_ = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;  // 沿检测基准（同菜单）
+  KillTimer(hwnd_, kTimerRetract);
+  setEmergeTarget(1);   // 面板期间保持展开（原型 holdOpen）
+  applyWindowPos();     // 面板区纳入窗口（并集扩窗 → WM_SIZE → render）
+  syncClickThru();      // 初始穿透状态按当前指针位置定
+  overview_.refresh(store_->agg(), nowMs());  // 首帧数据（rect 已由 applyWindowPos 落好）
+  overview_.layout(d3d_);
+  render();
+}
+
+// 关闭用量总览面板：窗口收回基础矩形（同 closeSettings 路径），指针已在窗外
+// 则恢复 600ms 迟滞收回（保持显示除外）。只读面板无草稿，无 apply 语义
+void DockApp::closeOverview() {
+  if (!overview_.open) return;
+  overview_.open = false;
+  if (clickThru_) syncClickThru();  // 恢复窗口可命中（关面板后不再需要穿透）
+  applyWindowPos();                 // 窗口收回基础矩形
+  POINT pt{};
+  GetCursorPos(&pt);
+  RECT wr{};
+  GetWindowRect(hwnd_, &wr);
+  if (cfg_.pinned) {
+    setEmergeTarget(1);  // 保持显示：关面板后仍常显展开
+  } else if (!PtInRect(&wr, pt)) {  // 指针已在窗外：恢复 600ms 迟滞收回
+    KillTimer(hwnd_, kTimerRetract);
+    SetTimer(hwnd_, kTimerRetract, 600, nullptr);
+  }
+  render();
+}
+
+void DockApp::activateOverview(int idx) {
+  const int r = overview_.click(idx);
+  if (r == 2) {  // ✕ 请求关闭
+    closeOverview();
+    return;
+  }
+  if (r == 4) {  // 分享钮：离屏渲染存 PNG + toast
+    shareOverview();
+    return;
+  }
+  if (r == 5) {  // toast「打开文件夹」：资源管理器选中该文件
+    const std::wstring params = L"/select,\"" + overview_.toastPath() + L"\"";
+    ShellExecuteW(nullptr, L"open", L"explorer.exe", params.c_str(), nullptr,
+                  SW_SHOWNORMAL);
+    return;
+  }
+  if (r == 3) {  // 主题切换（面板双主题，与 dock 材质解耦）：落盘 + 重绘
+    cfg_.overviewTheme = overview_.theme();
+    saveConfig(okmeterDir(), cfg_);
+    render();
+    return;
+  }
+  if (r == 6) {  // 置顶切换（图钉钮）：执行 SetWindowPos + 落盘 + 图标态回填
+    cfg_.topmost = !cfg_.topmost;
+    applyTopmost();
+    updateEdgeRaiseTimer();
+    overview_.setTopmost(cfg_.topmost);
+    saveConfig(okmeterDir(), cfg_);
+    render();
+    return;
+  }
+  if (r == 1) {  // 视图状态变化 → 帧重算 + 重排 + 重绘
+    overview_.refresh(store_->agg(), nowMs());
+    overview_.layout(d3d_);
+    overview_.startPendingAnim(nowMs());  // 范围 morph / 图型淡化（click 置位时启动）
+    render();
+  }
+}
+
+// 分享导出：面板内容 2× 离屏渲染存 PNG 到 Documents\Okryptos\screenshots\
+//（递归建目录；成功 toast 文件名 +「打开文件夹」，失败 toast 原因；不含 dock）
+void DockApp::shareOverview() {
+  const std::filesystem::path dir =
+      userProfile() / "Documents" / "Okryptos" / "screenshots";
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  if (ec) {
+    overview_.showToast(d3d_, L"保存失败：无法创建目录 " + dir.wstring(), L"", nowMs());
+    render();
+    return;
+  }
+  const time_t t = time(nullptr);
+  std::tm lt{};
+  localtime_s(&lt, &t);
+  wchar_t name[64];
+  swprintf_s(name, L"overview-%04d%02d%02d-%02d%02d%02d.png", lt.tm_year + 1900,
+             lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec);
+  const std::filesystem::path full = dir / name;
+  const int w = (int)(overviewScreen_.right - overviewScreen_.left) * 2;
+  const int h = (int)(overviewScreen_.bottom - overviewScreen_.top) * 2;
+  bool ok = false;
+  if (w > 0 && h > 0)
+    ok = d3d_.renderOffscreen(full.wstring(), w, h, [&](ID2D1DeviceContext* dc) {
+      dc->SetTransform(D2D1::Matrix3x2F::Scale(2.0f, 2.0f));  // 2× 清晰度
+      overview_.drawOffscreen(d3d_, *material_);  // 当前主题/视图状态直绘
+    });
+  if (ok)
+    overview_.showToast(d3d_, L"已保存 screenshots\\" + std::wstring(name),
+                        full.wstring(), nowMs());
+  else
+    overview_.showToast(d3d_, L"保存失败：截图渲染或编码错误", L"", nowMs());
+  render();
+}
+
+double DockApp::overviewAnimT() const {
+  if (!overview_.open || overviewOpenQpc_.QuadPart == 0) return 1.0;
+  const double t = qpcSeconds(overviewOpenQpc_, qpcNow()) / kPanelAnimSec;
+  return t >= 1.0 ? 1.0 : easeDock(t);
 }
 
 // 背景捕获接线：失败仅降级标记（backdrop.log），不影响 dock 本体
@@ -1185,6 +1387,26 @@ void DockApp::renderOnce() {
       settings_.draw(d3d_, *material_);
     }
   }
+  // 用量总览面板：出现动画 180ms（透明度 + 8px 上浮；中央面板无 dock 侧方向，
+  // 不沿用设置面板的侧向滑入）；面板底由 material.drawCardBack 供皮（跟随当前
+  // 生效材质，换肤保存后重开即新皮）。与设置面板互斥，绘制次序无关层级
+  if (overview_.open) {
+    const double t = overviewAnimT();
+    if (t < 1.0) {
+      const float off = (float)((1.0 - t) * 8.0);
+      ID2D1DeviceContext* dc = d3d_.dc();
+      dc->SetTransform(D2D1::Matrix3x2F::Translation(0.0f, off));
+      const D2D1_LAYER_PARAMETERS lp = D2D1::LayerParameters(
+          D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+          D2D1::IdentityMatrix(), (float)t);
+      dc->PushLayer(&lp, nullptr);
+      overview_.draw(d3d_, *material_);
+      dc->PopLayer();
+      dc->SetTransform(D2D1::IdentityMatrix());
+    } else {
+      overview_.draw(d3d_, *material_);
+    }
+  }
   // 自绘玻璃菜单（球区右键 / 设置面板级联下拉共用）：弹出动画 120ms（透明度 +
   // 向级联方向反向 6px 滑入，原型 cardin 同款）；无模态泵，动画帧照常驱动
   if (menu_.open) {
@@ -1249,6 +1471,7 @@ void DockApp::animTick() {
   }
   // 菜单打开期间：Escape 收起；窗外点击收起（NOACTIVATE 窗口收不到 WM_KEYDOWN 与
   // 窗外点击，动画帧里 GetAsyncKeyState 沿检测兜底；窗内点击走消息处理同效收起）
+  bool ovNeedRender = false;  // 总览动画/toast 计时要求的续帧
   if (menu_.open) {
     const bool esc = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
     const bool lmb = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
@@ -1271,6 +1494,14 @@ void DockApp::animTick() {
     prevEsc_ = esc;
     syncClickThru();  // 按指针位置动态穿透（帧时钟每帧轮询，不依赖鼠标消息）
   }
+  // 总览面板打开期间：Escape 关闭（同设置面板通路；点面板外不关闭——防误触丢视图）
+  if (overview_.open) {
+    const bool esc = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+    if (esc && !prevEsc_) closeOverview();
+    prevEsc_ = esc;
+    syncClickThru();  // 按指针位置动态穿透（帧时钟每帧轮询，不依赖鼠标消息）
+    ovNeedRender = overview_.tickAnim(now);  // 范围 morph / 图型淡化 / toast 逐帧推进
+  }
   if (emerged_) {
     // 弹簧静止后：材质仍有进行中的光效动画（粒子/柔光/光晕）或形态仍有持续
     // 动画（罗盘收缩态旋转）或菜单弹出动画未播完时持续重绘；面板滑入动画与
@@ -1278,6 +1509,9 @@ void DockApp::animTick() {
     if ((material_ && material_->wantsTick()) || (form_ && form_->wantsTick()) ||
         (menu_.open && menuAnimT() < 1.0) ||
         (settings_.open && panelAnimT() < 1.0) ||
+        (overview_.open && overviewAnimT() < 1.0) ||
+        ovNeedRender ||                            // 总览动画帧/toast 清除帧
+        (overview_.open && overview_.toastActive()) ||  // toast 显示期保持重绘计时
         (card_.valid && cardAnimT() < 1.0) ||
         (backdrop_.ok() && backdrop_.dirty()))
       render();
@@ -1314,7 +1548,7 @@ void DockApp::animTick() {
     // 横向形变落定补弹：形变期禁卡（原型 morphing 期 hideCard），落定后按指针
     // 实际落点重算悬停（等价原型 cardAfterMorph 的 elementFromPoint 命中）
     if (isHorizEdge(cfg_.edge) && emergeTarget_ > 0.5 && !menu_.open &&
-        !settings_.open) {
+        !settings_.open && !overview_.open) {
       POINT pt{};
       GetCursorPos(&pt);
       RECT wr{};
@@ -1380,11 +1614,34 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     case kTimerRel:
       rebuildItems();  // 仅刷新文本缓存（口径随 now 变化）
+      if (overview_.open) {  // 当前桶口径随 now 变化（跨日/跨周）→ 帧重算
+        overview_.refresh(store_->agg(), nowMs());
+        overview_.layout(d3d_);
+      }
       render();
       return 0;
     case kTimerRetract:
       KillTimer(hwnd_, kTimerRetract);
       if (!cfg_.pinned) setEmergeTarget(0);  // 保持显示：收回禁用
+      return 0;
+    case kTimerEdgeRaise:
+      // 非置顶兜底：指针贴到球区即把窗口浮到普通窗口最上（HWND_TOP，非 TOPMOST，
+      // 会被后续激活的窗口自然盖回）。置顶模式不需要；面板打开期由穿透逻辑接管
+      if (!cfg_.topmost && !overview_.open && !settings_.open) {
+        POINT pt{};
+        GetCursorPos(&pt);
+        RECT wr{};
+        GetWindowRect(hwnd_, &wr);
+        const RECT ballZone{ wr.left + zoneDX_, wr.top + zoneDY_,
+                             wr.left + zoneDX_ + baseW_, wr.top + zoneDY_ + baseH_ };
+        if (PtInRect(&ballZone, pt) && !edgeRaised_) {
+          SetWindowPos(hwnd_, HWND_TOP, 0, 0, 0, 0,
+                       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+          edgeRaised_ = true;
+        } else if (!PtInRect(&ballZone, pt) && edgeRaised_) {
+          edgeRaised_ = false;  // 指针离开球区：不压回，等下次贴边再浮
+        }
+      }
       return 0;
     case kTimerShot: {
       KillTimer(hwnd_, kTimerShot);
@@ -1505,6 +1762,24 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     }
     return 0;
   case WM_MOUSEMOVE: {
+    // 总览标题栏拖拽移动面板：位移按消息坐标换算屏幕系（窗口跟手移动后客户坐标
+    // 随窗口原点变化，消息坐标经 ClientToScreen 恒定映射，天然抗挪窗回环）；
+    // overviewScreen_ 平移（夹取工作区，标题栏保持可达）→ applyWindowPos 并集重算
+    if (overviewDrag_ && (wp & MK_LBUTTON)) {
+      POINT pt{ (int)(short)LOWORD(lp), (int)(short)HIWORD(lp) };
+      ClientToScreen(hwnd_, &pt);
+      const int w = overviewDragBase_.right - overviewDragBase_.left;
+      const int h = overviewDragBase_.bottom - overviewDragBase_.top;
+      int nx = overviewDragBase_.left + (pt.x - overviewDragStart_.x);
+      int ny = overviewDragBase_.top + (pt.y - overviewDragStart_.y);
+      const RECT work = workArea();
+      nx = (std::max)((int)work.left - w + 120, (std::min)(nx, (int)work.right - 120));
+      ny = (std::max)((int)work.top, (std::min)(ny, (int)work.bottom - 40));
+      overviewScreen_ = RECT{ nx, ny, nx + w, ny + h };
+      applyWindowPos();
+      render();
+      return 0;
+    }
     // 拖拽（规格 §3.2）：越阈值后窗口实时跟随指针；拖动中玻璃背景采样随窗移动
     if (dragArmed_ && (wp & MK_LBUTTON)) {
       POINT pt{ (int)(short)LOWORD(lp), (int)(short)HIWORD(lp) };
@@ -1574,6 +1849,26 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
         render();
       }
     }
+    if (overview_.open) {
+      // 主图拖拽平移进行中：像素级连续滑移，整桶边界换数据窗（2=需 refresh）
+      if (overview_.panActive()) {
+        const int pr = overview_.panMove((float)(mx - overview_.rect.left));
+        if (pr == 2) {
+          overview_.refresh(store_->agg(), nowMs());
+          overview_.layout(d3d_);
+          render();
+        } else if (pr == 1) {
+          render();
+        }
+        return 0;
+      }
+      bool ch = overview_.setHover(overview_.hit(mx, my));
+      // 主图悬停（面板坐标）：柱状=悬停桶列高亮，趋势=最近桶中心参考线
+      ch = overview_.plotHoverAt(mx - overview_.rect.left, my - overview_.rect.top) || ch;
+      // 活动图悬停（面板坐标）：格子 tooltip
+      ch = overview_.heatHoverAt(mx - overview_.rect.left, my - overview_.rect.top) || ch;
+      if (ch) render();
+    }
     return 0;
   }
   case WM_MOUSELEAVE:
@@ -1583,6 +1878,14 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     if (settings_.open) {
       // 面板期间保持展开（原型 holdOpen）：不收球、不换卡，仅清面板悬停
       if (settings_.hover != -1) { settings_.hover = -1; render(); }
+      return 0;
+    }
+    if (overview_.open) {
+      // 面板期间保持展开（原型 holdOpen）：不收球、不换卡，仅清面板悬停
+      bool ch = overview_.setHover(-1);
+      ch = overview_.clearPlotHover() || ch;
+      ch = overview_.clearHeatHover() || ch;
+      if (ch) render();
       return 0;
     }
     if (menu_.open) {
@@ -1619,6 +1922,28 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       if (idx >= 0) activateSettings(idx);
       return 0;
     }
+    // 总览面板打开期间：左键一律走面板命中（不按压/不起拖）；点面板外不关闭
+    //（面板外区域点击穿透，根本到不了这里；面板内空白命中 -1 无动作）
+    if (overview_.open) {
+      const int idx = overview_.hit(mx, my);
+      if (idx >= 0) {
+        activateOverview(idx);
+      } else if (overview_.titleBarHit((float)mx - overview_.rect.left,
+                                       (float)my - overview_.rect.top)) {
+        // 标题栏空白 = 拖拽把手：面板屏幕矩形随指针平移（夹取在 WM_MOUSEMOVE）；
+        // 起点同样取消息坐标换算（与移动侧同一坐标系，GetCursorPos 会混入竞态）
+        POINT spt{ mx, my };
+        ClientToScreen(hwnd_, &spt);
+        overviewDrag_ = true;
+        overviewDragBase_ = overviewScreen_;
+        overviewDragStart_ = spt;
+        SetCapture(hwnd_);  // 出窗继续跟手、松手必达
+      } else if (overview_.panBegin(mx - overview_.rect.left,
+                                    my - overview_.rect.top)) {
+        SetCapture(hwnd_);  // 拖拽平移捕获：出窗继续跟手、松手必达（防 pan 卡死）
+      }
+      return 0;
+    }
     // 按压反馈（沉浸光感：scale .9 + 扩散环）与拖拽预备共存：
     // 阈值内视为按压/点击（按压光晕照常），越阈值进入拖拽（规格 §3.2）
     const DockGeom g = barGeom(emerge_.value);
@@ -1650,6 +1975,16 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     }
     if (settings_.open) return 0;  // 面板期间：按下侧已吞/处理，松开无事
+    if (overview_.open) {
+      if (overviewDrag_) {  // 标题栏拖拽收尾（panActive 与拖拽互斥，见按下分支）
+        overviewDrag_ = false;
+        ReleaseCapture();
+        return 0;
+      }
+      if (overview_.panActive()) ReleaseCapture();  // 拖拽平移收尾（配对 panBegin 的捕获）
+      overview_.panEnd();
+      return 0;
+    }
     if (dragArmed_) {
       // ReleaseCapture 会同步派发 WM_CAPTURECHANGED（其处理器复位拖拽状态），
       // 必须先取标志再释放
@@ -1699,6 +2034,7 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
   case WM_RBUTTONUP: {
     // 设置面板打开期间吞掉右键（面板与菜单互斥，球上交互待面板关闭后恢复）
     if (settings_.open) return 0;
+    if (overview_.open) return 0;  // 同上（总览面板）
     // 自绘玻璃菜单（原生 TrackPopupMenu 已废除）：球上 = 映射组菜单，弧线/空白 =
     // 三项菜单；右键重复点击 = 原地重开（原生菜单同款行为）
     const int mx = (int)(short)LOWORD(lp), my = (int)(short)HIWORD(lp);
@@ -1715,6 +2051,8 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
   case WM_CAPTURECHANGED:
     dragArmed_ = false;  // 捕获被夺（菜单/系统等）→ 拖拽状态复位，防卡死
     dragging_ = false;
+    overviewDrag_ = false;  // 标题栏拖拽面板同款复位
+    overview_.panEnd();  // 总览拖拽平移同款复位（防御：panBegin 的 SetCapture 被夺）
     return 0;
   case WM_NCHITTEST:
     // 设置面板打开时联合窗口横贯全屏：面板/级联菜单/dock 球区以外回 HTTRANSPARENT
@@ -1728,11 +2066,20 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       if (!settings_.contains(pt.x, pt.y) && !PtInRect(&dz, pt))
         return HTTRANSPARENT;
     }
+    // 总览面板打开时同款穿透：面板矩形/dock 球区以外回 HTTRANSPARENT（点面板外
+    // 不关闭——点击直接落到下层窗口，面板无感）
+    if (overview_.open) {
+      POINT pt{ (int)(short)LOWORD(lp), (int)(short)HIWORD(lp) };
+      ScreenToClient(hwnd_, &pt);
+      const RECT dz{ zoneDX_, zoneDY_, zoneDX_ + baseW_, zoneDY_ + baseH_ };
+      if (!overview_.contains(pt.x, pt.y) && !PtInRect(&dz, pt))
+        return HTTRANSPARENT;
+    }
     return DefWindowProcW(hwnd_, msg, wp, lp);
   case WM_INPUT: {
-    // 设置面板滚轮（NOACTIVATE 窗口收不到 WM_MOUSEWHEEL——滚轮消息发给焦点窗口；
-    // run() 注册 RIDEV_INPUTSINK 原始输入后台收轮）：滚体区内容
-    if (!settings_.open) return 0;
+    // 设置面板/总览面板滚轮（NOACTIVATE 窗口收不到 WM_MOUSEWHEEL——滚轮消息发给
+    // 焦点窗口；run() 注册 RIDEV_INPUTSINK 原始输入后台收轮）：滚体区/右栏内容
+    if (!settings_.open && !overview_.open) return 0;
     RAWINPUT raw{};
     UINT size = sizeof(raw);
     if (GetRawInputData((HRAWINPUT)lp, RID_INPUT, &raw, &size,
@@ -1744,13 +2091,24 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
       GetCursorPos(&pt);
       // 体区滚动即收级联下拉（锚定行随滚动移位，原型 closeDrop 同款）；
       // 收菜单会触发并集收窗，客户区坐标须在收窗后重取
-      if (menuForSettings_ && !PtInRect(&menuScreen_, pt)) {
+      if (settings_.open && menuForSettings_ && !PtInRect(&menuScreen_, pt)) {
         closeMenu();
         GetCursorPos(&pt);
       }
       ScreenToClient(hwnd_, &pt);
       const int delta = (int)(short)raw.data.mouse.usButtonData;
-      if (settings_.wheelAt(pt.x, pt.y, delta)) render();
+      if (settings_.open) {
+        if (settings_.wheelAt(pt.x, pt.y, delta)) render();
+      } else if (overview_.open) {
+        const int wr = overview_.wheelAt(pt.x, pt.y, delta);
+        if (wr == 2) {  // 主图滚轮缩放：数据窗随 bw 变 → 帧重算 + 重排 + 重绘
+          overview_.refresh(store_->agg(), nowMs());
+          overview_.layout(d3d_);
+          render();
+        } else if (wr == 1) {  // 右栏滚动：仅重绘
+          render();
+        }
+      }
     }
     return 0;
   }
@@ -1764,13 +2122,14 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
   case WM_APP + 0x4C: {  // 在线诊断：转储当前 backbuffer + 布局状态到 okmeter 目录
     if (wp == 1) openSettings();        // 诊断便捷：wp=1 开设置面板（免菜单导航）
     else if (wp == 2) closeSettings(false);  // wp=2 丢弃关闭（配合复现"开两次黑边"）
-    else if (wp == 3 || wp == 4) {      // wp=3/4：临时关/开截图排除（黑边取证用——
+    else if (wp == 4) openOverview();   // wp=4 开用量总览面板（免菜单导航）
+    else if (wp == 5 || wp == 6) {      // wp=5/6：临时关/开截图排除（黑边取证用——
       using AffinityFn = BOOL(WINAPI*)(HWND, DWORD);  // 关掉后普通截图能拍到 dock 实际显示）
       const auto fn = reinterpret_cast<AffinityFn>(
           GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowDisplayAffinity"));
       if (fn) {
-        const BOOL ok = fn(hwnd_, wp == 3 ? 0x0 : 0x11);  // WDA_NONE / WDA_EXCLUDEFROMCAPTURE
-        backdrop_.note(L"诊断: affinity %s → %s", wp == 3 ? L"OFF" : L"ON",
+        const BOOL ok = fn(hwnd_, wp == 5 ? 0x0 : 0x11);  // WDA_NONE / WDA_EXCLUDEFROMCAPTURE
+        backdrop_.note(L"诊断: affinity %s → %s", wp == 5 ? L"OFF" : L"ON",
                        ok ? L"ok" : L"FAIL");
       }
     }
@@ -1780,11 +2139,12 @@ LRESULT DockApp::dispatchMessage(UINT msg, WPARAM wp, LPARAM lp) {
     GetWindowRect(hwnd_, &wr2);
     backdrop_.note(
         L"DUMP ok=%d win=(%ld,%ld,%ld,%ld) zone=(%d,%d) wide=%d hover=%d emerge=%.2f "
-        L"menu=%d settings=%d card=%d frames=%llu rebuilds=%u luma=%.2f",
+        L"menu=%d settings=%d overview=%d card=%d frames=%llu rebuilds=%u luma=%.2f",
         okDump ? 1 : 0, (long)wr2.left, (long)wr2.top, (long)wr2.right,
         (long)wr2.bottom, zoneDX_, zoneDY_, wide_ ? 1 : 0, hoverIdx_, emerge_.value,
-        menu_.open ? 1 : 0, settings_.open ? 1 : 0, card_.valid ? 1 : 0,
-        backdrop_.frameCount(), d3d_.rebuilds(), (double)backdrop_.luma());
+        menu_.open ? 1 : 0, settings_.open ? 1 : 0, overview_.open ? 1 : 0,
+        card_.valid ? 1 : 0, backdrop_.frameCount(), d3d_.rebuilds(),
+        (double)backdrop_.luma());
     return 0;
   }
   case WM_DPICHANGED:
@@ -1895,6 +2255,8 @@ int DockApp::run(HINSTANCE inst, const std::wstring& shotPath, int shotMenuSlot,
                           kClassName, L"OkMeter", WS_POPUP,
                           x, y0, w, h0, nullptr, nullptr, inst, this);
   if (!hwnd_) return 1;
+  applyTopmost();            // cfg_.topmost（创建样式固定 TOPMOST，这里按配置校正）
+  updateEdgeRaiseTimer();    // 非置顶兜底：贴边唤起轮询
   if (cfg_.pinned) setEmergeTarget(1);  // 保持显示：启动即常显展开（弹簧滑出）
   if (!d3d_.init(hwnd_, w, h0)) {
     DestroyWindow(hwnd_);

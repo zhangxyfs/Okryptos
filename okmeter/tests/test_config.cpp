@@ -70,10 +70,17 @@ TEST(config_roundtrip) {
   CHECK(back.expandTrigger == "click");
   CHECK_EQ(back.mapping.size(), (size_t)5);
   CHECK(back.mapping[1] == "model:kimi-code/k3");
+  CHECK(back.overviewTheme == "light");   // 缺省浅色（未写字段时回默认）
+  c.overviewTheme = "dark";
   c.edge = "bottom";
   CHECK(saveConfig(d, c));
   CHECK(loadConfig(d, back));
   CHECK(back.edge == "bottom");
+  CHECK(back.overviewTheme == "dark");    // 主题持久化 roundtrip
+  c.overviewTheme = "neon";               // 非法主题：normalize 回 light
+  CHECK(saveConfig(d, c));
+  CHECK(loadConfig(d, back));
+  CHECK(back.overviewTheme == "light");
   std::error_code ec;
   std::filesystem::remove_all(d, ec);
 }

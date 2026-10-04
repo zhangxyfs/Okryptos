@@ -23,6 +23,11 @@ TEST(catalog_forms) {
   CHECK(render::findForm("nixie") == &render::kFormCatalog[5]);
   CHECK(render::findForm("nope") == nullptr);  // 未知 id → nullptr（调用方兜底）
   CHECK(render::findForm("") == nullptr);
+  // listed=false：设置面板切换入口关闭但功能保留（罗盘/电平柱，2026-09-16 用户裁决）
+  CHECK(!render::kFormCatalog[2].listed);  // compass
+  CHECK(!render::kFormCatalog[3].listed);  // level
+  for (int i = 0; i < render::kFormCount; ++i)
+    if (i != 2 && i != 3) CHECK(render::kFormCatalog[i].listed);
 }
 
 TEST(catalog_materials) {
