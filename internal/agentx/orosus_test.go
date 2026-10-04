@@ -102,14 +102,17 @@ func orosusTablesOf(t *testing.T, hooks map[string]any, event string) []map[stri
 }
 
 func TestOrosusHooksBlockForShape(t *testing.T) {
+	// 平台双态约定：Linux 上 filepath.ToSlash 是 no-op（不转反斜杠）——期望值
+	// 与函数走同一归一，否则 ubuntu CI 必红（Windows 断言 D:/、Linux 断言 D:\）
+	slashExe := filepath.ToSlash(`D:\x\ok.exe`)
 	block := OrosusHooksBlockFor(`D:\x\ok.exe`, 15)
 	for _, want := range []string{
 		"[[hooks.UserPromptSubmit]]",
 		"[[hooks.PostToolUse]]",
 		`matcher = "^tool-fs__(write|edit)$"`,
-		`command = "\"D:/x/ok.exe\" hook prompt claude"`,
-		`command = "\"D:/x/ok.exe\" hook post-tool claude"`,
-		`command = "\"D:/x/ok.exe\" hook stop claude"`,
+		`command = "\"` + slashExe + `\" hook prompt claude"`,
+		`command = "\"` + slashExe + `\" hook post-tool claude"`,
+		`command = "\"` + slashExe + `\" hook stop claude"`,
 		`name = "知识注入"`, `name = "触碰记账"`, `name = "规则评估"`,
 		`product = "Okryptos"`,
 		"timeout = 15",
