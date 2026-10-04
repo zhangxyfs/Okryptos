@@ -116,7 +116,8 @@
     <summary data-i18n="c.ledger">版本档案</summary>
     <div class="group">
       <div class="group-title">2.26.x</div>
-      <a href="#v2-26-4"><span><span class="latest-dot"></span>v2.26.4</span><span class="d">09-14</span></a>
+      <a href="#v2-26-5"><span><span class="latest-dot"></span>v2.26.5</span><span class="d">10-04</span></a>
+      <a href="#v2-26-4"><span>v2.26.4</span><span class="d">09-14</span></a>
       <a href="#v2-26-3"><span>v2.26.3</span><span class="d">09-14</span></a>
       <a href="#v2-26-2"><span>v2.26.2</span><span class="d">09-14</span></a>
       <a href="#v2-26-1"><span>v2.26.1</span><span class="d">09-13</span></a>
@@ -215,12 +216,35 @@
       <h1 data-i18n="c.h1">更新日志</h1>
       <p class="lede" data-i18n="c.lede">Okryptos 的版本发布记录。日期为 2026 年。</p>
       <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/zhangxyfs/Okryptos/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.26.4</a>
+        <a class="btn btn-primary" href="https://github.com/zhangxyfs/Okryptos/releases" target="_blank" rel="noopener" data-i18n="c.cta">下载最新版 v2.26.5</a>
       </div>
     </div>
 
+    <section class="ver" id="v2-26-5">
+      <div class="ver-head"><h2>v2.26.5</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-10-04</time></div>
+      <div class="chg">
+        <span class="tag tag-new" data-i18n="t.new">新功能</span>
+        <ul>
+          <li data-i18n="c.2265.f1">引导页新增 Orosus 卡片：自研模块化 AI 编程助手 CLI 一键接入——知识注入、触碰记账、规则评估三条 hook 自动写入 Orosus 的 hooks 配置，安装/自愈/卸载与 ZCode、Codex 同款；本机装有 Orosus 时自动出现</li>
+          <li data-i18n="c.2265.f2">OkMeter 用量总览弹窗：趋势图与 Token 活动图按日/周/月/年查看用量，图例点击过滤、按模型下钻，多提供商配色两两可辨</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-fix" data-i18n="t.fix">修复</span>
+        <ul>
+          <li data-i18n="c.2265.x1">修复多端同步空远端首推死锁：远端仓库为空或被重建时拉取永远失败、推送永远执行不到，本地提交无限堆积；现在自动识别该场景降级直推，一次同步自愈</li>
+        </ul>
+      </div>
+      <div class="chg">
+        <span class="tag tag-note" data-i18n="t.note">说明</span>
+        <ul>
+          <li data-i18n="c.2265.n1">无知识库数据与配置格式变化；OkMeter 新增消息轮数计数，旧统计文件兼容（从 0 起计），用量口径不变</li>
+        </ul>
+      </div>
+    </section>
+
     <section class="ver" id="v2-26-4">
-      <div class="ver-head"><h2>v2.26.4</h2><span class="badge-latest" data-i18n="c.latest">最新</span><time>2026-09-14</time></div>
+      <div class="ver-head"><h2>v2.26.4</h2><time>2026-09-14</time></div>
       <div class="chg">
         <span class="tag tag-fix" data-i18n="t.fix">修复</span>
         <ul>
