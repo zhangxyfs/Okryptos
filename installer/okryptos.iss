@@ -2,7 +2,7 @@
 ; 构建：bash scripts/build-installer.sh（先构建 dist/ 再调用 ISCC）
 
 #define AppName "Okryptos"
-#define AppVersion "2.26.5"
+#define AppVersion "2.26.6"
 #define AppPublisher "Okryptos"
 
 [Setup]
